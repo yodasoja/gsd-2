@@ -17,6 +17,7 @@ import { ensureManagedTools } from './tool-bootstrap.js'
 import { loadStoredEnvKeys } from './wizard.js'
 import { getPiDefaultModelAndProvider, migratePiCredentials } from './pi-migration.js'
 import { shouldRunOnboarding, runOnboarding } from './onboarding.js'
+import { checkForUpdates } from './update-check.js'
 
 // ---------------------------------------------------------------------------
 // Minimal CLI arg parser — detects print/subagent mode flags
@@ -103,6 +104,11 @@ migratePiCredentials(authStorage)
 // Run onboarding wizard on first launch (no LLM provider configured)
 if (!isPrintMode && shouldRunOnboarding(authStorage)) {
   await runOnboarding(authStorage)
+}
+
+// Non-blocking update check — runs at most once per 24h, fire-and-forget
+if (!isPrintMode) {
+  checkForUpdates().catch(() => {})
 }
 
 const modelRegistry = new ModelRegistry(authStorage)
