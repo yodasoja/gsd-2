@@ -138,8 +138,8 @@ export function writeIntegrationBranch(basePath: string, milestoneId: string, br
   // Skip if already recorded with the same branch (idempotent across restarts).
   // If recorded with a different branch, update it — the user started auto-mode
   // from a new branch and expects slices to merge back there (#300).
-  const existing_branch = readIntegrationBranch(basePath, milestoneId);
-  if (existing_branch === branch) return;
+  const existingBranch = readIntegrationBranch(basePath, milestoneId);
+  if (existingBranch === branch) return;
 
   const metaFile = milestoneMetaPath(basePath, milestoneId);
   mkdirSync(join(basePath, ".gsd", "milestones", milestoneId), { recursive: true });
