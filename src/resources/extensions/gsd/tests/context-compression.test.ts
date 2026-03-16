@@ -74,6 +74,19 @@ test("compression: buildExecuteTaskPrompt minimal truncates prior summaries", ()
   );
 });
 
+test("compression: buildExecuteTaskPrompt passes verificationBudget to loadPrompt (#707)", () => {
+  // The execute-task template declares {{verificationBudget}} — the builder must supply it
+  assert.ok(
+    promptsSrc.includes("verificationBudget"),
+    "buildExecuteTaskPrompt should pass verificationBudget in the loadPrompt vars object",
+  );
+  // Verify it computes the budget from computeBudgets
+  assert.ok(
+    promptsSrc.includes("computeBudgets(contextWindow)"),
+    "buildExecuteTaskPrompt should compute budgets from the executor context window",
+  );
+});
+
 test("compression: buildPlanMilestonePrompt minimal drops project/requirements/decisions files", () => {
   // The plan-milestone builder should gate root file inlining on inlineLevel
   assert.ok(

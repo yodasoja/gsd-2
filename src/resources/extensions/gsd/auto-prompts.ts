@@ -716,6 +716,12 @@ export async function buildExecuteTaskPrompt(
   const activeOverrides = await loadActiveOverrides(base);
   const overridesSection = formatOverridesSection(activeOverrides);
 
+  // Compute verification budget for the executor's context window (issue #707)
+  const prefs = loadEffectiveGSDPreferences();
+  const contextWindow = resolveExecutorContextWindow(undefined, prefs?.preferences);
+  const budgets = computeBudgets(contextWindow);
+  const verificationBudget = `~${Math.round(budgets.verificationBudgetChars / 1000)}K chars`;
+
   return loadPrompt("execute-task", {
     overridesSection,
     workingDirectory: base,
@@ -730,6 +736,7 @@ export async function buildExecuteTaskPrompt(
     priorTaskLines: priorLines,
     taskSummaryPath,
     inlinedTemplates,
+    verificationBudget,
   });
 }
 
