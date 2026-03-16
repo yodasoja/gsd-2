@@ -178,14 +178,10 @@ async function buildForensicReport(basePath: string): Promise<ForensicReport> {
     }
   }
 
-  // 8. GSD version
-  let gsdVersion = "unknown";
-  try {
-    const pkgPath = join(dirname(fileURLToPath(import.meta.url)), "../../../../package.json");
-    if (existsSync(pkgPath)) {
-      gsdVersion = JSON.parse(readFileSync(pkgPath, "utf-8")).version ?? "unknown";
-    }
-  } catch { /* non-fatal */ }
+  // 8. GSD version — use GSD_VERSION env var set by the loader at startup.
+  // Extensions run from ~/.gsd/agent/extensions/gsd/ at runtime, so path-traversal
+  // from import.meta.url would resolve to ~/package.json (wrong on every system).
+  const gsdVersion = process.env.GSD_VERSION || "unknown";
 
   // 9. Run anomaly detectors
   if (metrics?.units) detectStuckLoops(metrics.units, anomalies);
