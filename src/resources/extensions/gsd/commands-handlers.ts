@@ -20,15 +20,7 @@ import {
 } from "./doctor.js";
 import { loadPrompt } from "./prompt-loader.js";
 import { isAutoActive } from "./auto.js";
-import { resolveProjectRoot } from "./worktree.js";
-import { assertSafeDirectory } from "./validate-directory.js";
-
-/** Resolve the effective project root, accounting for worktree paths. */
-function projectRoot(): string {
-  const root = resolveProjectRoot(process.cwd());
-  assertSafeDirectory(root);
-  return root;
-}
+import { projectRoot } from "./commands.js";
 
 function dispatchDoctorHeal(pi: ExtensionAPI, scope: string | undefined, reportText: string, structuredIssues: string): void {
   const workflowPath = process.env.GSD_WORKFLOW_PATH ?? join(process.env.HOME ?? "~", ".pi", "GSD-WORKFLOW.md");
