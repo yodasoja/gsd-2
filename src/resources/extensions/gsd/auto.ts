@@ -118,7 +118,7 @@ import {
   parseSliceBranch,
   setActiveMilestoneId,
 } from "./worktree.js";
-import { GitServiceImpl, type TaskCommitContext } from "./git-service.js";
+import { createGitService, type TaskCommitContext } from "./git-service.js";
 import { getPriorSliceCompletionBlocker } from "./dispatch-guard.js";
 import { formatGitError } from "./git-self-heal.js";
 import {
@@ -462,7 +462,7 @@ export async function stopAuto(ctx?: ExtensionContext, pi?: ExtensionAPI, reason
       try { autoCommitCurrentBranch(s.basePath, "stop", s.currentMilestoneId); } catch (e) { debugLog("stop-auto-commit-failed", { error: e instanceof Error ? e.message : String(e) }); }
       teardownAutoWorktree(s.originalBasePath, s.currentMilestoneId, { preserveBranch: true });
       s.basePath = s.originalBasePath;
-      s.gitService = new GitServiceImpl(s.basePath, loadEffectiveGSDPreferences()?.preferences?.git ?? {});
+      s.gitService = createGitService(s.basePath);
       ctx?.ui.notify("Exited auto-worktree (branch preserved for resume).", "info");
     } catch (err) {
       ctx?.ui.notify(
@@ -626,12 +626,12 @@ export async function startAuto(
         if (existingWtPath) {
           const wtPath = enterAutoWorktree(s.originalBasePath, s.currentMilestoneId);
           s.basePath = wtPath;
-          s.gitService = new GitServiceImpl(s.basePath, loadEffectiveGSDPreferences()?.preferences?.git ?? {});
+          s.gitService = createGitService(s.basePath);
           ctx.ui.notify(`Re-entered auto-worktree at ${wtPath}`, "info");
         } else {
           const wtPath = createAutoWorktree(s.originalBasePath, s.currentMilestoneId);
           s.basePath = wtPath;
-          s.gitService = new GitServiceImpl(s.basePath, loadEffectiveGSDPreferences()?.preferences?.git ?? {});
+          s.gitService = createGitService(s.basePath);
           ctx.ui.notify(`Recreated auto-worktree at ${wtPath}`, "info");
         }
       } catch (err) {
@@ -1124,7 +1124,7 @@ async function dispatchNextUnit(
       }
 
       s.basePath = s.originalBasePath;
-      s.gitService = new GitServiceImpl(s.basePath, loadEffectiveGSDPreferences()?.preferences?.git ?? {});
+      s.gitService = createGitService(s.basePath);
       invalidateAllCaches();
 
       state = await deriveState(s.basePath);
@@ -1136,7 +1136,7 @@ async function dispatchNextUnit(
         try {
           const wtPath = createAutoWorktree(s.basePath, mid);
           s.basePath = wtPath;
-          s.gitService = new GitServiceImpl(s.basePath, loadEffectiveGSDPreferences()?.preferences?.git ?? {});
+          s.gitService = createGitService(s.basePath);
           ctx.ui.notify(`Created auto-worktree for ${mid} at ${wtPath}`, "info");
         } catch (err) {
           ctx.ui.notify(
@@ -1176,7 +1176,7 @@ async function dispatchNextUnit(
             const roadmapContent = readFileSync(roadmapPath, "utf-8");
             const mergeResult = mergeMilestoneToMain(s.originalBasePath, s.currentMilestoneId, roadmapContent);
             s.basePath = s.originalBasePath;
-            s.gitService = new GitServiceImpl(s.basePath, loadEffectiveGSDPreferences()?.preferences?.git ?? {});
+            s.gitService = createGitService(s.basePath);
             ctx.ui.notify(
               `Milestone ${ s.currentMilestoneId } merged to main.${mergeResult.pushed ? " Pushed to remote." : ""}`,
               "info",
@@ -1201,7 +1201,7 @@ async function dispatchNextUnit(
             if (roadmapPath) {
               const roadmapContent = readFileSync(roadmapPath, "utf-8");
               const mergeResult = mergeMilestoneToMain(s.basePath, s.currentMilestoneId, roadmapContent);
-              s.gitService = new GitServiceImpl(s.basePath, loadEffectiveGSDPreferences()?.preferences?.git ?? {});
+              s.gitService = createGitService(s.basePath);
               ctx.ui.notify(
                 `Milestone ${ s.currentMilestoneId } merged (branch mode).${mergeResult.pushed ? " Pushed to remote." : ""}`,
                 "info",
@@ -1279,7 +1279,7 @@ async function dispatchNextUnit(
         const roadmapContent = readFileSync(roadmapPath, "utf-8");
         const mergeResult = mergeMilestoneToMain(s.originalBasePath, s.currentMilestoneId, roadmapContent);
         s.basePath = s.originalBasePath;
-        s.gitService = new GitServiceImpl(s.basePath, loadEffectiveGSDPreferences()?.preferences?.git ?? {});
+        s.gitService = createGitService(s.basePath);
         ctx.ui.notify(
           `Milestone ${ s.currentMilestoneId } merged to main.${mergeResult.pushed ? " Pushed to remote." : ""}`,
           "info",
@@ -1303,7 +1303,7 @@ async function dispatchNextUnit(
           if (roadmapPath) {
             const roadmapContent = readFileSync(roadmapPath, "utf-8");
             const mergeResult = mergeMilestoneToMain(s.basePath, s.currentMilestoneId, roadmapContent);
-            s.gitService = new GitServiceImpl(s.basePath, loadEffectiveGSDPreferences()?.preferences?.git ?? {});
+            s.gitService = createGitService(s.basePath);
             ctx.ui.notify(
               `Milestone ${ s.currentMilestoneId } merged (branch mode).${mergeResult.pushed ? " Pushed to remote." : ""}`,
               "info",
@@ -1866,8 +1866,6 @@ export async function dispatchHookUnit(
   ctx.ui.setStatus("gsd-auto", s.stepMode ? "next" : "auto");
   ctx.ui.notify(`Running post-unit hook: ${hookName}`, "info");
 
-  console.log(`[dispatchHookUnit] Sending prompt of length ${hookPrompt.length}`);
-  console.log(`[dispatchHookUnit] Prompt preview: ${hookPrompt.substring(0, 200)}...`);
   pi.sendMessage(
     { customType: "gsd-auto", content: hookPrompt, display: true },
     { triggerTurn: true },

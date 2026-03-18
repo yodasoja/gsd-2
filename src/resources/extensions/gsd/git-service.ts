@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { gsdRoot } from "./paths.js";
 import { GIT_NO_PROMPT_ENV } from "./git-constants.js";
+import { loadEffectiveGSDPreferences } from "./preferences.js";
 
 import {
   detectWorktreeName,
@@ -539,6 +540,14 @@ export class GitServiceImpl {
 
   // ─── Merge ─────────────────────────────────────────────────────────────
 
+}
+
+// ─── Factory ───────────────────────────────────────────────────────────────
+
+/** Create a GitServiceImpl with the current effective git preferences. */
+export function createGitService(basePath: string): GitServiceImpl {
+  const gitPrefs = loadEffectiveGSDPreferences()?.preferences?.git ?? {};
+  return new GitServiceImpl(basePath, gitPrefs);
 }
 
 // ─── Commit Type Inference ─────────────────────────────────────────────────
