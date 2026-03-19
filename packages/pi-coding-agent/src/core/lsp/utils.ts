@@ -353,10 +353,6 @@ export function formatLocation(location: Location, cwd: string): string {
 	return `${file}:${line}:${col}`;
 }
 
-export function formatPosition(line: number, col: number): string {
-	return `${line}:${col}`;
-}
-
 // =============================================================================
 // WorkspaceEdit Formatting
 // =============================================================================
