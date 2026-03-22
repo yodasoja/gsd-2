@@ -103,12 +103,14 @@ function writePausedSession(
   milestoneId = "M001",
   stepMode = false,
   worktreePath?: string,
+  unitType?: string,
+  unitId?: string,
 ): void {
   const runtimeDir = join(base, ".gsd", "runtime");
   mkdirSync(runtimeDir, { recursive: true });
   writeFileSync(
     join(runtimeDir, "paused-session.json"),
-    JSON.stringify({ milestoneId, originalBasePath: base, stepMode, worktreePath }, null, 2),
+    JSON.stringify({ milestoneId, originalBasePath: base, stepMode, worktreePath, unitType, unitId }, null, 2),
     "utf-8",
   );
 }
@@ -163,6 +165,38 @@ test("readPausedSessionMetadata reads paused-session metadata when present", () 
     writePausedSession(base, "M009");
     const meta = readPausedSessionMetadata(base);
     assert.equal(meta?.milestoneId, "M009");
+  } finally {
+    cleanup(base);
+  }
+});
+
+test("readPausedSessionMetadata preserves unitType and unitId through round-trip", () => {
+  const base = makeTmpBase();
+  try {
+    writePausedSession(base, "M001", false, undefined, "execute-task", "M001/S01/T02");
+    const meta = readPausedSessionMetadata(base);
+    assert.equal(meta?.unitType, "execute-task");
+    assert.equal(meta?.unitId, "M001/S01/T02");
+  } finally {
+    cleanup(base);
+  }
+});
+
+test("readPausedSessionMetadata handles legacy metadata without unitType/unitId", () => {
+  const base = makeTmpBase();
+  try {
+    // Write metadata without unitType/unitId (simulates older version)
+    const runtimeDir = join(base, ".gsd", "runtime");
+    mkdirSync(runtimeDir, { recursive: true });
+    writeFileSync(
+      join(runtimeDir, "paused-session.json"),
+      JSON.stringify({ milestoneId: "M001", originalBasePath: base }),
+      "utf-8",
+    );
+    const meta = readPausedSessionMetadata(base);
+    assert.equal(meta?.milestoneId, "M001");
+    assert.equal(meta?.unitType, undefined);
+    assert.equal(meta?.unitId, undefined);
   } finally {
     cleanup(base);
   }
