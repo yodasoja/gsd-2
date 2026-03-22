@@ -366,6 +366,14 @@ export function getActiveEngineId(): string | null {
   return s.activeEngineId;
 }
 
+export function setActiveRunDir(runDir: string | null): void {
+  s.activeRunDir = runDir;
+}
+
+export function getActiveRunDir(): string | null {
+  return s.activeRunDir;
+}
+
 /**
  * Return the model captured at auto-mode start for this session.
  * Used by error-recovery to fall back to the session's own model

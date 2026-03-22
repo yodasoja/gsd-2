@@ -80,3 +80,11 @@ Connect the pure modules from T01 into the existing auto-mode infrastructure. Fo
 - `src/resources/extensions/gsd/auto/session.ts` — extended with activeRunDir property
 - `src/resources/extensions/gsd/auto.ts` — extended with setActiveRunDir/getActiveRunDir exports
 - `src/resources/extensions/gsd/auto-dashboard.ts` — extended with custom-step unit type rendering
+
+## Observability Impact
+
+- **New diagnostic surface:** `s.toJSON()` now includes `activeRunDir`, making the current run directory visible in diagnostic snapshots and crash recovery state. This lets agents and operators see which workflow run is active without inspecting filesystem state.
+- **Dashboard signal:** `unitVerb("custom-step")` → `"executing workflow step"` and `unitPhaseLabel("custom-step")` → `"WORKFLOW"` make custom workflow steps visible in the progress widget during auto-mode execution.
+- **Engine resolution tracing:** Custom engine resolution errors include the engine ID and the value of `activeRunDir` in the error message, aiding diagnosis when a custom workflow dispatch fails due to missing run state.
+- **No new runtime logging:** This task adds no `debugLog` calls — those are wired in T03 when the loop dispatch path is built.
+- **Failure inspection:** If `resolveEngine()` throws for a custom engine, the error message contains both the engine ID and the `activeRunDir` value (or `null`/`undefined` if missing), making it clear whether the issue is a missing run setup vs. a code path problem.

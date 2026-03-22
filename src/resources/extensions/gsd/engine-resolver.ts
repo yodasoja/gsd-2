@@ -2,13 +2,17 @@
  * engine-resolver.ts — Route sessions to engine/policy pairs.
  *
  * Routes `null` and `"dev"` engine IDs to the DevWorkflowEngine/DevExecutionPolicy
- * pair. Respects `GSD_ENGINE_BYPASS=1` kill switch to skip the engine layer entirely.
+ * pair. Any other non-null engine ID is treated as a custom workflow engine that
+ * reads its state from an `activeRunDir`. Respects `GSD_ENGINE_BYPASS=1` kill
+ * switch to skip the engine layer entirely.
  */
 
-import type { WorkflowEngine } from "./workflow-engine.js";
-import type { ExecutionPolicy } from "./execution-policy.js";
-import { DevWorkflowEngine } from "./dev-workflow-engine.js";
-import { DevExecutionPolicy } from "./dev-execution-policy.js";
+import type { WorkflowEngine } from "./workflow-engine.ts";
+import type { ExecutionPolicy } from "./execution-policy.ts";
+import { DevWorkflowEngine } from "./dev-workflow-engine.ts";
+import { DevExecutionPolicy } from "./dev-execution-policy.ts";
+import { CustomWorkflowEngine } from "./custom-workflow-engine.ts";
+import { CustomExecutionPolicy } from "./custom-execution-policy.ts";
 
 /** A resolved engine + policy pair ready for the auto-loop. */
 export interface ResolvedEngine {
@@ -21,10 +25,11 @@ export interface ResolvedEngine {
  *
  * - `GSD_ENGINE_BYPASS=1` → throws (fall through to direct auto-mode path)
  * - `null` or `"dev"` → DevWorkflowEngine + DevExecutionPolicy
- * - anything else → throws (unknown engine)
+ * - any other non-null ID → CustomWorkflowEngine(activeRunDir) + CustomExecutionPolicy()
+ *   (requires activeRunDir to be a non-empty string)
  */
 export function resolveEngine(
-  session: { activeEngineId: string | null },
+  session: { activeEngineId: string | null; activeRunDir?: string | null },
 ): ResolvedEngine {
   if (process.env.GSD_ENGINE_BYPASS === "1") {
     throw new Error(
@@ -32,7 +37,7 @@ export function resolveEngine(
     );
   }
 
-  const { activeEngineId } = session;
+  const { activeEngineId, activeRunDir } = session;
 
   if (activeEngineId === null || activeEngineId === "dev") {
     return {
@@ -41,7 +46,17 @@ export function resolveEngine(
     };
   }
 
-  throw new Error(
-    `Unknown engine ID: "${activeEngineId}" — only "dev" is registered`,
-  );
+  // Any non-null, non-"dev" engine ID is a custom workflow engine.
+  // activeRunDir is required — the engine reads GRAPH.yaml from it.
+  if (!activeRunDir || typeof activeRunDir !== "string") {
+    throw new Error(
+      `Custom engine "${activeEngineId}" requires activeRunDir to be a non-empty string, ` +
+      `got: ${JSON.stringify(activeRunDir)}`,
+    );
+  }
+
+  return {
+    engine: new CustomWorkflowEngine(activeRunDir),
+    policy: new CustomExecutionPolicy(),
+  };
 }

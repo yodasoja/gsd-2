@@ -6,20 +6,20 @@
  * auto-mode behavior behind the engine-polymorphic interface.
  */
 
-import type { WorkflowEngine } from "./workflow-engine.js";
+import type { WorkflowEngine } from "./workflow-engine.ts";
 import type {
   EngineState,
   EngineDispatchAction,
   CompletedStep,
   ReconcileResult,
   DisplayMetadata,
-} from "./engine-types.js";
-import type { GSDState } from "./types.js";
-import type { DispatchAction, DispatchContext } from "./auto-dispatch.js";
+} from "./engine-types.ts";
+import type { GSDState } from "./types.ts";
+import type { DispatchAction, DispatchContext } from "./auto-dispatch.ts";
 
-import { deriveState } from "./state.js";
-import { resolveDispatch } from "./auto-dispatch.js";
-import { loadEffectiveGSDPreferences } from "./preferences.js";
+import { deriveState } from "./state.ts";
+import { resolveDispatch } from "./auto-dispatch.ts";
+import { loadEffectiveGSDPreferences } from "./preferences.ts";
 
 // ─── Bridge: DispatchAction → EngineDispatchAction ────────────────────────
 

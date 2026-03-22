@@ -200,12 +200,23 @@ describe("Resolver stub behavior", () => {
     );
   });
 
-  test("resolveEngine throws for unknown activeEngineId", async () => {
+  test("resolveEngine throws for unknown activeEngineId without activeRunDir", async () => {
     const { resolveEngine } = await import("../engine-resolver.ts");
     assert.throws(
       () => resolveEngine({ activeEngineId: "custom-xyz" }),
-      /Unknown engine/,
-      "resolveEngine should throw for unknown engine IDs",
+      /activeRunDir/,
+      "resolveEngine should throw when custom engine has no activeRunDir",
+    );
+  });
+
+  test("resolveEngine returns custom engine for non-dev activeEngineId with activeRunDir", async () => {
+    const { resolveEngine } = await import("../engine-resolver.ts");
+    const result = resolveEngine({ activeEngineId: "custom-xyz", activeRunDir: "/tmp/test-run" });
+    assert.ok(result.engine, "should return engine for custom ID");
+    assert.equal(
+      result.engine.engineId,
+      "custom",
+      "engine.engineId should be 'custom' for non-dev activeEngineId",
     );
   });
 

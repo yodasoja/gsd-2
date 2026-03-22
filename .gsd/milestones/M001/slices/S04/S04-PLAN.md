@@ -53,7 +53,7 @@
   - Verify: `node --experimental-strip-types --test src/resources/extensions/gsd/tests/run-manager.test.ts && node --experimental-strip-types --test src/resources/extensions/gsd/tests/custom-workflow-engine.test.ts`
   - Done when: All unit tests pass; `createRun()` creates correct directory structure; `CustomWorkflowEngine.deriveState()` → `resolveDispatch()` → `reconcile()` lifecycle works against a real temp directory; `CustomExecutionPolicy.verify()` returns `"continue"`
 
-- [ ] **T02: Wire engine resolver, session, auto.ts exports, and dashboard for custom engine** `est:25m`
+- [x] **T02: Wire engine resolver, session, auto.ts exports, and dashboard for custom engine** `est:25m`
   - Why: Connects the pure modules from T01 into the existing infrastructure — resolver can return custom engine, session tracks the active run directory, auto.ts exposes the new state, and the dashboard renders custom-step units.
   - Files: `src/resources/extensions/gsd/engine-resolver.ts`, `src/resources/extensions/gsd/auto/session.ts`, `src/resources/extensions/gsd/auto.ts`, `src/resources/extensions/gsd/auto-dashboard.ts`
   - Do: Add custom engine branch to `resolveEngine()` that accepts `{ activeEngineId, activeRunDir }` and returns `CustomWorkflowEngine(activeRunDir)` + `CustomExecutionPolicy()` for any non-null, non-"dev" engine ID. Add `activeRunDir: string | null = null` to `AutoSession` (in properties, `reset()`, and `toJSON()`). Add `setActiveRunDir()`/`getActiveRunDir()` exports to `auto.ts`. Add `"custom-step"` cases to `unitVerb()` ("executing workflow step") and `unitPhaseLabel()` ("WORKFLOW") in `auto-dashboard.ts`. Maintain all `.js` import extensions.
