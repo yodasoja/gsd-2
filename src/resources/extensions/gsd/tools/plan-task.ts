@@ -1,5 +1,5 @@
 import { clearParseCache } from "../files.js";
-import { getSlice, getTask, insertTask, upsertTaskPlanning } from "../gsd-db.js";
+import { transaction, getSlice, getTask, insertTask, upsertTaskPlanning } from "../gsd-db.js";
 import { invalidateStateCache } from "../state.js";
 import { renderTaskPlanFromDb } from "../markdown-renderer.js";
 
@@ -75,24 +75,26 @@ export async function handlePlanTask(
   }
 
   try {
-    if (!getTask(params.milestoneId, params.sliceId, params.taskId)) {
-      insertTask({
-        id: params.taskId,
-        sliceId: params.sliceId,
-        milestoneId: params.milestoneId,
+    transaction(() => {
+      if (!getTask(params.milestoneId, params.sliceId, params.taskId)) {
+        insertTask({
+          id: params.taskId,
+          sliceId: params.sliceId,
+          milestoneId: params.milestoneId,
+          title: params.title,
+          status: "pending",
+        });
+      }
+      upsertTaskPlanning(params.milestoneId, params.sliceId, params.taskId, {
         title: params.title,
-        status: "pending",
+        description: params.description,
+        estimate: params.estimate,
+        files: params.files,
+        verify: params.verify,
+        inputs: params.inputs,
+        expectedOutput: params.expectedOutput,
+        observabilityImpact: params.observabilityImpact ?? "",
       });
-    }
-    upsertTaskPlanning(params.milestoneId, params.sliceId, params.taskId, {
-      title: params.title,
-      description: params.description,
-      estimate: params.estimate,
-      files: params.files,
-      verify: params.verify,
-      inputs: params.inputs,
-      expectedOutput: params.expectedOutput,
-      observabilityImpact: params.observabilityImpact ?? "",
     });
   } catch (err) {
     return { error: `db write failed: ${(err as Error).message}` };
