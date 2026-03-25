@@ -962,4 +962,36 @@ describe('derive-state-db', async () => {
       cleanup(base);
     }
   });
-});
+
+  // ─── Regression: disk-only milestones synced into DB (#2416) ─────────
+  test('derive-state-db: disk-only milestone auto-synced into DB (#2416)', async () => {
+    const base = createFixtureBase();
+    try {
+      // M001 is complete and exists in DB. M002 was queued on disk only — no DB row.
+      writeFile(base, 'milestones/M001/M001-SUMMARY.md', '# M001 Summary\n\nDone.');
+      writeFile(base, 'milestones/M002/M002-CONTEXT.md', '# M002: Queued\n\nQueued milestone.');
+
+      openDatabase(':memory:');
+      // Only insert M001 — simulates the state after migration guard ran then /gsd queue added M002
+      insertMilestone({ id: 'M001', title: 'First', status: 'complete' });
+
+      invalidateStateCache();
+      const state = await deriveStateFromDb(base);
+
+      // Before the fix, M002 was invisible: getAllMilestones() returned only M001
+      // (complete) → phase='complete' → auto-mode stopped.
+      // After the fix, deriveStateFromDb reconciles disk dirs and inserts M002.
+      assert.deepStrictEqual(state.phase, 'pre-planning', 'disk-sync-2416: phase is pre-planning, not complete');
+      assert.deepStrictEqual(state.registry.length, 2, 'disk-sync-2416: both milestones visible in registry');
+      assert.deepStrictEqual(state.registry[0]?.id, 'M001', 'disk-sync-2416: registry[0] is M001');
+      assert.deepStrictEqual(state.registry[0]?.status, 'complete', 'disk-sync-2416: M001 is complete');
+      assert.deepStrictEqual(state.registry[1]?.id, 'M002', 'disk-sync-2416: registry[1] is M002');
+      assert.deepStrictEqual(state.registry[1]?.status, 'active', 'disk-sync-2416: M002 is active');
+      assert.deepStrictEqual(state.activeMilestone?.id, 'M002', 'disk-sync-2416: activeMilestone is M002');
+
+      closeDatabase();
+    } finally {
+      closeDatabase();
+      cleanup(base);
+    }
+  });
