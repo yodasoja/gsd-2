@@ -1,3 +1,4 @@
+# CI workflow — builds, tests, and gates merges to main
 name: CI
 
 on:
