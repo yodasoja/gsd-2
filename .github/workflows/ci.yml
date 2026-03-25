@@ -139,6 +139,9 @@ jobs:
       - name: Run unit tests
         run: npm run test:unit
 
+      - name: Run package tests
+        run: npm run test:packages
+
       - name: Run integration tests
         run: npm run test:integration
 
@@ -170,3 +173,6 @@ jobs:
 
       - name: Run unit tests
         run: npm run test:unit
+
+      - name: Run package tests
+        run: npm run test:packages
