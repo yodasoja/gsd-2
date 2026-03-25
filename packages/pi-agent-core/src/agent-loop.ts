@@ -234,8 +234,9 @@ async function runLoop(
 
 			const toolResults: ToolResultMessage[] = [];
 			if (hasMoreToolCalls && config.externalToolExecution) {
-				// External execution mode: tools were handled by the provider (e.g., Claude Code SDK).
-				// Emit synthetic tool events for TUI rendering but skip local dispatch.
+				// External execution mode: tools were handled by the provider
+				// (e.g., Claude Code SDK). Emit tool_execution events for each
+				// tool call. The TUI adds these as components after the message.
 				for (const tc of toolCalls as AgentToolCall[]) {
 					stream.push({
 						type: "tool_execution_start",
