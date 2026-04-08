@@ -363,7 +363,13 @@ const GENERIC_WORDS = new Set([
   'fix', 'fixes', 'add', 'adds', 'remove', 'removes',
   'create', 'creates', 'build', 'builds', 'deploy', 'deployment',
   'refactor', 'refactoring', 'cleanup', 'polish', 'review',
+  // Process/activity words that describe what you're doing, not what domain
+  'hardening', 'validation', 'verification', 'optimization',
+  'improvement', 'enhancement', 'infrastructure',
 ]);
+
+// Pattern to match slice/milestone/task IDs (e.g., S01, M001, T03)
+const UNIT_ID_PATTERN = /^[smt]\d+$/i;
 
 /**
  * Derive a scope keyword from slice title and optional description.
@@ -394,17 +400,18 @@ export function deriveSliceScope(sliceTitle: string, sliceDescription?: string):
   // Find the first word that is:
   // 1. Not a stopword
   // 2. Not a generic word
-  // 3. At least 3 characters (meaningful scope)
+  // 3. Not a unit ID (S01, M001, T03)
+  // 4. At least 3 characters (meaningful scope)
   for (const word of words) {
     if (STOPWORDS.has(word)) continue;
     if (GENERIC_WORDS.has(word)) continue;
+    if (UNIT_ID_PATTERN.test(word)) continue;
     if (word.length < 3) continue;
     return word;
   }
 
   return undefined;
 }
-
 /**
  * Extract keywords from a slice title for scoped knowledge queries.
  * Splits on whitespace, filters stopwords, lowercases.
