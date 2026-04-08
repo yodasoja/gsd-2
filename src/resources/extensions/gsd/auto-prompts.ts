@@ -262,7 +262,11 @@ export async function inlineGsdRootFile(
 /**
  * Inline decisions with optional milestone scoping from the DB.
  * Falls back to filesystem via inlineGsdRootFile only when DB is unavailable.
- * When DB is available but cascade returns empty, returns null (empty is intentional per D020).
+ *
+ * Cascade logic (R005):
+ * 1. Query with { milestoneId, scope } if scope provided
+ * 2. If empty AND scope was provided, retry with { milestoneId } only (drop scope)
+ * 3. If still empty, return null (intentional per D020)
  */
 export async function inlineDecisionsFromDb(
   base: string, milestoneId?: string, scope?: string, level?: InlineLevel,
@@ -272,7 +276,15 @@ export async function inlineDecisionsFromDb(
     const { isDbAvailable } = await import("./gsd-db.js");
     if (isDbAvailable()) {
       const { queryDecisions, formatDecisionsForPrompt } = await import("./context-store.js");
-      const decisions = queryDecisions({ milestoneId, scope });
+
+      // First query: try with both milestoneId and scope (if scope provided)
+      let decisions = queryDecisions({ milestoneId, scope });
+
+      // Cascade: if empty AND scope was provided, retry without scope
+      if (decisions.length === 0 && scope) {
+        decisions = queryDecisions({ milestoneId });
+      }
+
       if (decisions.length > 0) {
         // Use compact format for non-full levels to save ~35% tokens
         const formatted = inlineLevel !== "full"
@@ -280,7 +292,7 @@ export async function inlineDecisionsFromDb(
           : formatDecisionsForPrompt(decisions);
         return `### Decisions\nSource: \`.gsd/DECISIONS.md\`\n\n${formatted}`;
       }
-      // DB available but empty result — intentional per D020, don't fall back to file
+      // DB available but cascade returned empty — intentional per D020, don't fall back to file
       return null;
     }
   } catch (err) {
@@ -341,6 +353,57 @@ export async function inlineProjectFromDb(
 
 // ─── Stopwords for keyword extraction ─────────────────────────────────────
 const STOPWORDS = new Set(['of', 'the', 'and', 'a', 'for', '+', '-', 'to', 'in', 'on', 'with', 'is', 'as', 'by']);
+
+// Generic words that don't provide meaningful scope differentiation
+const GENERIC_WORDS = new Set([
+  'setup', 'integration', 'implementation', 'testing', 'test', 'tests',
+  'config', 'configuration', 'init', 'initial', 'basic', 'core',
+  'main', 'primary', 'final', 'complete', 'finish', 'end',
+  'start', 'begin', 'first', 'last', 'update', 'updates',
+  'fix', 'fixes', 'add', 'adds', 'remove', 'removes',
+  'create', 'creates', 'build', 'builds', 'deploy', 'deployment',
+  'refactor', 'refactoring', 'cleanup', 'polish', 'review',
+]);
+
+/**
+ * Derive a scope keyword from slice title and optional description.
+ * Returns the most specific noun (first non-generic keyword) for decision scoping.
+ *
+ * Examples:
+ * - "Auth Middleware & Protected Route" → "auth"
+ * - "Database & User Model Setup" → "database"
+ * - "Integration Testing" → undefined (too generic)
+ * - "API Rate Limiting" → "api"
+ *
+ * @param sliceTitle - The slice title
+ * @param sliceDescription - Optional roadmap description (demo text)
+ * @returns A single lowercase keyword or undefined if no meaningful scope
+ */
+export function deriveSliceScope(sliceTitle: string, sliceDescription?: string): string | undefined {
+  // Combine title and description for keyword extraction
+  const combinedText = sliceDescription
+    ? `${sliceTitle} ${sliceDescription}`
+    : sliceTitle;
+
+  // Extract all words, lowercase, remove punctuation
+  const words = combinedText
+    .split(/[\s&+,;:|/\\()-]+/)
+    .map(w => w.toLowerCase().replace(/[^a-z0-9]/g, ''))
+    .filter(w => w.length >= 2);
+
+  // Find the first word that is:
+  // 1. Not a stopword
+  // 2. Not a generic word
+  // 3. At least 3 characters (meaningful scope)
+  for (const word of words) {
+    if (STOPWORDS.has(word)) continue;
+    if (GENERIC_WORDS.has(word)) continue;
+    if (word.length < 3) continue;
+    return word;
+  }
+
+  return undefined;
+}
 
 /**
  * Extract keywords from a slice title for scoped knowledge queries.
@@ -1086,7 +1149,10 @@ export async function buildResearchSlicePrompt(
   if (sliceCtxInline) inlined.push(sliceCtxInline);
   const researchInline = await inlineFileOptional(milestoneResearchPath, milestoneResearchRel, "Milestone Research");
   if (researchInline) inlined.push(researchInline);
-  const decisionsInline = await inlineDecisionsFromDb(base, mid);
+
+  // Derive scope from slice title for decision filtering (R005)
+  const derivedScope = deriveSliceScope(sTitle);
+  const decisionsInline = await inlineDecisionsFromDb(base, mid, derivedScope);
   if (decisionsInline) inlined.push(decisionsInline);
   const requirementsInline = await inlineRequirementsFromDb(base, mid, sid);
   if (requirementsInline) inlined.push(requirementsInline);
@@ -1158,7 +1224,9 @@ export async function buildPlanSlicePrompt(
   const researchInline = await inlineFileOptional(researchPath, researchRel, "Slice Research");
   if (researchInline) inlined.push(researchInline);
   if (inlineLevel !== "minimal") {
-    const decisionsInline = await inlineDecisionsFromDb(base, mid, undefined, inlineLevel);
+    // Derive scope from slice title for decision filtering (R005)
+    const derivedScopePS = deriveSliceScope(sTitle);
+    const decisionsInline = await inlineDecisionsFromDb(base, mid, derivedScopePS, inlineLevel);
     if (decisionsInline) inlined.push(decisionsInline);
     const requirementsInline = await inlineRequirementsFromDb(base, mid, sid, inlineLevel);
     if (requirementsInline) inlined.push(requirementsInline);
