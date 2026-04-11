@@ -53,6 +53,36 @@ describe("interactive routing bypass (#3962)", () => {
     );
   });
 
+  test("resolvePreferredModelConfig skips routing synthesis when isAutoMode is false", () => {
+    // resolvePreferredModelConfig should accept isAutoMode and bail early
+    // before synthesizing a routing ceiling from tier_models (#3962 codex review)
+    assert.ok(
+      modelSelectionSrc.includes("function resolvePreferredModelConfig"),
+      "resolvePreferredModelConfig should exist",
+    );
+    // The function should check isAutoMode before routing synthesis
+    const fnIdx = modelSelectionSrc.indexOf("function resolvePreferredModelConfig");
+    const fnBody = modelSelectionSrc.slice(fnIdx, fnIdx + 600);
+    assert.ok(
+      fnBody.includes("isAutoMode"),
+      "resolvePreferredModelConfig should accept isAutoMode parameter",
+    );
+    assert.ok(
+      fnBody.includes("if (!isAutoMode) return undefined"),
+      "should return undefined (skip routing synthesis) when not in auto-mode",
+    );
+  });
+
+  test("selectAndApplyModel threads isAutoMode to resolvePreferredModelConfig", () => {
+    // The call to resolvePreferredModelConfig inside selectAndApplyModel
+    // should pass isAutoMode as the third argument
+    const callSite = "resolvePreferredModelConfig(unitType, autoModeStartModel, isAutoMode)";
+    assert.ok(
+      modelSelectionSrc.includes(callSite),
+      "selectAndApplyModel should pass isAutoMode to resolvePreferredModelConfig",
+    );
+  });
+
   test("guided-flow passes isAutoMode=false", () => {
     // guided-flow.ts should explicitly pass isAutoMode as false
     assert.ok(
@@ -147,6 +177,31 @@ describe("auto-mode start routing banner (#3962)", () => {
     assert.ok(
       autoStartSrc.includes("startModelLabel"),
       "banner should reference the start/ceiling model",
+    );
+  });
+
+  test("banner accounts for flat-rate provider suppression", () => {
+    // The banner should check isFlatRateProvider to accurately reflect
+    // whether routing will actually be active at dispatch time (#3962 codex review)
+    assert.ok(
+      autoStartSrc.includes("isFlatRateProvider"),
+      "banner should check flat-rate provider status",
+    );
+    assert.ok(
+      autoStartSrc.includes("effectivelyEnabled"),
+      "banner should compute effective routing state, not just raw config",
+    );
+  });
+
+  test("banner uses effective ceiling from tier_models.heavy when configured", () => {
+    // The actual ceiling may come from tier_models.heavy, not the start model
+    assert.ok(
+      autoStartSrc.includes("tier_models?.heavy"),
+      "banner should check tier_models.heavy for the effective ceiling",
+    );
+    assert.ok(
+      autoStartSrc.includes("effectiveCeiling"),
+      "banner should compute the effective ceiling model",
     );
   });
 });

@@ -780,13 +780,28 @@ export async function bootstrapAutoSession(
 
     // Show dynamic routing status so users know upfront if models will be
     // downgraded for simple tasks (#3962).
+    // Use the same effective logic as selectAndApplyModel: check flat-rate
+    // provider suppression and resolve the actual ceiling model.
     const routingConfig = resolveDynamicRoutingConfig();
     const startModelLabel = s.autoModeStartModel
       ? `${s.autoModeStartModel.provider}/${s.autoModeStartModel.id}`
       : ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "default";
-    if (routingConfig.enabled) {
+
+    // Flat-rate providers (e.g. GitHub Copilot, claude-code) suppress routing
+    // at dispatch time (#3453) — reflect that in the banner.
+    const { isFlatRateProvider } = await import("./auto-model-selection.js");
+    const effectiveProvider = s.autoModeStartModel?.provider ?? ctx.model?.provider;
+    const effectivelyEnabled = routingConfig.enabled
+      && !(effectiveProvider && isFlatRateProvider(effectiveProvider));
+
+    // The actual ceiling may come from tier_models.heavy, not the start model.
+    const effectiveCeiling = (routingConfig.enabled && routingConfig.tier_models?.heavy)
+      ? routingConfig.tier_models.heavy
+      : startModelLabel;
+
+    if (effectivelyEnabled) {
       ctx.ui.notify(
-        `Dynamic routing: enabled — simple tasks may use cheaper models (ceiling: ${startModelLabel})`,
+        `Dynamic routing: enabled — simple tasks may use cheaper models (ceiling: ${effectiveCeiling})`,
         "info",
       );
     } else {

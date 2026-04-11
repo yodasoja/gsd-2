@@ -25,9 +25,16 @@ export interface ModelSelectionResult {
 export function resolvePreferredModelConfig(
   unitType: string,
   autoModeStartModel: { provider: string; id: string } | null,
+  /** When false, only return explicit per-phase model configs — do not
+   *  synthesize a routing ceiling from dynamic_routing.tier_models (#3962). */
+  isAutoMode = true,
 ) {
   const explicitConfig = resolveModelWithFallbacksForUnit(unitType);
   if (explicitConfig) return explicitConfig;
+
+  // In interactive mode, don't synthesize a routing-based model config.
+  // The user's session model (/model) should be used as-is (#3962).
+  if (!isAutoMode) return undefined;
 
   const routingConfig = resolveDynamicRoutingConfig();
   if (!routingConfig.enabled || !routingConfig.tier_models) return undefined;
@@ -66,7 +73,7 @@ export async function selectAndApplyModel(
    *  Dynamic routing only applies in auto-mode where cost optimization is expected. (#3962) */
   isAutoMode = true,
 ): Promise<ModelSelectionResult> {
-  const modelConfig = resolvePreferredModelConfig(unitType, autoModeStartModel);
+  const modelConfig = resolvePreferredModelConfig(unitType, autoModeStartModel, isAutoMode);
   let routing: { tier: string; modelDowngraded: boolean } | null = null;
   let appliedModel: Model<Api> | null = null;
 
