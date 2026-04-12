@@ -48,3 +48,17 @@ test("bootstrapAutoSession checks manual session override before preferences", (
     "manual override and preference fallback must be resolved before building startModelSnapshot",
   );
 });
+
+test("bootstrapAutoSession validates preferred model against live registry auth (#unconfigured-models)", () => {
+  // The raw PREFERENCES.md value must be validated against getAvailable()
+  // before being captured as the snapshot, so an unconfigured provider
+  // (no API key / OAuth) can't become autoModeStartModel.
+  const validationIdx = source.indexOf("ctx.modelRegistry.getAvailable()");
+  assert.ok(validationIdx > -1, "auto-start.ts should validate preferred model against getAvailable()");
+
+  const resolveModelIdIdx = source.indexOf("resolveModelId");
+  assert.ok(resolveModelIdIdx > -1, "auto-start.ts should resolve preferred model against the registry");
+
+  const warningIdx = source.indexOf("is not configured; falling back to session default");
+  assert.ok(warningIdx > -1, "auto-start.ts should warn when preferred model is unconfigured");
+});

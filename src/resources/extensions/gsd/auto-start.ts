@@ -269,16 +269,40 @@ export async function bootstrapAutoSession(
   //
   // Precedence:
   // 1) Explicit session override via /gsd model (this session)
-  // 2) GSD model preferences from PREFERENCES.md
-  // 3) Current session model from settings/session restore
+  // 2) GSD model preferences from PREFERENCES.md (validated against live auth)
+  // 3) Current session model from settings/session restore (if provider ready)
   //
   // This preserves #3517 defaults while honoring explicit runtime model
   // selection for subsequent /gsd runs in the same session.
   const manualSessionOverride = getSessionModelOverride(ctx.sessionManager.getSessionId());
   const preferredModel = resolveDefaultSessionModel(ctx.model?.provider);
+  // Validate the preferred model against the live registry + provider auth so
+  // an unconfigured PREFERENCES.md entry (no API key / OAuth) can't become the
+  // start-model snapshot. Without this, every subsequent unit would try to
+  // fall back to an unusable model.
+  let validatedPreferredModel: { provider: string; id: string } | undefined;
+  if (preferredModel) {
+    const { resolveModelId } = await import("./auto-model-selection.js");
+    const available = ctx.modelRegistry.getAvailable();
+    const match = resolveModelId(
+      `${preferredModel.provider}/${preferredModel.id}`,
+      available,
+      ctx.model?.provider,
+    );
+    if (match) {
+      validatedPreferredModel = { provider: match.provider, id: match.id };
+    } else {
+      ctx.ui.notify(
+        `Preferred model ${preferredModel.provider}/${preferredModel.id} from PREFERENCES.md is not configured; falling back to session default.`,
+        "warning",
+      );
+    }
+  }
+  const sessionModelReady =
+    ctx.model && ctx.modelRegistry.isProviderRequestReady(ctx.model.provider);
   const startModelSnapshot = manualSessionOverride
-    ?? preferredModel
-    ?? (ctx.model
+    ?? validatedPreferredModel
+    ?? (sessionModelReady && ctx.model
       ? { provider: ctx.model.provider, id: ctx.model.id }
       : null);
 
