@@ -417,7 +417,7 @@ describe("stream-adapter — session persistence (#2859)", () => {
 			delete process.env.GSD_WORKFLOW_MCP_ARGS;
 			delete process.env.GSD_WORKFLOW_MCP_ENV;
 			delete process.env.GSD_WORKFLOW_MCP_CWD;
-			const options = buildSdkOptions("claude-sonnet-4-20250514", "test", { onElicitation });
+			const options = buildSdkOptions("claude-sonnet-4-20250514", "test", undefined, { onElicitation });
 			assert.equal(options.onElicitation, onElicitation);
 		} finally {
 			process.env.GSD_WORKFLOW_MCP_COMMAND = prev.GSD_WORKFLOW_MCP_COMMAND;

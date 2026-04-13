@@ -957,10 +957,10 @@ async function pumpSdkMessages(
 					// (e.g. stop_reason: "tool_use" followed directly by result,
 					// or a turn with text but no tool execution), the `builder`
 					// still holds toolCall blocks that were never pushed into
-					// `intermediateToolCalls`. Fold them in here so they aren't
+					// `intermediateToolBlocks`. Fold them in here so they aren't
 					// dropped from the final AssistantMessage.
 					if (builder) {
-						mergePendingToolCalls(intermediateToolCalls, builder.message.content);
+						mergePendingToolCalls(intermediateToolBlocks, builder.message.content);
 					}
 
 					// Add tool calls from intermediate turns first (renders above text)
