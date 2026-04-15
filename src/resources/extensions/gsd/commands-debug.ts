@@ -6,6 +6,7 @@ import {
   listDebugSessions,
   loadDebugSession,
   updateDebugSession,
+  type DebugTddGate,
 } from "./debug-session-store.js";
 import { loadPrompt } from "./prompt-loader.js";
 
@@ -228,14 +229,90 @@ export async function handleDebug(args: string, ctx: ExtensionCommandContext, pi
         return;
       }
 
+      // Determine checkpoint/TDD dispatch context before updating session state.
+      const checkpoint = loaded.session.checkpoint;
+      const tddGate = loaded.session.tddGate;
+      const hasCheckpoint = checkpoint != null && checkpoint.awaitingResponse;
+      const hasTddGate = tddGate != null && tddGate.enabled;
+
+      let dispatchTemplate = "debug-diagnose";
+      let goal = "find_and_fix";
+      let dispatchModeLabel = "find_and_fix";
+      let checkpointContext = "";
+      let tddContext = "";
+      let tddGateUpdate: DebugTddGate | undefined;
+
+      if (hasCheckpoint || hasTddGate) {
+        dispatchTemplate = "debug-session-manager";
+
+        if (hasCheckpoint) {
+          const cpLines = [
+            `## Active Checkpoint`,
+            `- type: ${checkpoint.type}`,
+            `- summary: ${checkpoint.summary}`,
+          ];
+          if (checkpoint.userResponse) {
+            cpLines.push(`- userResponse:\n\nDATA_START\n${checkpoint.userResponse}\nDATA_END`);
+          } else {
+            cpLines.push(`- awaitingResponse: true`);
+          }
+          checkpointContext = cpLines.join("\n");
+          dispatchModeLabel = `checkpointType=${checkpoint.type}`;
+        }
+
+        if (hasTddGate) {
+          if (tddGate.phase === "red") {
+            goal = "find_and_fix";
+            const tddLines = [
+              `## TDD Gate`,
+              `- phase: red → green`,
+            ];
+            if (tddGate.testFile) tddLines.push(`- testFile: ${tddGate.testFile}`);
+            if (tddGate.testName) tddLines.push(`- testName: ${tddGate.testName}`);
+            if (tddGate.failureOutput) tddLines.push(`- failureOutput:\n${tddGate.failureOutput}`);
+            tddLines.push(`The failing test has been confirmed. Proceed to implement the fix that makes this test pass.`);
+            tddContext = tddLines.join("\n");
+            tddGateUpdate = { ...tddGate, phase: "green" };
+            dispatchModeLabel = "tddPhase=red→green";
+          } else if (tddGate.phase === "green") {
+            goal = "find_and_fix";
+            const tddLines = [
+              `## TDD Gate`,
+              `- phase: green`,
+            ];
+            if (tddGate.testFile) tddLines.push(`- testFile: ${tddGate.testFile}`);
+            if (tddGate.testName) tddLines.push(`- testName: ${tddGate.testName}`);
+            tddLines.push(`The test is now passing. Continue verifying the fix.`);
+            tddContext = tddLines.join("\n");
+            dispatchModeLabel = "tddPhase=green";
+          } else {
+            // phase === "pending": investigate only, do not fix yet
+            goal = "find_root_cause_only";
+            const tddLines = [
+              `## TDD Gate`,
+              `- phase: pending`,
+              `TDD mode is active. Write a failing test that captures this bug first. Do NOT fix the issue yet.`,
+            ];
+            if (tddGate.testFile) tddLines.push(`- testFile: ${tddGate.testFile}`);
+            tddContext = tddLines.join("\n");
+            dispatchModeLabel = "tddPhase=pending";
+          }
+        } else {
+          // Checkpoint only, no TDD gate — apply fix after human response
+          goal = "find_and_fix";
+        }
+      }
+
+      // Update session state BEFORE dispatch — handler returns after sendMessage.
       const resumed = updateDebugSession(basePath, parsed.slug, {
         status: "active",
         phase: "continued",
         lastError: null,
+        ...(tddGateUpdate !== undefined ? { tddGate: tddGateUpdate } : {}),
       });
 
       const canDispatch = pi != null && typeof (pi as ExtensionAPI).sendMessage === "function";
-      const dispatchNote = canDispatch ? "\ndispatchMode=find_and_fix" : "";
+      const dispatchNote = canDispatch ? `\ndispatchMode=${dispatchModeLabel}` : "";
       ctx.ui.notify(
         [
           `Resumed debug session: ${resumed.session.slug}`,
@@ -248,13 +325,18 @@ export async function handleDebug(args: string, ctx: ExtensionCommandContext, pi
 
       if (canDispatch) {
         try {
-          const prompt = loadPrompt("debug-diagnose", {
-            goal: "find_and_fix",
+          const promptVars: Record<string, string> = {
+            goal,
             issue: resumed.session.issue,
             slug: resumed.session.slug,
             mode: resumed.session.mode,
             workingDirectory: basePath,
-          });
+          };
+          if (dispatchTemplate === "debug-session-manager") {
+            promptVars.checkpointContext = checkpointContext;
+            promptVars.tddContext = tddContext;
+          }
+          const prompt = loadPrompt(dispatchTemplate, promptVars);
           pi.sendMessage(
             { customType: "gsd-debug-continue", content: prompt, display: false },
             { triggerTurn: true },

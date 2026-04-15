@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { handleDebug, parseDebugCommand } from "../commands-debug.ts";
-import { createDebugSession, debugSessionArtifactPath } from "../debug-session-store.ts";
+import { createDebugSession, debugSessionArtifactPath, updateDebugSession } from "../debug-session-store.ts";
 import { loadPrompt } from "../prompt-loader.ts";
 
 function makeBase(): string {
@@ -575,6 +575,164 @@ describe("handleDebug lifecycle", () => {
       assert.equal(dispatched.length, 1);
       assert.match(dispatched[0].content, /find_root_cause_only/);
       assert.match(dispatched[0].content, /status-endpoint-continues-to-return-500/);
+    } finally {
+      process.chdir(saved);
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  test("continue with checkpoint state dispatches debug-session-manager template with checkpoint context", async () => {
+    const base = makeBase();
+    const ctx = createMockCtx();
+    const dispatched: Array<{ customType: string; content: string; display: boolean }> = [];
+    const mockPi = {
+      sendMessage(msg: { customType: string; content: string; display: boolean }) {
+        dispatched.push(msg);
+      },
+    };
+    const saved = process.cwd();
+    process.chdir(base);
+
+    try {
+      createDebugSession(base, { issue: "Auth timeout", createdAt: 10 });
+      updateDebugSession(base, "auth-timeout", {
+        checkpoint: {
+          type: "human-verify",
+          summary: "Confirm the network trace shows the right headers",
+          awaitingResponse: true,
+        },
+      });
+
+      await handleDebug("continue auth-timeout", ctx as any, mockPi as any);
+
+      assert.equal(dispatched.length, 1);
+      const dispatch = dispatched[0];
+      assert.equal(dispatch.customType, "gsd-debug-continue");
+      assert.equal(dispatch.display, false);
+      // Uses debug-session-manager template (has structured return headers)
+      assert.match(dispatch.content, /## CHECKPOINT REACHED/);
+      // Checkpoint context is populated
+      assert.match(dispatch.content, /## Active Checkpoint/);
+      assert.match(dispatch.content, /type: human-verify/);
+      assert.match(dispatch.content, /Confirm the network trace/);
+      // Notification includes checkpoint hint
+      assert.match(ctx.notifications[0].message, /checkpointType=human-verify/);
+    } finally {
+      process.chdir(saved);
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  test("continue with TDD gate pending dispatches find_root_cause_only and does not dispatch find_and_fix", async () => {
+    const base = makeBase();
+    const ctx = createMockCtx();
+    const dispatched: Array<{ customType: string; content: string; display: boolean }> = [];
+    const mockPi = {
+      sendMessage(msg: { customType: string; content: string; display: boolean }) {
+        dispatched.push(msg);
+      },
+    };
+    const saved = process.cwd();
+    process.chdir(base);
+
+    try {
+      createDebugSession(base, { issue: "Flaky auth", createdAt: 10 });
+      updateDebugSession(base, "flaky-auth", {
+        tddGate: { enabled: true, phase: "pending", testFile: "auth.test.ts" },
+      });
+
+      await handleDebug("continue flaky-auth", ctx as any, mockPi as any);
+
+      assert.equal(dispatched.length, 1);
+      const dispatch = dispatched[0];
+      // Active goal line must be find_root_cause_only — the template always lists both goal names in
+      // its semantics section, so we check the specific "## Goal\n`…`" line, not the whole content.
+      assert.match(dispatch.content, /## Goal\s+`find_root_cause_only`/);
+      assert.doesNotMatch(dispatch.content, /## Goal\s+`find_and_fix`/);
+      // TDD context appears
+      assert.match(dispatch.content, /TDD Gate/);
+      assert.match(dispatch.content, /phase: pending/);
+      // Notification shows TDD hint
+      assert.match(ctx.notifications[0].message, /tddPhase=pending/);
+    } finally {
+      process.chdir(saved);
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  test("continue with TDD gate red dispatches find_and_fix and advances phase to green before dispatch", async () => {
+    const base = makeBase();
+    const ctx = createMockCtx();
+    const dispatched: Array<{ customType: string; content: string; display: boolean }> = [];
+    const mockPi = {
+      sendMessage(msg: { customType: string; content: string; display: boolean }) {
+        dispatched.push(msg);
+      },
+    };
+    const saved = process.cwd();
+    process.chdir(base);
+
+    try {
+      createDebugSession(base, { issue: "Cache miss", createdAt: 10 });
+      updateDebugSession(base, "cache-miss", {
+        tddGate: {
+          enabled: true,
+          phase: "red",
+          testFile: "cache.test.ts",
+          testName: "returns stale entry",
+          failureOutput: "Expected 'fresh' to equal 'stale'",
+        },
+      });
+
+      await handleDebug("continue cache-miss", ctx as any, mockPi as any);
+
+      // Dispatch uses find_and_fix
+      assert.equal(dispatched.length, 1);
+      assert.match(dispatched[0].content, /`find_and_fix`/);
+      assert.match(dispatched[0].content, /TDD Gate/);
+      assert.match(dispatched[0].content, /red → green/);
+      // Session artifact must have tddGate.phase === "green" after dispatch
+      const statusCtx = createMockCtx();
+      await handleDebug("status cache-miss", statusCtx as any);
+      // Load the artifact directly to verify phase was updated
+      const { loadDebugSession: load } = await import("../debug-session-store.ts");
+      const record = load(base, "cache-miss");
+      assert.ok(record != null);
+      assert.equal(record!.session.tddGate?.phase, "green");
+      // Notification shows red→green transition
+      assert.match(ctx.notifications[0].message, /tddPhase=red→green/);
+    } finally {
+      process.chdir(saved);
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  test("continue without checkpoint or TDD gate uses debug-diagnose template with find_and_fix (regression guard)", async () => {
+    const base = makeBase();
+    const ctx = createMockCtx();
+    const dispatched: Array<{ customType: string; content: string; display: boolean }> = [];
+    const mockPi = {
+      sendMessage(msg: { customType: string; content: string; display: boolean }) {
+        dispatched.push(msg);
+      },
+    };
+    const saved = process.cwd();
+    process.chdir(base);
+
+    try {
+      createDebugSession(base, { issue: "Login broken", createdAt: 10, status: "paused", phase: "blocked" });
+
+      await handleDebug("continue login-broken", ctx as any, mockPi as any);
+
+      assert.equal(dispatched.length, 1);
+      const dispatch = dispatched[0];
+      assert.equal(dispatch.customType, "gsd-debug-continue");
+      // Plain continue uses debug-diagnose — no structured return headers like ## TDD CHECKPOINT
+      assert.match(dispatch.content, /`find_and_fix`/);
+      assert.doesNotMatch(dispatch.content, /## Active Checkpoint/);
+      assert.doesNotMatch(dispatch.content, /## TDD Gate/);
+      // Notification shows plain dispatchMode
+      assert.match(ctx.notifications[0].message, /dispatchMode=find_and_fix/);
     } finally {
       process.chdir(saved);
       rmSync(base, { recursive: true, force: true });
