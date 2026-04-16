@@ -107,8 +107,10 @@ export function downsizeConversationImages(messages: Message[]): DownsizeResult 
 		const imageBlock = contentArr[contentIdx] as ImageContent;
 		const mimeType = imageBlock.mimeType || "image/unknown";
 
-		// Replace the image block with a text placeholder
-		(contentArr as any[])[contentIdx] = {
+		// Replace the image block with a text placeholder.
+		// Cast to writable array — msg.content is narrowed to (TextContent | ImageContent)[]
+		// above; index assignment is safe since TextContent is in the union.
+		(contentArr as Array<TextContent | ImageContent>)[contentIdx] = {
 			type: "text",
 			text: `[image removed to reduce context size — was ${mimeType}]`,
 		} as TextContent;

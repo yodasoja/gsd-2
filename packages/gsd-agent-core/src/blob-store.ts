@@ -39,8 +39,8 @@ export class BlobStore {
 
 		try {
 			writeFileSync(blobPath, data, { flag: "wx" }); // Atomic: fails if file exists
-		} catch (err: any) {
-			if (err.code !== "EEXIST") throw err;
+		} catch (err: unknown) {
+			if (typeof err !== "object" || err === null || (err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
 			// File already exists — expected for content-addressed storage
 		}
 		return result;

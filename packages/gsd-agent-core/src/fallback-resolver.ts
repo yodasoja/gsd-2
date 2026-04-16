@@ -27,18 +27,18 @@ export interface FallbackChainEntry {
 }
 
 /** Extended SettingsManager with GSD fallback chain support. */
-interface SettingsManagerWithFallback extends SettingsManager {
+export interface SettingsManagerWithFallback extends SettingsManager {
 	getFallbackSettings(): { enabled: boolean; chains: Record<string, FallbackChainEntry[]> };
 }
 
 /** Extended AuthStorage with GSD provider availability tracking. */
-interface AuthStorageWithFallback extends AuthStorage {
+export interface AuthStorageWithFallback extends AuthStorage {
 	markProviderExhausted(provider: string, errorType: UsageLimitErrorType): void;
 	isProviderAvailable(provider: string): boolean;
 }
 
 /** Extended ModelRegistry with GSD provider readiness check. */
-interface ModelRegistryWithFallback extends ModelRegistry {
+export interface ModelRegistryWithFallback extends ModelRegistry {
 	isProviderRequestReady(provider: string): boolean;
 }
 

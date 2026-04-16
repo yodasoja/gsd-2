@@ -64,7 +64,12 @@ import {
 	wrapRegisteredTools,
 } from "@gsd/pi-coding-agent";
 import type { BashExecutionMessage, CustomMessage } from "@gsd/agent-types";
-import { FallbackResolver } from "./fallback-resolver.js";
+import {
+	FallbackResolver,
+	type SettingsManagerWithFallback,
+	type AuthStorageWithFallback,
+	type ModelRegistryWithFallback,
+} from "./fallback-resolver.js";
 import type { ModelRegistry } from "@gsd/agent-types";
 import { expandPromptTemplate } from "@gsd/pi-coding-agent";
 import type { PromptTemplate } from "@gsd/agent-types";
@@ -421,9 +426,9 @@ export class AgentSession {
 		this._cwd = config.cwd;
 		this._modelRegistry = config.modelRegistry as ModelRegistryWithReadiness;
 		this._fallbackResolver = new FallbackResolver(
-			this.settingsManager as any,
-			this._modelRegistry.authStorage as any,
-			this._modelRegistry as any,
+			this.settingsManager as SettingsManagerWithFallback,
+			this._modelRegistry.authStorage as AuthStorageWithFallback,
+			this._modelRegistry as ModelRegistryWithFallback,
 		);
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
@@ -974,7 +979,10 @@ export class AgentSession {
 
 		// Replace the one-shot initFactory with the real factory so all future
 		// transitions go through the proper path.
-		(this._runtime as any)["createRuntime"] = factory;
+		// vendor-seam: dual-module-path — AgentSessionRuntime does not expose a public
+		// createRuntime setter. Required for one-shot init to factory transition.
+		// Bounded to this single call site.
+		(this._runtime as any /* vendor-seam: dual-module-path */)["createRuntime"] = factory;
 
 		return this._runtime;
 	}
@@ -3113,10 +3121,12 @@ export class AgentSession {
 		const currentTheme = ((themeName ? getThemeByName(themeName) : undefined) ?? getThemeByName("dark"))!;
 
 		// Create tool renderer for extension and built-in tool HTML rendering
-		// The `as any` cast bypasses the dual-module-path Theme mismatch (dist vs src).
+		// vendor-seam: dual-module-path — Theme resolves to @gsd/pi-coding-agent/dist in
+		// createToolHtmlRenderer but @gsd/pi-coding-agent/src here. Structural mismatch;
+		// no fix without pi-mono changes.
 		const toolRenderer = createToolHtmlRenderer({
 			getToolDefinition: (name) => this.getRenderableToolDefinition(name),
-			theme: currentTheme as any,
+			theme: currentTheme as any /* vendor-seam: dual-module-path */,
 		});
 
 		return await exportSessionToHtml(this.sessionManager, this.state, {
