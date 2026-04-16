@@ -53,7 +53,6 @@ export type {
 	AgentStartEvent,
 	AgentToolResult,
 	AgentToolUpdateCallback,
-	AppKeybinding,
 	BashToolCallEvent,
 	BeforeAgentStartEvent,
 	BeforeProviderRequestEvent,
@@ -97,7 +96,6 @@ export type {
 	ReadToolCallEvent,
 	RegisteredCommand,
 	RegisteredTool,
-	ResolvedCommand,
 	SessionBeforeCompactEvent,
 	SessionBeforeForkEvent,
 	SessionBeforeSwitchEvent,
@@ -108,7 +106,6 @@ export type {
 	SessionTreeEvent,
 	SlashCommandInfo,
 	SlashCommandSource,
-	SourceInfo,
 	TerminalInputHandler,
 	ToolCallEvent,
 	ToolCallEventResult,
@@ -125,9 +122,17 @@ export type {
 } from "./core/extensions/index.js";
 export {
 	createExtensionRuntime,
-	defineTool,
 	discoverAndLoadExtensions,
 	ExtensionRunner,
+	wrapRegisteredTool,
+	wrapRegisteredTools,
+} from "./core/extensions/index.js";
+// Additional extension system exports from direct source (not in GSD extensions/index.js)
+export type { AppKeybinding } from "./core/keybindings.js";
+export type { ResolvedCommand } from "./core/extensions/types.js";
+export type { SourceInfo } from "./core/source-info.js";
+export {
+	defineTool,
 	isBashToolResult,
 	isEditToolResult,
 	isFindToolResult,
@@ -136,9 +141,7 @@ export {
 	isReadToolResult,
 	isToolCallEventType,
 	isWriteToolResult,
-	wrapRegisteredTool,
-	wrapRegisteredTools,
-} from "./core/extensions/index.js";
+} from "./core/extensions/types.js";
 // Footer data provider (git branch + extension statuses - data not otherwise available to extensions)
 export type { ReadonlyFooterDataProvider } from "./core/footer-data-provider.js";
 export { convertToLlm } from "./core/messages.js";

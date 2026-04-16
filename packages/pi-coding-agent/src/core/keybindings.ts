@@ -43,7 +43,7 @@ export interface AppKeybindings {
 
 export type AppKeybinding = keyof AppKeybindings;
 
-declare module "@mariozechner/pi-tui" {
+declare module "@gsd/pi-tui" {
 	interface Keybindings extends AppKeybindings {}
 }
 

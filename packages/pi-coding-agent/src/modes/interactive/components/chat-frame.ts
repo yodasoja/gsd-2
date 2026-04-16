@@ -1,5 +1,5 @@
 import { truncateToWidth, visibleWidth } from "@gsd/pi-tui";
-import { theme } from "../core/theme/theme.js";
+import { theme } from "../../../core/theme/theme.js";
 import { formatTimestamp, type TimestampFormat } from "./timestamp.js";
 
 type FrameTone = "assistant" | "user";

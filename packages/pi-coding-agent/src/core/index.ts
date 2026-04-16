@@ -36,7 +36,6 @@ export {
 	type AgentToolUpdateCallback,
 	type BeforeAgentStartEvent,
 	type ContextEvent,
-	defineTool,
 	discoverAndLoadExtensions,
 	type ExecOptions,
 	type ExecResult,
@@ -72,6 +71,7 @@ export {
 	type TurnStartEvent,
 } from "./extensions/index.js";
 export { createSyntheticSourceInfo } from "./source-info.js";
+export { defineTool } from "./extensions/types.js";
 // GSD additions — re-export @gsd/agent-core symbols for consumers
 export { FallbackResolver, type FallbackResult } from "@gsd/agent-core";
 export { ContextualTips, type TipContext } from "@gsd/agent-core";
