@@ -71,3 +71,68 @@ export type { SlashCommandSource } from "@gsd/pi-coding-agent";
 export type { SessionContext } from "@gsd/pi-coding-agent";
 export type { EditDiffError } from "@gsd/pi-coding-agent";
 export type { EditDiffResult } from "@gsd/pi-coding-agent";
+
+// ============================================================================
+// GSD utility types and helpers (no pi-mono counterpart)
+// ============================================================================
+
+/**
+ * Assertion that the type checker should reach this point with `never`.
+ * Throws at runtime if somehow reached; tells TypeScript the branch is unreachable.
+ * Usage: default: assertNever(value); in switch over union type.
+ */
+export function assertNever(x: never): never {
+    throw new Error(`Unexpected value reached assertNever: ${String(x)}`);
+}
+
+// Runtime-only content block types for pi-ai streaming responses.
+// These types are not in the pi-ai public API but appear at runtime.
+export interface ServerToolUseBlock {
+    type: "serverToolUse";
+    id?: string;
+    name: string;
+    input: Record<string, unknown>;
+}
+
+export interface WebSearchResultBlock {
+    type: "webSearchResult";
+    toolUseId?: string;
+    url?: string;
+    title?: string;
+    content?: unknown;
+}
+
+export function isServerToolUseBlock(content: unknown): content is ServerToolUseBlock {
+    return (
+        typeof content === "object" &&
+        content !== null &&
+        "type" in content &&
+        (content as { type: unknown }).type === "serverToolUse"
+    );
+}
+
+export function isWebSearchResultBlock(content: unknown): content is WebSearchResultBlock {
+    return (
+        typeof content === "object" &&
+        content !== null &&
+        "type" in content &&
+        (content as { type: unknown }).type === "webSearchResult"
+    );
+}
+
+/**
+ * Structural interface for AgentSession to avoid dual-module-path TS2345.
+ * Use this in GSD-owned function signatures that accept a session object.
+ * The actual AgentSession from pi-coding-agent satisfies this structurally.
+ */
+export interface GSDAgentSession {
+    readonly agent: { state: { tools?: unknown[] } };
+    readonly settingsManager: import("@gsd/pi-coding-agent").SettingsManager;
+    model: import("@gsd/pi-coding-agent").ToolInfo | null | undefined;
+    thinkingLevel: string;
+    setModel(model: import("@gsd/pi-coding-agent").ToolInfo | null): Promise<void> | void;
+    setThinkingLevel(level: string): void;
+    getAllTools(): Array<{ name: string }>;
+    setActiveToolsByName(names: string[]): void;
+    setScopedModels(models: Array<{ model: import("@gsd/pi-coding-agent").ToolInfo; thinkingLevel?: string }>): void;
+}
