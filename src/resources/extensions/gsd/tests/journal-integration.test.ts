@@ -452,6 +452,41 @@ test("runUnitPhase emits unit-start and unit-end with causedBy reference", async
   assert.equal(endEvents[0].causedBy!.seq, startEvents[0].seq, "unit-end causedBy.seq must match unit-start.seq");
 });
 
+test("runUnitPhase increments unitDispatchCount for repeated artifact-missing retries", async () => {
+  const capture = createEventCapture();
+  const { resolveAgentEnd, _resetPendingResolve } = await import("../auto-loop.js");
+  _resetPendingResolve();
+
+  const deps = makeMockDeps(capture);
+  const ic = makeIC(deps);
+  const iterData: IterationData = {
+    unitType: "execute-task",
+    unitId: "M001/S01/T01",
+    prompt: "do stuff",
+    finalPrompt: "do stuff",
+    pauseAfterUatDispatch: false,
+    state: { phase: "executing", activeMilestone: { id: "M001" }, activeSlice: { id: "S01" }, registry: [], blockers: [] } as any,
+    mid: "M001",
+    midTitle: "Test",
+    isRetry: false,
+    previousTier: undefined,
+  };
+  const loopState: LoopState = { recentUnits: [{ key: "execute-task/M001/S01/T01" }], stuckRecoveryAttempts: 0, consecutiveFinalizeTimeouts: 0 };
+
+  const firstRun = runUnitPhase(ic, iterData, loopState);
+  await new Promise(r => setTimeout(r, 50));
+  resolveAgentEnd({ messages: [{ role: "assistant" }] });
+  await firstRun;
+  assert.equal(ic.s.unitDispatchCount.get("execute-task/M001/S01/T01"), 1);
+
+  _resetPendingResolve();
+  const secondRun = runUnitPhase(ic, iterData, loopState);
+  await new Promise(r => setTimeout(r, 50));
+  resolveAgentEnd({ messages: [{ role: "assistant" }] });
+  await secondRun;
+  assert.equal(ic.s.unitDispatchCount.get("execute-task/M001/S01/T01"), 2);
+});
+
 test("all events from a mock iteration have monotonically increasing seq and same flowId", async () => {
   const capture = createEventCapture();
   const { resolveAgentEnd, _resetPendingResolve } = await import("../auto-loop.js");
