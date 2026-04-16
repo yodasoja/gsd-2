@@ -10,12 +10,24 @@ export {
 	type ModelCycleResult,
 	type PromptOptions,
 	type SessionStats,
-} from "@gsd/agent-core";
-export { type BashExecutorOptions, type BashResult, executeBash, executeBashWithOperations } from "@gsd/agent-core";
-export { FallbackResolver, type FallbackResult } from "@gsd/agent-core";
-export type { CompactionResult } from "@gsd/pi-coding-agent";
+} from "./agent-session.js";
+export {
+	AgentSessionRuntime,
+	type CreateAgentSessionRuntimeFactory,
+	type CreateAgentSessionRuntimeResult,
+	createAgentSessionRuntime,
+} from "./agent-session-runtime.js";
+export {
+	type AgentSessionRuntimeDiagnostic,
+	type AgentSessionServices,
+	type CreateAgentSessionFromServicesOptions,
+	type CreateAgentSessionServicesOptions,
+	createAgentSessionFromServices,
+	createAgentSessionServices,
+} from "./agent-session-services.js";
+export { type BashExecutorOptions, type BashResult, executeBash, executeBashWithOperations } from "./bash-executor.js";
+export type { CompactionResult } from "./compaction/index.js";
 export { createEventBus, type EventBus, type EventBusController } from "./event-bus.js";
-
 // Extensions system
 export {
 	type AgentEndEvent,
@@ -24,12 +36,12 @@ export {
 	type AgentToolUpdateCallback,
 	type BeforeAgentStartEvent,
 	type ContextEvent,
+	defineTool,
 	discoverAndLoadExtensions,
 	type ExecOptions,
 	type ExecResult,
 	type Extension,
 	type ExtensionAPI,
-	type ExtensionManifest,
 	type ExtensionCommandContext,
 	type ExtensionContext,
 	type ExtensionError,
@@ -48,23 +60,15 @@ export {
 	type SessionBeforeSwitchEvent,
 	type SessionBeforeTreeEvent,
 	type SessionCompactEvent,
-	type SessionForkEvent,
 	type SessionShutdownEvent,
 	type SessionStartEvent,
-	type SessionSwitchEvent,
 	type SessionTreeEvent,
 	type ToolCallEvent,
-	readManifest,
-	readManifestFromEntryPath,
-	type SortResult,
-	type SortWarning,
-	sortExtensionPaths,
+	type ToolCallEventResult,
 	type ToolDefinition,
 	type ToolRenderResultOptions,
 	type ToolResultEvent,
 	type TurnEndEvent,
 	type TurnStartEvent,
-	wrapToolsWithExtensions,
 } from "./extensions/index.js";
-
-export { ContextualTips, type TipContext } from "@gsd/agent-core";
+export { createSyntheticSourceInfo } from "./source-info.js";

@@ -36,12 +36,16 @@
     "strip-ansi": "^7.1.0",
     "undici": "^7.24.2",
     "sql.js": "^1.14.1",
-    "yaml": "^2.8.2"
+    "yaml": "^2.8.2",
+    "ajv": "^8.17.1",
+    "cli-highlight": "^2.1.11",
+    "uuid": "^11.1.0"
   },
   "devDependencies": {
     "@types/sql.js": "^1.4.9",
     "@types/diff": "^7.0.2",
     "@types/hosted-git-info": "^3.0.5",
     "@types/proper-lockfile": "^4.1.4"
-  }
+  },
+  "piVersion": "0.67.2"
 }
