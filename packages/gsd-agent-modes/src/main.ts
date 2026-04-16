@@ -370,7 +370,7 @@ export async function main(args: string[]) {
 		const remoteModel = modelRegistry.getAll().find((m) => !isLocalModel(m));
 		if (remoteModel) {
 			console.error(
-				`Error: --offline requires all configured models to be local. Found remote model: ${remoteModel.name} (${(remoteModel as any).baseUrl || "cloud API"})`,
+				`Error: --offline requires all configured models to be local. Found remote model: ${remoteModel.name} (${(remoteModel as { baseUrl?: string | null }).baseUrl || "cloud API"})`,
 			);
 			process.exit(1);
 		}

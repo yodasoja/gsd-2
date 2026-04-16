@@ -157,7 +157,7 @@ export class FallbackResolver {
 	/**
 	 * Search a chain for the first available entry starting from startIndex.
 	 */
-	async _findAvailableInChain(
+	private async _findAvailableInChain(
 		chainName: string,
 		entries: FallbackChainEntry[],
 		startIndex: number,
