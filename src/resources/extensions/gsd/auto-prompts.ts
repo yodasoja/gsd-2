@@ -997,14 +997,19 @@ export async function checkNeedsRunUat(
  * as a seed when present. The discussion agent interviews the user, writes
  * a full CONTEXT.md, and the phase transitions to pre-planning automatically.
  */
-export async function buildDiscussMilestonePrompt(mid: string, midTitle: string, base: string): Promise<string> {
+export async function buildDiscussMilestonePrompt(
+  mid: string,
+  midTitle: string,
+  base: string,
+  structuredQuestionsAvailable = "false",
+): Promise<string> {
   const discussTemplates = inlineTemplate("context", "Context");
 
   const basePrompt = loadPrompt("guided-discuss-milestone", {
     milestoneId: mid,
     milestoneTitle: midTitle,
     inlinedTemplates: discussTemplates,
-    structuredQuestionsAvailable: "false",
+    structuredQuestionsAvailable,
     commitInstruction: "Do not commit planning artifacts — .gsd/ is managed externally.",
     fastPathInstruction: "",
   });

@@ -59,6 +59,7 @@ import { resolveSafetyHarnessConfig } from "../safety/safety-harness.js";
 import {
   getWorkflowTransportSupportError,
   getRequiredWorkflowToolsForAutoUnit,
+  supportsStructuredQuestions,
 } from "../workflow-mcp.js";
 
 // ─── Session timeout auto-resume state ────────────────────────────────────────
@@ -781,6 +782,15 @@ export async function runDispatch(
   const { ctx, pi, s, deps, prefs } = ic;
   const { state, mid, midTitle } = preData;
   const STUCK_WINDOW_SIZE = 6;
+  const provider = ctx.model?.provider;
+  const authMode = provider && typeof ctx.modelRegistry?.getProviderAuthMode === "function"
+    ? ctx.modelRegistry.getProviderAuthMode(provider)
+    : undefined;
+  const activeTools = typeof pi.getActiveTools === "function" ? pi.getActiveTools() : [];
+  const structuredQuestionsAvailable = supportsStructuredQuestions(activeTools, {
+    authMode,
+    baseUrl: ctx.model?.baseUrl,
+  }) ? "true" : "false";
 
   debugLog("autoLoop", { phase: "dispatch-resolve", iteration: ic.iteration });
   const dispatchResult = await deps.resolveDispatch({
@@ -790,6 +800,7 @@ export async function runDispatch(
     state,
     prefs,
     session: s,
+    structuredQuestionsAvailable,
   });
 
   if (dispatchResult.action === "stop") {

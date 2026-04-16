@@ -152,6 +152,7 @@ export interface LoopDeps {
     state: GSDState;
     prefs: GSDPreferences | undefined;
     session?: AutoSession;
+    structuredQuestionsAvailable?: "true" | "false";
   }) => Promise<DispatchAction>;
   runPreDispatchHooks: (
     unitType: string,

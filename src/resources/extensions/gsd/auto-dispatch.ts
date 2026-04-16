@@ -78,6 +78,7 @@ export interface DispatchContext {
   state: GSDState;
   prefs: GSDPreferences | undefined;
   session?: import("./auto/session.js").AutoSession;
+  structuredQuestionsAvailable?: "true" | "false";
 }
 
 export interface DispatchRule {
@@ -331,19 +332,24 @@ export const DISPATCH_RULES: DispatchRule[] = [
   },
   {
     name: "needs-discussion → discuss-milestone",
-    match: async ({ state, mid, midTitle, basePath }) => {
+    match: async ({ state, mid, midTitle, basePath, structuredQuestionsAvailable }) => {
       if (state.phase !== "needs-discussion") return null;
       return {
         action: "dispatch",
         unitType: "discuss-milestone",
         unitId: mid,
-        prompt: await buildDiscussMilestonePrompt(mid, midTitle, basePath),
+        prompt: await buildDiscussMilestonePrompt(
+          mid,
+          midTitle,
+          basePath,
+          structuredQuestionsAvailable,
+        ),
       };
     },
   },
   {
     name: "pre-planning (no context) → discuss-milestone",
-    match: async ({ state, mid, midTitle, basePath }) => {
+    match: async ({ state, mid, midTitle, basePath, structuredQuestionsAvailable }) => {
       if (state.phase !== "pre-planning") return null;
       const contextFile = resolveMilestoneFile(basePath, mid, "CONTEXT");
       const hasContext = !!(contextFile && (await loadFile(contextFile)));
@@ -352,7 +358,12 @@ export const DISPATCH_RULES: DispatchRule[] = [
         action: "dispatch",
         unitType: "discuss-milestone",
         unitId: mid,
-        prompt: await buildDiscussMilestonePrompt(mid, midTitle, basePath),
+        prompt: await buildDiscussMilestonePrompt(
+          mid,
+          midTitle,
+          basePath,
+          structuredQuestionsAvailable,
+        ),
       };
     },
   },
