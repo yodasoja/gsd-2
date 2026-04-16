@@ -1,6 +1,7 @@
 import type { ExtensionUIContext } from "@gsd/pi-coding-agent";
 
-import { Theme, getAvailableThemesWithPaths, getThemeByName, setTheme, setThemeInstance, theme } from "@gsd/pi-coding-agent";
+import { Theme, getAvailableThemesWithPaths, getThemeByName, setTheme, setThemeInstance } from "@gsd/pi-coding-agent";
+import { theme } from "../../../theme.js";
 import { appKey } from "../components/keybinding-hints.js";
 
 export function createExtensionUIContext(host: any): ExtensionUIContext {
@@ -35,11 +36,11 @@ export function createExtensionUIContext(host: any): ExtensionUIContext {
 		get theme() {
 			return theme;
 		},
-		getAllThemes: () => getAvailableThemesWithPaths(),
-		getTheme: (name) => getThemeByName(name),
+		getAllThemes: () => getAvailableThemesWithPaths() as any,
+		getTheme: (name) => getThemeByName(name) as any,
 		setTheme: (themeOrName) => {
 			if (themeOrName instanceof Theme) {
-				setThemeInstance(themeOrName);
+				setThemeInstance(themeOrName as any);
 				host.ui.requestRender();
 				return { success: true };
 			}
@@ -54,6 +55,9 @@ export function createExtensionUIContext(host: any): ExtensionUIContext {
 		},
 		getToolsExpanded: () => host.toolOutputExpanded,
 		setToolsExpanded: (expanded) => host.setToolsExpanded(expanded),
+		setHiddenThinkingLabel: (_label: string | undefined) => {
+			// Thinking label not supported in this context
+		},
 	};
 }
 

@@ -1,5 +1,5 @@
 import * as Diff from "diff";
-import { theme } from "@gsd/pi-coding-agent";
+import { theme } from "../../../theme.js";
 
 /**
  * Parse diff line to extract prefix, line number, and content.

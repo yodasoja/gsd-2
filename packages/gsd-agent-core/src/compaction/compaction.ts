@@ -8,7 +8,10 @@
 import type { AgentMessage } from "@gsd/pi-agent-core";
 import type { AssistantMessage, Model, Usage } from "@gsd/pi-ai";
 import { completeSimple } from "@gsd/pi-ai";
-import { COMPACTION_KEEP_RECENT_TOKENS, COMPACTION_RESERVE_TOKENS } from "@gsd/pi-coding-agent";
+// COMPACTION_KEEP_RECENT_TOKENS and COMPACTION_RESERVE_TOKENS were removed from
+// the @gsd/pi-coding-agent 0.67.2 public API. Phase 09 moves these to @gsd/agent-types.
+const COMPACTION_KEEP_RECENT_TOKENS = 20_000;
+const COMPACTION_RESERVE_TOKENS = 16_384;
 import { convertToLlm } from "@gsd/pi-coding-agent";
 import type { CompactionEntry, SessionEntry } from "@gsd/pi-coding-agent";
 import {

@@ -1,7 +1,7 @@
 import { Loader, Markdown, Spacer, Text } from "@gsd/pi-tui";
 
 import type { InteractiveModeEvent, InteractiveModeStateHost } from "../interactive-mode-state.js";
-import { theme } from "@gsd/pi-coding-agent";
+import { theme } from "../../../theme.js";
 import { AssistantMessageComponent } from "../components/assistant-message.js";
 import { ToolExecutionComponent } from "../components/tool-execution.js";
 import { DynamicBorder } from "../components/dynamic-border.js";
@@ -215,8 +215,8 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 							isError: ext.isError ?? false,
 						};
 					}
-				} else if (innerEvent.type === "server_tool_use") {
-					const idx = typeof innerEvent.contentIndex === "number" ? innerEvent.contentIndex : -1;
+				} else if ((innerEvent as any).type === "server_tool_use") {
+					const idx = typeof (innerEvent as any).contentIndex === "number" ? (innerEvent as any).contentIndex : -1;
 					const block = idx >= 0 ? (host.streamingMessage.content[idx] as any) : undefined;
 					const ext = block?.externalResult;
 					if (block?.id && ext) {
@@ -540,7 +540,7 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 							pinnedTextComponent = new Markdown(latestText, 1, 0, host.getMarkdownThemeWithSettings());
 							// Cap pinned content to ~40% of terminal height so tall output
 							// doesn't exceed the viewport and cause render flashing.
-							pinnedTextComponent.maxLines = Math.max(3, Math.floor(host.ui.terminal.rows * 0.4));
+							(pinnedTextComponent as any).maxLines = Math.max(3, Math.floor(host.ui.terminal.rows * 0.4));
 							host.pinnedMessageContainer.addChild(pinnedTextComponent);
 							// Hide the separate status loader — the pinned zone replaces it
 							if (host.loadingAnimation) {
@@ -553,7 +553,7 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 							pinnedTextComponent?.setText(latestText);
 							// Refresh maxLines in case terminal was resized
 							if (pinnedTextComponent) {
-								pinnedTextComponent.maxLines = Math.max(3, Math.floor(host.ui.terminal.rows * 0.4));
+								(pinnedTextComponent as any).maxLines = Math.max(3, Math.floor(host.ui.terminal.rows * 0.4));
 							}
 						}
 					}

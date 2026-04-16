@@ -256,7 +256,19 @@ export async function exportSessionToHtml(
 		entries,
 		leafId: sm.getLeafId(),
 		systemPrompt: state?.systemPrompt,
-		tools: state?.tools?.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters })),
+		tools: state?.tools?.map((t) => ({
+			name: t.name,
+			description: t.description,
+			parameters: t.parameters,
+			// ToolInfo.sourceInfo required in 0.67.2; AgentTool has no sourceInfo,
+			// so synthesize a builtin-style source for export display purposes.
+			sourceInfo: {
+				path: "",
+				source: "builtin",
+				scope: "temporary" as const,
+				origin: "top-level" as const,
+			},
+		})),
 		renderedTools,
 	};
 

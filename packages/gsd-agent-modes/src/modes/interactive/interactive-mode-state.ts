@@ -1,4 +1,4 @@
-import type { AgentSessionEvent } from "@gsd/pi-coding-agent";
+import type { AgentSessionEvent } from "@gsd/agent-core";
 
 export interface InteractiveModeStateHost {
 	defaultEditor: any;

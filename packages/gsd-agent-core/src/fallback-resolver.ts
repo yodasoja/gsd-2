@@ -10,9 +10,37 @@
  */
 
 import type { Api, Model } from "@gsd/pi-ai";
-import type { AuthStorage, UsageLimitErrorType } from "@gsd/pi-coding-agent";
+import type { AuthStorage } from "@gsd/pi-coding-agent";
 import type { ModelRegistry } from "@gsd/pi-coding-agent";
-import type { FallbackChainEntry, SettingsManager } from "@gsd/pi-coding-agent";
+import type { SettingsManager } from "@gsd/pi-coding-agent";
+
+// Local shims for GSD fallback types removed from @gsd/pi-coding-agent 0.67.2.
+// Phase 09 moves these to @gsd/agent-types.
+
+/** Error type that triggered provider exhaustion. */
+export type UsageLimitErrorType = "rate_limit" | "quota" | "context_length" | "unknown";
+
+/** Single entry in a provider fallback chain (from GSD settings). */
+export interface FallbackChainEntry {
+	provider: string;
+	model: string;
+}
+
+/** Extended SettingsManager with GSD fallback chain support. */
+interface SettingsManagerWithFallback extends SettingsManager {
+	getFallbackSettings(): { enabled: boolean; chains: Record<string, FallbackChainEntry[]> };
+}
+
+/** Extended AuthStorage with GSD provider availability tracking. */
+interface AuthStorageWithFallback extends AuthStorage {
+	markProviderExhausted(provider: string, errorType: UsageLimitErrorType): void;
+	isProviderAvailable(provider: string): boolean;
+}
+
+/** Extended ModelRegistry with GSD provider readiness check. */
+interface ModelRegistryWithFallback extends ModelRegistry {
+	isProviderRequestReady(provider: string): boolean;
+}
 
 export interface FallbackResult {
 	model: Model<Api>;
@@ -22,9 +50,9 @@ export interface FallbackResult {
 
 export class FallbackResolver {
 	constructor(
-		readonly settingsManager: SettingsManager,
-		readonly authStorage: AuthStorage,
-		readonly modelRegistry: ModelRegistry,
+		readonly settingsManager: SettingsManagerWithFallback,
+		readonly authStorage: AuthStorageWithFallback,
+		readonly modelRegistry: ModelRegistryWithFallback,
 	) {}
 
 	/**

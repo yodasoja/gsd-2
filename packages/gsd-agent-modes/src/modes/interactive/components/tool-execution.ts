@@ -17,7 +17,8 @@ import { allTools } from "@gsd/pi-coding-agent";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from "@gsd/pi-coding-agent";
 import { convertToPng } from "@gsd/pi-coding-agent";
 import { sanitizeBinaryOutput } from "@gsd/pi-coding-agent";
-import { getLanguageFromPath, highlightCode, theme } from "@gsd/pi-coding-agent";
+import { getLanguageFromPath, highlightCode } from "@gsd/pi-coding-agent";
+import { theme } from "../../../theme.js";
 import { shortenPath } from "../utils/shorten-path.js";
 import { renderDiff } from "./diff.js";
 import { keyHint } from "./keybinding-hints.js";
@@ -327,34 +328,57 @@ export class ToolExecutionComponent extends Container {
 	/**
 	 * Compute edit diff preview when we have complete args.
 	 * This runs async and updates display when done.
+	 * Handles both single-edit format (oldText/newText) and multi-edit format (edits[]).
 	 */
 	private maybeComputeEditDiff(): void {
 		if (this.toolName !== "edit") return;
 
 		const path = this.args?.path;
+
+		if (!path) return;
+
 		const oldText = this.args?.oldText;
 		const newText = this.args?.newText;
+		const edits = this.args?.edits;
 
-		// Need all three params to compute diff
-		if (!path || oldText === undefined || newText === undefined) return;
+		if (typeof oldText === "string" && typeof newText === "string") {
+			// Single-edit path: oldText + newText at top level
+			const argsKey = JSON.stringify({ path, oldText, newText });
+			if (this.editDiffArgsKey === argsKey) return;
+			this.editDiffArgsKey = argsKey;
 
-		// Create a key to track which args this computation is for
-		const argsKey = JSON.stringify({ path, oldText, newText });
+			computeEditDiff(path, oldText, newText, this.cwd).then((result) => {
+				if (this.editDiffArgsKey === argsKey) {
+					this.editDiffPreview = result;
+					this.updateDisplay();
+					this.ui.requestRender();
+				}
+			});
+		} else if (Array.isArray(edits)) {
+			// Multi-edit path: edits[] array format
+			// Validate each element has oldText and newText strings before passing to computeEditDiff
+			const firstValidEdit = edits.find(
+				(e): e is { oldText: string; newText: string } =>
+					e !== null &&
+					typeof e === "object" &&
+					typeof e.oldText === "string" &&
+					typeof e.newText === "string",
+			);
+			if (!firstValidEdit) return;
 
-		// Skip if we already computed for these exact args
-		if (this.editDiffArgsKey === argsKey) return;
+			const argsKey = JSON.stringify({ path, edits });
+			if (this.editDiffArgsKey === argsKey) return;
+			this.editDiffArgsKey = argsKey;
 
-		this.editDiffArgsKey = argsKey;
-
-		// Compute diff async
-		computeEditDiff(path, oldText, newText, this.cwd).then((result) => {
-			// Only update if args haven't changed since we started
-			if (this.editDiffArgsKey === argsKey) {
-				this.editDiffPreview = result;
-				this.updateDisplay();
-				this.ui.requestRender();
-			}
-		});
+			// Preview the first edit; subsequent edits will be reflected in the post-execution diff
+			computeEditDiff(path, firstValidEdit.oldText, firstValidEdit.newText, this.cwd).then((result) => {
+				if (this.editDiffArgsKey === argsKey) {
+					this.editDiffPreview = result;
+					this.updateDisplay();
+					this.ui.requestRender();
+				}
+			});
+		}
 	}
 
 	updateResult(
@@ -377,6 +401,15 @@ export class ToolExecutionComponent extends Container {
 		this.updateDisplay();
 		// Convert non-PNG images to PNG for Kitty protocol (async)
 		this.maybeConvertImagesForKitty();
+	}
+
+	/**
+	 * Mark a pending tool call as finished with no result (e.g., squashed by compaction).
+	 * Stops the "Running" indicator without providing a result.
+	 */
+	markHistoricalNoResult(): void {
+		this.isPartial = false;
+		this.updateDisplay();
 	}
 
 	/**
@@ -487,7 +520,21 @@ export class ToolExecutionComponent extends Container {
 			// Render call component
 			if (this.toolDefinition.renderCall) {
 				try {
-					const callComponent = this.toolDefinition.renderCall(this.args, theme);
+					const renderContext = {
+						args: this.args,
+						toolCallId: "",
+						invalidate: () => this.updateDisplay(),
+						lastComponent: undefined,
+						state: undefined,
+						cwd: this.cwd,
+						executionStarted: !this.isPartial,
+						argsComplete: true,
+						isPartial: this.isPartial,
+						expanded: this.expanded,
+						showImages: this.showImages,
+						isError: this.result?.isError ?? false,
+					};
+					const callComponent = (this.toolDefinition.renderCall as any)(this.args, theme, renderContext);
 					if (callComponent !== undefined) {
 						this.contentBox.addChild(callComponent);
 						customRendererHasContent = true;
@@ -506,10 +553,25 @@ export class ToolExecutionComponent extends Container {
 			// Render result component if we have a result
 			if (this.result && this.toolDefinition.renderResult) {
 				try {
-					const resultComponent = this.toolDefinition.renderResult(
+					const renderContext = {
+						args: this.args,
+						toolCallId: "",
+						invalidate: () => this.updateDisplay(),
+						lastComponent: undefined,
+						state: undefined,
+						cwd: this.cwd,
+						executionStarted: true,
+						argsComplete: true,
+						isPartial: this.isPartial,
+						expanded: this.expanded,
+						showImages: this.showImages,
+						isError: this.result.isError,
+					};
+					const resultComponent = (this.toolDefinition.renderResult as any)(
 						{ content: this.result.content as any, details: this.result.details },
 						{ expanded: this.expanded, isPartial: this.isPartial },
 						theme,
+						renderContext,
 					);
 					if (resultComponent !== undefined) {
 						this.contentBox.addChild(resultComponent);
@@ -577,18 +639,8 @@ export class ToolExecutionComponent extends Container {
 						{ maxWidthCells: 60 },
 						cachedDims,
 					);
-					if (!cachedDims) {
-						const imgIdx = i;
-						imageComponent.setOnDimensionsResolved(() => {
-							// Cache resolved dimensions so future updateDisplay() calls
-							// don't re-trigger async parsing → infinite loop (#3455).
-							const dims = imageComponent.getDimensions?.();
-							if (dims) this.resolvedImageDimensions.set(imgIdx, dims);
-							// Just re-render — don't call updateDisplay() which would
-							// destroy and recreate all Image components.
-							this.ui.requestRender();
-						});
-					}
+					// setOnDimensionsResolved/getDimensions removed in pi-tui 0.67.2 —
+					// dimensions are passed to the Image constructor and resolved synchronously.
 					this.imageComponents.push(imageComponent);
 					this.addChild(imageComponent);
 				}

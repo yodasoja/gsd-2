@@ -1,6 +1,6 @@
 import type { Component, TUI } from "@gsd/pi-tui";
 import { visibleWidth } from "@gsd/pi-tui";
-import { theme } from "@gsd/pi-coding-agent";
+import { theme } from "../../../theme.js";
 
 /**
  * Dynamic border component that adjusts to viewport width.

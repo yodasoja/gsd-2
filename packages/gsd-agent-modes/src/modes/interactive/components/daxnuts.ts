@@ -5,7 +5,7 @@
  */
 
 import { type Component, type TUI, visibleWidth } from "@gsd/pi-tui";
-import { theme } from "@gsd/pi-coding-agent";
+import { theme } from "../../../theme.js";
 
 // 32x32 RGB image of dax, hex encoded (3 bytes per pixel)
 const DAX_HEX =

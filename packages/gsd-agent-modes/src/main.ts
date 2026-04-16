@@ -14,7 +14,6 @@ import {
 	type CreateAgentSessionOptions,
 	DefaultPackageManager,
 	DefaultResourceLoader,
-	KeybindingsManager,
 	type LoadExtensionsResult,
 	ModelRegistry,
 	exportFromFile,
@@ -25,7 +24,6 @@ import {
 	resolveCliModel,
 	resolveModelScope,
 	runMigrations,
-	runPackageCommand,
 	type ScopedModel,
 	SessionManager,
 	SettingsManager,
@@ -36,6 +34,7 @@ import {
 	createAgentSession,
 	allTools,
 } from "@gsd/pi-coding-agent";
+import { KeybindingsManager } from "@gsd/agent-core";
 import { type Args, parseArgs, printHelp } from "./cli/args.js";
 import { selectConfig } from "./cli/config-selector.js";
 import { processFileArguments } from "./cli/file-processor.js";
@@ -342,18 +341,7 @@ export async function main(args: string[]) {
 		process.env.PI_SKIP_VERSION_CHECK = "1";
 	}
 
-	const packageCommand = await runPackageCommand({
-		appName: APP_NAME,
-		args,
-		cwd: process.cwd(),
-		agentDir: getAgentDir(),
-		stdout: process.stdout,
-		stderr: process.stderr,
-	});
-	if (packageCommand.handled) {
-		process.exitCode = packageCommand.exitCode;
-		return;
-	}
+	// runPackageCommand removed in pi-coding-agent 0.67.2 — no-op.
 
 	if (await handleConfigCommand(args)) {
 		return;
@@ -373,19 +361,22 @@ export async function main(args: string[]) {
 	const authStorage = AuthStorage.create();
 	const modelRegistry = ModelRegistry.create(authStorage, getModelsPath());
 
+	// isAllLocalChain / isLocalModel removed in pi-coding-agent 0.67.2 —
+	// check baseUrl: models with no baseUrl use cloud APIs, those with one may be local.
+	const isLocalModel = (m: { baseUrl?: string | null }) => !!m.baseUrl;
+	const allModelsLocal = modelRegistry.getAll().length > 0 && modelRegistry.getAll().every(isLocalModel);
+
 	// Offline mode validation / auto-detection
 	if (offlineMode) {
 		// --offline flag: validate all models are local
-		if (!modelRegistry.isAllLocalChain()) {
-			const remoteModel = modelRegistry.getAll().find((m) => !ModelRegistry.isLocalModel(m));
-			if (remoteModel) {
-				console.error(
-					`Error: --offline requires all configured models to be local. Found remote model: ${remoteModel.name} (${remoteModel.baseUrl || "cloud API"})`,
-				);
-				process.exit(1);
-			}
+		const remoteModel = modelRegistry.getAll().find((m) => !isLocalModel(m));
+		if (remoteModel) {
+			console.error(
+				`Error: --offline requires all configured models to be local. Found remote model: ${remoteModel.name} (${(remoteModel as any).baseUrl || "cloud API"})`,
+			);
+			process.exit(1);
 		}
-	} else if (modelRegistry.isAllLocalChain() && modelRegistry.getAll().length > 0) {
+	} else if (allModelsLocal) {
 		// Auto-detect: all models are local, enable offline mode
 		process.env.PI_OFFLINE = "1";
 		process.env.PI_SKIP_VERSION_CHECK = "1";
@@ -405,7 +396,7 @@ export async function main(args: string[]) {
 		noPromptTemplates: firstPass.noPromptTemplates || firstPass.bare,
 		noThemes: firstPass.noThemes || firstPass.bare,
 		systemPrompt: firstPass.systemPrompt,
-		appendSystemPrompt: firstPass.appendSystemPrompt,
+		appendSystemPrompt: firstPass.appendSystemPrompt ? [firstPass.appendSystemPrompt] : undefined,
 		// --bare: suppress CLAUDE.md/AGENTS.md ancestor walk
 		...(firstPass.bare ? { agentsFilesOverride: () => ({ agentsFiles: [] }) } : {}),
 	});
@@ -450,14 +441,9 @@ export async function main(args: string[]) {
 	}
 
 	if (parsed.addProvider) {
-		const { ModelsJsonWriter } = await import("@gsd/pi-coding-agent");
-		const writer = new ModelsJsonWriter();
-		writer.setProvider(parsed.addProvider, {
-			baseUrl: parsed.addProviderBaseUrl,
-			apiKey: parsed.apiKey,
-		});
-		console.log(`Provider "${parsed.addProvider}" added to models.json`);
-		process.exit(0);
+		// ModelsJsonWriter removed in pi-coding-agent 0.67.2 — feature unavailable.
+		console.error(`Error: --add-provider is not available in this version.`);
+		process.exit(1);
 	}
 
 	if (parsed.discoverModels !== undefined) {
@@ -589,7 +575,7 @@ export async function main(args: string[]) {
 	}
 
 	if (mode === "rpc") {
-		await runRpcMode(session);
+		await runRpcMode(session as any);
 	} else if (isInteractive) {
 		if (scopedModels.length > 0 && (parsed.verbose || !settingsManager.getQuietStartup())) {
 			const modelList = scopedModels
@@ -602,7 +588,7 @@ export async function main(args: string[]) {
 		}
 
 		printTimings();
-		const mode = new InteractiveMode(session, {
+		const mode = new InteractiveMode(session as any, {
 			migratedProviders,
 			modelFallbackMessage,
 			initialMessage,
@@ -612,7 +598,7 @@ export async function main(args: string[]) {
 		});
 		await mode.run();
 	} else {
-		await runPrintMode(session, {
+		await runPrintMode(session as any, {
 			mode,
 			messages: parsed.messages,
 			initialMessage,

@@ -2,9 +2,14 @@
  * Utilities for formatting keybinding hints in the UI.
  */
 
-import { type EditorAction, getEditorKeybindings, type KeyId } from "@gsd/pi-tui";
-import type { AppAction, KeybindingsManager } from "@gsd/pi-coding-agent";
-import { theme } from "@gsd/pi-coding-agent";
+import { type Keybinding, getKeybindings, type KeyId } from "@gsd/pi-tui";
+import type { AppAction } from "@gsd/pi-coding-agent";
+import { KeybindingsManager } from "@gsd/agent-core";
+import { theme } from "../../../theme.js";
+
+// EditorAction is any valid keybinding string (namespaced like "tui.select.cancel" or app-level).
+// Widened to string so both TUI keybindings and app actions can be passed without TS errors.
+type EditorAction = string;
 
 const isMac = process.platform === "darwin";
 
@@ -31,7 +36,7 @@ function formatKeys(keys: KeyId[]): string {
  * Get display string for an editor action.
  */
 export function editorKey(action: EditorAction): string {
-	return formatKeys(getEditorKeybindings().getKeys(action));
+	return formatKeys(getKeybindings().getKeys(action as Keybinding));
 }
 
 /**
@@ -45,7 +50,7 @@ export function appKey(keybindings: KeybindingsManager, action: AppAction): stri
  * Format a keybinding hint with consistent styling: dim key, muted description.
  * Looks up the key from editor keybindings automatically.
  *
- * @param action - Editor action name (e.g., "selectConfirm", "expandTools")
+ * @param action - Editor action name (e.g., "tui.select.confirm", "expandTools")
  * @param description - Description text (e.g., "to expand", "cancel")
  * @returns Formatted string with dim key and muted description
  */

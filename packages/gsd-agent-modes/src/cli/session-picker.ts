@@ -3,11 +3,14 @@
  */
 
 import { ProcessTerminal, TUI } from "@gsd/pi-tui";
+import { KeybindingsManager } from "@gsd/agent-core";
 import {
-	KeybindingsManager,
 	SessionSelectorComponent,
 } from "@gsd/pi-coding-agent";
-import type { SessionInfo, SessionListProgress } from "@gsd/pi-coding-agent";
+import type { SessionInfo } from "@gsd/pi-coding-agent";
+
+// SessionListProgress is not exported from pi-coding-agent index in 0.67.2
+type SessionListProgress = (loaded: number, total: number) => void;
 
 type SessionsLoader = (onProgress?: SessionListProgress) => Promise<SessionInfo[]>;
 
@@ -43,7 +46,7 @@ export async function selectSession(
 				process.exit(0);
 			},
 			() => ui.requestRender(),
-			{ showRenameHint: false, keybindings },
+			{ showRenameHint: false, keybindings: keybindings as any },
 		);
 
 		ui.addChild(selector);

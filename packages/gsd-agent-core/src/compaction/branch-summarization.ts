@@ -8,9 +8,19 @@
 import type { AgentMessage } from "@gsd/pi-agent-core";
 import type { Model } from "@gsd/pi-ai";
 import { completeSimple } from "@gsd/pi-ai";
-import { COMPACTION_RESERVE_TOKENS } from "@gsd/pi-coding-agent";
 import { convertToLlm } from "@gsd/pi-coding-agent";
-import type { ReadonlySessionManager, SessionEntry } from "@gsd/pi-coding-agent";
+import type { SessionEntry } from "@gsd/pi-coding-agent";
+
+// COMPACTION_RESERVE_TOKENS removed from @gsd/pi-coding-agent 0.67.2 public API.
+// Phase 09 moves to @gsd/agent-types.
+const COMPACTION_RESERVE_TOKENS = 16_384;
+
+// ReadonlySessionManager removed from @gsd/pi-coding-agent 0.67.2 public API.
+// Phase 09 moves to @gsd/agent-types. Local minimal interface covering branch-summarization usage.
+interface ReadonlySessionManager {
+	getBranch(leafId?: string | null): SessionEntry[];
+	getEntry(id: string): SessionEntry | undefined;
+}
 import { estimateTokens } from "./compaction.js";  // STAYS RELATIVE — both files moved together
 import {
 	computeFileLists,

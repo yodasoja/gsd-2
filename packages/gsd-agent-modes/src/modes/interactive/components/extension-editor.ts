@@ -12,13 +12,14 @@ import {
 	Editor,
 	type EditorOptions,
 	type Focusable,
-	getEditorKeybindings,
+	getKeybindings,
 	Spacer,
 	Text,
 	type TUI,
 } from "@gsd/pi-tui";
-import type { KeybindingsManager } from "@gsd/pi-coding-agent";
-import { getEditorTheme, theme } from "@gsd/pi-coding-agent";
+import { KeybindingsManager } from "@gsd/agent-core";
+import { getEditorTheme } from "@gsd/pi-coding-agent";
+import { theme } from "../../../theme.js";
 import { DynamicBorder } from "./dynamic-border.js";
 import { appKeyHint, keyHint } from "./keybinding-hints.js";
 
@@ -78,11 +79,11 @@ export class ExtensionEditorComponent extends Container implements Focusable {
 		// Add hint
 		const hasExternalEditor = !!(process.env.VISUAL || process.env.EDITOR);
 		const hint =
-			keyHint("selectConfirm", "submit") +
+			keyHint("tui.select.confirm", "submit") +
 			"  " +
-			keyHint("newLine", "newline") +
+			keyHint("tui.input.newLine", "newline") +
 			"  " +
-			keyHint("selectCancel", "cancel") +
+			keyHint("tui.select.cancel", "cancel") +
 			(hasExternalEditor ? `  ${appKeyHint(this.keybindings, "externalEditor", "external editor")}` : "");
 		this.addChild(new Text(hint, 1, 0));
 
@@ -93,9 +94,9 @@ export class ExtensionEditorComponent extends Container implements Focusable {
 	}
 
 	handleInput(keyData: string): void {
-		const kb = getEditorKeybindings();
+		const kb = getKeybindings();
 		// Escape or Ctrl+C to cancel
-		if (kb.matches(keyData, "selectCancel")) {
+		if (kb.matches(keyData, "tui.select.cancel")) {
 			this.onCancelCallback();
 			return;
 		}

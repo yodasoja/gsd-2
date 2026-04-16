@@ -13,8 +13,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { ThinkingLevel } from "@gsd/pi-agent-core";
 import type {
-	EditorAction,
 	EditorComponent,
+	Keybinding,
 	MarkdownTheme,
 } from "@gsd/pi-tui";
 import {
@@ -28,8 +28,9 @@ import { spawn, spawnSync } from "child_process";
 import {
 	getShareViewerUrl,
 } from "@gsd/pi-coding-agent";
-import type { AgentSession } from "@gsd/pi-coding-agent";
-import type { AppAction, KeybindingsManager } from "@gsd/pi-coding-agent";
+import type { AgentSession } from "@gsd/agent-core";
+import type { AppAction } from "@gsd/pi-coding-agent";
+import { KeybindingsManager } from "@gsd/agent-core";
 import type { SessionManager } from "@gsd/pi-coding-agent";
 import type { SettingsManager } from "@gsd/pi-coding-agent";
 import { copyToClipboard } from "@gsd/pi-coding-agent";
@@ -39,7 +40,7 @@ import { BorderedLoader } from "./components/bordered-loader.js";
 import { DynamicBorder } from "./components/dynamic-border.js";
 import { appKey, editorKey, formatKeyForDisplay } from "./components/keybinding-hints.js";
 import { SelectSubmenu, THINKING_DESCRIPTIONS } from "./components/settings-selector.js";
-import { theme } from "@gsd/pi-coding-agent";
+import { theme } from "../../theme.js";
 
 import type { TUI } from "@gsd/pi-tui";
 
@@ -465,32 +466,32 @@ export function getAppKeyDisplay(keybindings: KeybindingsManager, action: AppAct
 	return capitalizeKey(appKey(keybindings, action));
 }
 
-function getEditorKeyDisplay(action: EditorAction): string {
+function getEditorKeyDisplay(action: Keybinding): string {
 	return capitalizeKey(editorKey(action));
 }
 
 function handleHotkeysCommand(ctx: SlashCommandContext): void {
 	// Navigation keybindings
-	const cursorWordLeft = getEditorKeyDisplay("cursorWordLeft");
-	const cursorWordRight = getEditorKeyDisplay("cursorWordRight");
-	const cursorLineStart = getEditorKeyDisplay("cursorLineStart");
-	const cursorLineEnd = getEditorKeyDisplay("cursorLineEnd");
-	const jumpForward = getEditorKeyDisplay("jumpForward");
-	const jumpBackward = getEditorKeyDisplay("jumpBackward");
-	const pageUp = getEditorKeyDisplay("pageUp");
-	const pageDown = getEditorKeyDisplay("pageDown");
+	const cursorWordLeft = getEditorKeyDisplay("tui.editor.cursorWordLeft");
+	const cursorWordRight = getEditorKeyDisplay("tui.editor.cursorWordRight");
+	const cursorLineStart = getEditorKeyDisplay("tui.editor.cursorLineStart");
+	const cursorLineEnd = getEditorKeyDisplay("tui.editor.cursorLineEnd");
+	const jumpForward = getEditorKeyDisplay("tui.editor.jumpForward");
+	const jumpBackward = getEditorKeyDisplay("tui.editor.jumpBackward");
+	const pageUp = getEditorKeyDisplay("tui.editor.pageUp");
+	const pageDown = getEditorKeyDisplay("tui.editor.pageDown");
 
 	// Editing keybindings
-	const submit = getEditorKeyDisplay("submit");
-	const newLine = getEditorKeyDisplay("newLine");
-	const deleteWordBackward = getEditorKeyDisplay("deleteWordBackward");
-	const deleteWordForward = getEditorKeyDisplay("deleteWordForward");
-	const deleteToLineStart = getEditorKeyDisplay("deleteToLineStart");
-	const deleteToLineEnd = getEditorKeyDisplay("deleteToLineEnd");
-	const yank = getEditorKeyDisplay("yank");
-	const yankPop = getEditorKeyDisplay("yankPop");
-	const undo = getEditorKeyDisplay("undo");
-	const tab = getEditorKeyDisplay("tab");
+	const submit = getEditorKeyDisplay("tui.input.submit");
+	const newLine = getEditorKeyDisplay("tui.input.newLine");
+	const deleteWordBackward = getEditorKeyDisplay("tui.editor.deleteWordBackward");
+	const deleteWordForward = getEditorKeyDisplay("tui.editor.deleteWordForward");
+	const deleteToLineStart = getEditorKeyDisplay("tui.editor.deleteToLineStart");
+	const deleteToLineEnd = getEditorKeyDisplay("tui.editor.deleteToLineEnd");
+	const yank = getEditorKeyDisplay("tui.editor.yank");
+	const yankPop = getEditorKeyDisplay("tui.editor.yankPop");
+	const undo = getEditorKeyDisplay("tui.editor.undo");
+	const tab = getEditorKeyDisplay("tui.input.tab");
 
 	// App keybindings
 	const interrupt = getAppKeyDisplay(ctx.keybindings, "interrupt");

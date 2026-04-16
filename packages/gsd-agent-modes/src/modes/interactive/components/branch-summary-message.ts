@@ -1,6 +1,7 @@
 import { Box, Markdown, type MarkdownTheme, Spacer, Text } from "@gsd/pi-tui";
 import type { BranchSummaryMessage } from "@gsd/pi-coding-agent";
-import { getMarkdownTheme, theme } from "@gsd/pi-coding-agent";
+import { getMarkdownTheme } from "@gsd/pi-coding-agent";
+import { theme } from "../../../theme.js";
 import { editorKey } from "./keybinding-hints.js";
 
 /**

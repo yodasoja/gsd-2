@@ -3,8 +3,13 @@
  */
 
 import { getDocsPath, getExamplesPath, getReadmePath } from "@gsd/pi-coding-agent";
-import { toPosixPath } from "@gsd/pi-coding-agent";
 import { formatSkillsForPrompt, type Skill } from "@gsd/pi-coding-agent";
+
+// toPosixPath removed from @gsd/pi-coding-agent 0.67.2 public API.
+// Phase 09: move to @gsd/agent-types.
+function toPosixPath(p: string): string {
+	return p.replace(/\\/g, "/");
+}
 
 /** Tool descriptions for system prompt */
 const toolDescriptions: Record<string, string> = {

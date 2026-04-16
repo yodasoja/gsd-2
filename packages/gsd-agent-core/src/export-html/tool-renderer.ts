@@ -48,7 +48,23 @@ export function createToolHtmlRenderer(deps: ToolHtmlRendererDeps): ToolHtmlRend
 					return undefined;
 				}
 
-				const component = toolDef.renderCall(args, theme);
+				// 0.67.2: renderCall takes (args, theme, context). Provide a minimal stub context
+				// for HTML export since we don't have a live ToolRenderContext here.
+				const stubContext = {
+					args,
+					toolCallId: toolName,
+					invalidate: () => {},
+					lastComponent: undefined,
+					state: undefined,
+					cwd: process.cwd(),
+					executionStarted: true,
+					argsComplete: true,
+					isPartial: false,
+					expanded: false,
+					showImages: false,
+					isError: false,
+				};
+				const component = toolDef.renderCall(args, theme, stubContext);
 				if (!component) {
 					return undefined;
 				}
@@ -80,11 +96,29 @@ export function createToolHtmlRenderer(deps: ToolHtmlRendererDeps): ToolHtmlRend
 					isError,
 				};
 
+				// 0.67.2: renderResult takes (result, options, theme, context). Provide a minimal
+				// stub context for HTML export since we don't have a live ToolRenderContext here.
+				const resultStubContext = {
+					args: {},
+					toolCallId: toolName,
+					invalidate: () => {},
+					lastComponent: undefined,
+					state: undefined,
+					cwd: process.cwd(),
+					executionStarted: true,
+					argsComplete: true,
+					isPartial: false,
+					expanded: false,
+					showImages: false,
+					isError,
+				};
+
 				// Render collapsed
 				const collapsedComponent = toolDef.renderResult(
 					agentToolResult,
 					{ expanded: false, isPartial: false },
 					theme,
+					resultStubContext,
 				);
 				const collapsed = collapsedComponent ? ansiLinesToHtml(collapsedComponent.render(width)) : undefined;
 
@@ -93,6 +127,7 @@ export function createToolHtmlRenderer(deps: ToolHtmlRendererDeps): ToolHtmlRend
 					agentToolResult,
 					{ expanded: true, isPartial: false },
 					theme,
+					resultStubContext,
 				);
 				const expanded = expandedComponent ? ansiLinesToHtml(expandedComponent.render(width)) : undefined;
 

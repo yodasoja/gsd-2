@@ -3,7 +3,7 @@ import {
 	Container,
 	type Focusable,
 	fuzzyFilter,
-	getEditorKeybindings,
+	getKeybindings,
 	Input,
 	Spacer,
 	Text,
@@ -11,7 +11,7 @@ import {
 } from "@gsd/pi-tui";
 import type { ModelRegistry } from "@gsd/pi-coding-agent";
 import type { SettingsManager } from "@gsd/pi-coding-agent";
-import { theme } from "@gsd/pi-coding-agent";
+import { theme } from "../../../theme.js";
 import { DynamicBorder } from "./dynamic-border.js";
 import { keyHint } from "./keybinding-hints.js";
 
@@ -123,7 +123,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 		// Only land in "scoped" view when at least one scoped model has working
 		// auth — otherwise the user would see an empty picker (#unconfigured-models).
 		const hasReadyScopedModel = scopedModels.some((scoped) =>
-			modelRegistry.isProviderRequestReady(scoped.model.provider),
+			modelRegistry.hasConfiguredAuth(scoped.model),
 		);
 		this.scope = hasReadyScopedModel ? "scoped" : "all";
 		this.onSelectCallback = onSelect;
@@ -224,7 +224,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 		// can't pick a scoped model whose provider has no API key / OAuth.
 		this.scopedModelItems = this.sortModelsWithinProvider(
 			this.scopedModels
-				.filter((scoped) => this.modelRegistry.isProviderRequestReady(scoped.model.provider))
+				.filter((scoped) => this.modelRegistry.hasConfiguredAuth(scoped.model))
 				.map((scoped) => ({
 					provider: scoped.model.provider,
 					id: scoped.model.id,
@@ -334,7 +334,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 	}
 
 	private getScopeHintText(): string {
-		return keyHint("tab", "scope") + theme.fg("muted", " (all/scoped)");
+		return keyHint("tui.input.tab", "scope") + theme.fg("muted", " (all/scoped)");
 	}
 
 	private setScope(scope: ModelScope): void {
@@ -524,10 +524,10 @@ export class ModelSelectorComponent extends Container implements Focusable {
 	}
 
 	handleInput(keyData: string): void {
-		const kb = getEditorKeybindings();
+		const kb = getKeybindings();
 
 		// Tab: scope toggle
-		if (kb.matches(keyData, "tab")) {
+		if (kb.matches(keyData, "tui.input.tab")) {
 			if (this.scopedModelItems.length > 0) {
 				const nextScope: ModelScope = this.scope === "all" ? "scoped" : "all";
 				this.setScope(nextScope);
@@ -539,24 +539,24 @@ export class ModelSelectorComponent extends Container implements Focusable {
 		}
 
 		// Navigation keys
-		if (kb.matches(keyData, "selectUp")) {
+		if (kb.matches(keyData, "tui.select.up")) {
 			this.moveUp();
 			return;
 		}
-		if (kb.matches(keyData, "selectDown")) {
+		if (kb.matches(keyData, "tui.select.down")) {
 			this.moveDown();
 			return;
 		}
 
 		// Confirm
-		if (kb.matches(keyData, "selectConfirm")) {
+		if (kb.matches(keyData, "tui.select.confirm")) {
 			const model = this.getSelectedModel();
 			if (model) this.handleSelect(model);
 			return;
 		}
 
 		// Cancel
-		if (kb.matches(keyData, "selectCancel")) {
+		if (kb.matches(keyData, "tui.select.cancel")) {
 			this.onCancelCallback();
 			return;
 		}

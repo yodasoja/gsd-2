@@ -20,20 +20,41 @@ import {
 	prepareCompaction,
 	shouldCompact,
 } from "./compaction/index.js";
-import type { ExtensionRunner, SessionBeforeCompactResult } from "@gsd/pi-coding-agent";
+import type { ExtensionRunner } from "@gsd/pi-coding-agent";
 import type { ModelRegistry } from "@gsd/pi-coding-agent";
 import { getLatestCompactionEntry } from "@gsd/pi-coding-agent";
 import type { CompactionEntry, SessionManager } from "@gsd/pi-coding-agent";
 import type { SettingsManager } from "@gsd/pi-coding-agent";
 import type { AgentSessionEvent } from "./agent-session.js";
-import { getErrorMessage } from "@gsd/pi-coding-agent";
+
+// Local shims for types/functions absent from @gsd/pi-coding-agent 0.67.2 public API.
+// Phase 09 moves these to @gsd/agent-types or resolves via upstream PR.
+
+/** Result returned by session_before_compact extension handlers. */
+interface SessionBeforeCompactResult {
+	cancel?: boolean;
+	compaction?: CompactionResult;
+}
+
+/** Extract a human-readable error message from an unknown thrown value. */
+function getErrorMessage(e: unknown): string {
+	return e instanceof Error ? e.message : String(e);
+}
+
+/** Extended ModelRegistry with GSD provider readiness check. */
+interface ModelRegistryWithReadiness extends ModelRegistry {
+	isProviderRequestReady(provider: string): boolean;
+	getApiKeyAndHeaders(model: import("@gsd/pi-ai").Model<import("@gsd/pi-ai").Api>): Promise<
+		{ ok: true; apiKey?: string; headers?: Record<string, string> } | { ok: false; error: string }
+	>;
+}
 
 /** Dependencies injected from AgentSession into CompactionOrchestrator */
 export interface CompactionOrchestratorDeps {
 	readonly agent: Agent;
 	readonly sessionManager: SessionManager;
 	readonly settingsManager: SettingsManager;
-	readonly modelRegistry: ModelRegistry;
+	readonly modelRegistry: ModelRegistryWithReadiness;
 	getModel: () => Model<any> | undefined;
 	getSessionId: () => string;
 	getExtensionRunner: () => ExtensionRunner | undefined;
@@ -97,8 +118,9 @@ export class CompactionOrchestrator {
 			if (!this._deps.modelRegistry.isProviderRequestReady(model.provider)) {
 				throw new Error(`No API key for ${model.provider}`);
 			}
-			// undefined for externalCli/none providers — stripped at the streamSimple boundary (model-registry.ts)
-			const apiKey = await this._deps.modelRegistry.getApiKey(model, this._deps.getSessionId());
+			// undefined for providers without API keys (e.g. external CLI) — stripped at streamSimple boundary.
+			const authResult = await this._deps.modelRegistry.getApiKeyAndHeaders(model);
+			const apiKey = authResult.ok ? authResult.apiKey : undefined;
 
 			const pathEntries = this._deps.sessionManager.getBranch();
 			const settings = this._deps.settingsManager.getCompactionSettings();
@@ -166,7 +188,7 @@ export class CompactionOrchestrator {
 			this._deps.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension);
 			const newEntries = this._deps.sessionManager.getEntries();
 			const sessionContext = this._deps.sessionManager.buildSessionContext();
-			this._deps.agent.replaceMessages(sessionContext.messages);
+			this._deps.agent.state.messages = sessionContext.messages;
 
 			const savedCompactionEntry = newEntries.find(
 				(e) => e.type === "compaction" && e.summary === summary,
@@ -244,7 +266,7 @@ export class CompactionOrchestrator {
 			this._overflowRecoveryAttempted = true;
 			const messages = this._deps.agent.state.messages;
 			if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
-				this._deps.agent.replaceMessages(messages.slice(0, -1));
+				this._deps.agent.state.messages = messages.slice(0, -1);
 			}
 			await this._runAutoCompaction("overflow", true);
 			return;
@@ -304,8 +326,9 @@ export class CompactionOrchestrator {
 				this._deps.emit({ type: "auto_compaction_end", result: undefined, aborted: false, willRetry: false });
 				return;
 			}
-			// undefined for externalCli/none providers — stripped at the streamSimple boundary (model-registry.ts)
-			const apiKey = await this._deps.modelRegistry.getApiKey(model, this._deps.getSessionId());
+			// undefined for providers without API keys (e.g. external CLI) — stripped at streamSimple boundary.
+			const authResult = await this._deps.modelRegistry.getApiKeyAndHeaders(model);
+			const apiKey = authResult.ok ? authResult.apiKey : undefined;
 
 			const pathEntries = this._deps.sessionManager.getBranch();
 			const preparation = prepareCompaction(pathEntries, settings);
@@ -375,7 +398,7 @@ export class CompactionOrchestrator {
 			this._deps.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension);
 			const newEntries = this._deps.sessionManager.getEntries();
 			const sessionContext = this._deps.sessionManager.buildSessionContext();
-			this._deps.agent.replaceMessages(sessionContext.messages);
+			this._deps.agent.state.messages = sessionContext.messages;
 
 			const savedCompactionEntry = newEntries.find(
 				(e) => e.type === "compaction" && e.summary === summary,
@@ -396,7 +419,7 @@ export class CompactionOrchestrator {
 				const messages = this._deps.agent.state.messages;
 				const lastMsg = messages[messages.length - 1];
 				if (lastMsg?.role === "assistant" && (lastMsg as AssistantMessage).stopReason === "error") {
-					this._deps.agent.replaceMessages(messages.slice(0, -1));
+					this._deps.agent.state.messages = messages.slice(0, -1);
 				}
 
 				setTimeout(() => {

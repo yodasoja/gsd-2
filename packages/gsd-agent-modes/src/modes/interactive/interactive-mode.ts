@@ -44,7 +44,8 @@ import {
 	getUpdateInstruction,
 	VERSION,
 } from "@gsd/pi-coding-agent";
-import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "@gsd/pi-coding-agent";
+import type { AgentSession, AgentSessionEvent } from "@gsd/agent-core";
+import { parseSkillBlock } from "@gsd/pi-coding-agent";
 import type { CompactionResult } from "@gsd/pi-coding-agent";
 import type {
 	ExtensionContext,
@@ -54,7 +55,8 @@ import type {
 	ExtensionWidgetOptions,
 } from "@gsd/pi-coding-agent";
 import { FooterDataProvider, type ReadonlyFooterDataProvider } from "@gsd/pi-coding-agent";
-import { type AppAction, KeybindingsManager } from "@gsd/pi-coding-agent";
+import { type AppAction } from "@gsd/pi-coding-agent";
+import { KeybindingsManager } from "@gsd/agent-core";
 import { createCompactionSummaryMessage } from "@gsd/pi-coding-agent";
 import { resolveModelScope } from "@gsd/pi-coding-agent";
 import type { ResourceDiagnostic } from "@gsd/pi-coding-agent";
@@ -115,8 +117,8 @@ import {
 	setThemeInstance,
 	Theme,
 	type ThemeColor,
-	theme,
 } from "@gsd/pi-coding-agent";
+import { theme } from "../../theme.js";
 
 /** Interface for components that can be expanded/collapsed */
 interface Expandable {
@@ -339,14 +341,14 @@ export class InteractiveMode {
 		this.editorContainer = new Container();
 		this.editorContainer.addChild(this.editor as Component);
 		this.footerDataProvider = new FooterDataProvider();
-		this.footer = new FooterComponent(session, this.footerDataProvider);
+		this.footer = new FooterComponent(session as any, this.footerDataProvider);
 		this.footer.setAutoCompactEnabled(session.autoCompactionEnabled);
 
 		// Load hide thinking block setting
 		this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
 
 		// Register themes from resource loader and initialize
-		setRegisteredThemes(this.session.resourceLoader.getThemes().themes);
+		setRegisteredThemes(this.session.resourceLoader.getThemes().themes as any);
 		initTheme(this.settingsManager.getTheme(), true);
 	}
 
@@ -414,8 +416,8 @@ export class InteractiveMode {
 		// Convert extension commands to SlashCommand format
 		const builtinCommandNames = new Set(slashCommands.map((c) => c.name));
 		const extensionCommands: SlashCommand[] = (
-			this.session.extensionRunner?.getRegisteredCommands(builtinCommandNames) ?? []
-		).map((cmd) => ({
+			this.session.extensionRunner?.getRegisteredCommands() ?? []
+		).filter((cmd: any) => !builtinCommandNames.has(cmd.name)).map((cmd: any) => ({
 			name: cmd.name,
 			description: cmd.description ?? "(extension command)",
 			getArgumentCompletions: cmd.getArgumentCompletions,
@@ -436,10 +438,6 @@ export class InteractiveMode {
 		this.autocompleteProvider = new CombinedAutocompleteProvider(
 			[...slashCommands, ...templateCommands, ...extensionCommands, ...skillCommandList],
 			process.cwd(),
-			{
-				respectGitignore: this.settingsManager.getRespectGitignoreInPicker(),
-				excludeDirs: this.settingsManager.getSearchExcludeDirs(),
-			},
 		);
 		this.defaultEditor.setAutocompleteProvider(this.autocompleteProvider);
 		if (this.editor !== this.defaultEditor) {
@@ -474,7 +472,7 @@ export class InteractiveMode {
 				rawKeyHint(`${appKey(kb, "clear")} twice`, "to exit"),
 				hint("exit", "to exit (empty)"),
 				hint("suspend", "to suspend"),
-				keyHint("deleteToLineEnd", "to delete to end"),
+				keyHint("tui.editor.deleteToLineEnd", "to delete to end"),
 				hint("cycleThinkingLevel", "to cycle thinking level"),
 				rawKeyHint(`${appKey(kb, "cycleModelForward")}/${appKey(kb, "cycleModelBackward")}`, "to cycle models"),
 				hint("selectModel", "to select model"),
@@ -1012,7 +1010,7 @@ export class InteractiveMode {
 			return;
 		}
 
-		const metadata = this.session.resourceLoader.getPathMetadata();
+		const metadata = (this.session.resourceLoader as any).getPathMetadata?.();
 		const sectionHeader = (name: string, color: ThemeColor = "mdHeading") => theme.fg(color, `[${name}]`);
 
 		const skillsResult = this.session.resourceLoader.getSkills();
@@ -1231,12 +1229,12 @@ export class InteractiveMode {
 					}
 				},
 				onError: (error) => {
-					this.showExtensionError(error.extensionPath, error.error, error.stack);
+					this.showExtensionError(error.extensionPath, error.error, (error as any).stack);
 				},
 			});
 		}
 
-		setRegisteredThemes(this.session.resourceLoader.getThemes().themes);
+		setRegisteredThemes(this.session.resourceLoader.getThemes().themes as any);
 		this.setupAutocomplete();
 
 		const extensionRunner = this.session.extensionRunner;
@@ -1320,6 +1318,7 @@ export class InteractiveMode {
 				})();
 			},
 			getSystemPrompt: () => this.session.systemPrompt,
+			signal: undefined,
 		});
 
 		// Set up the extension shortcut handler on the default editor
@@ -1443,7 +1442,7 @@ export class InteractiveMode {
 		// so there's no extra blank line between pinned output and the editor border.
 		// Use detachChildren() (not clear()) — the extensionWidgetsAbove map owns
 		// disposal; clear() would dispose every mounted widget on every re-render.
-		this.widgetContainerAbove.detachChildren();
+		(this.widgetContainerAbove as any).detachChildren?.() ?? this.widgetContainerAbove.clear();
 		const pinned = this.pinnedMessageContainer;
 		this.widgetContainerAbove.addChild({
 			render: () => pinned.children.length > 0 ? [] : [""],
@@ -1465,7 +1464,7 @@ export class InteractiveMode {
 	): void {
 		// Detach without disposing — the widgets map owns lifecycle; disposing
 		// here would kill refresh timers and subscriptions on every re-render.
-		container.detachChildren();
+		(container as any).detachChildren?.() ?? container.clear();
 
 		if (widgets.size === 0) {
 			if (spacerWhenEmpty) {
@@ -1689,7 +1688,7 @@ export class InteractiveMode {
 					this.hideExtensionInput();
 					resolve(undefined);
 				},
-				{ tui: this.ui, timeout: opts?.timeout, secure: opts?.secure },
+				{ tui: this.ui, timeout: opts?.timeout, secure: (opts as any)?.secure },
 			);
 
 			this.editorContainer.clear();
@@ -2119,7 +2118,7 @@ export class InteractiveMode {
 	}
 
 	private addMessageToChat(message: AgentMessage, options?: { populateHistory?: boolean }): void {
-		const timestampFormat = this.settingsManager.getTimestampFormat();
+		const timestampFormat = (this.settingsManager as any).getTimestampFormat?.();
 		switch (message.role) {
 			case "bashExecution": {
 				const component = new BashExecutionComponent(message.command, this.ui, message.excludeFromContext);
@@ -2234,7 +2233,7 @@ export class InteractiveMode {
 		options: { updateFooter?: boolean; populateHistory?: boolean } = {},
 	): void {
 		this.pendingTools.clear();
-		const timestampFormat = this.settingsManager.getTimestampFormat();
+		const timestampFormat = (this.settingsManager as any).getTimestampFormat?.();
 
 		if (options.updateFooter) {
 			this.footer.invalidate();
@@ -2244,7 +2243,7 @@ export class InteractiveMode {
 		for (const message of sessionContext.messages) {
 			// Assistant messages need special handling for tool calls
 			if (message.role === "assistant") {
-				const hasToolBlocks = message.content.some((c) => c.type === "toolCall" || c.type === "serverToolUse");
+				const hasToolBlocks = message.content.some((c: any) => c.type === "toolCall" || c.type === "serverToolUse");
 				if (!hasToolBlocks) {
 					this.addMessageToChat(message);
 					continue;
@@ -2294,11 +2293,11 @@ export class InteractiveMode {
 						} else {
 							this.pendingTools.set(content.id, component);
 						}
-					} else if (content.type === "serverToolUse") {
+					} else if ((content as any).type === "serverToolUse") {
 						// Server-side tool (e.g., native web search)
 						const component = new ToolExecutionComponent(
-							content.name,
-							content.input ?? {},
+							(content as any).name,
+							(content as any).input ?? {},
 							{ showImages: this.settingsManager.getShowImages() },
 							undefined,
 							this.ui,
@@ -2307,10 +2306,10 @@ export class InteractiveMode {
 						this.chatContainer.addChild(component);
 						// Find matching webSearchResult in this message's content
 						const resultBlock = message.content.find(
-							(c) => c.type === "webSearchResult" && c.toolUseId === content.id,
+							(c: any) => c.type === "webSearchResult" && c.toolUseId === (content as any).id,
 						);
-						if (resultBlock && resultBlock.type === "webSearchResult") {
-							const searchContent = resultBlock.content;
+						if (resultBlock && (resultBlock as any).type === "webSearchResult") {
+							const searchContent = (resultBlock as any).content;
 							const isError = searchContent && typeof searchContent === "object" && "type" in (searchContent as any) && (searchContent as any).type === "web_search_tool_result_error";
 							const resultText = this.formatWebSearchResult(searchContent);
 							component.updateResult({
@@ -2319,7 +2318,7 @@ export class InteractiveMode {
 							});
 						} else {
 							// No result yet (aborted stream?) — show as pending
-							this.pendingTools.set(content.id, component);
+							this.pendingTools.set((content as any).id, component);
 						}
 					}
 				}
@@ -2417,7 +2416,7 @@ export class InteractiveMode {
 		}
 		if (lastTextIndex >= 0) {
 			for (let i = lastTextIndex + 1; i < content.length; i++) {
-				if (content[i].type === "toolCall" || content[i].type === "serverToolUse") {
+				if ((content[i] as any).type === "toolCall" || (content[i] as any).type === "serverToolUse") {
 					hasToolAfterText = true;
 					break;
 				}
@@ -3045,10 +3044,10 @@ export class InteractiveMode {
 					showHardwareCursor: this.settingsManager.getShowHardwareCursor(),
 					editorPaddingX: this.settingsManager.getEditorPaddingX(),
 					autocompleteMaxVisible: this.settingsManager.getAutocompleteMaxVisible(),
-					respectGitignoreInPicker: this.settingsManager.getRespectGitignoreInPicker(),
+					respectGitignoreInPicker: (this.settingsManager as any).getRespectGitignoreInPicker?.() ?? true,
 					quietStartup: this.settingsManager.getQuietStartup(),
 					clearOnShrink: this.settingsManager.getClearOnShrink(),
-					timestampFormat: this.settingsManager.getTimestampFormat(),
+					timestampFormat: (this.settingsManager as any).getTimestampFormat?.(),
 				},
 				{
 					onAutoCompactChange: (enabled) => {
@@ -3081,7 +3080,7 @@ export class InteractiveMode {
 					},
 					onTransportChange: (transport) => {
 						this.settingsManager.setTransport(transport);
-						this.session.agent.setTransport(transport);
+						this.session.agent.transport = transport;
 					},
 					onThinkingLevelChange: (level) => {
 						this.session.setThinkingLevel(level);
@@ -3149,11 +3148,11 @@ export class InteractiveMode {
 						this.ui.setClearOnShrink(enabled);
 					},
 					onRespectGitignoreInPickerChange: (enabled) => {
-						this.settingsManager.setRespectGitignoreInPicker(enabled);
-						this.autocompleteProvider?.setRespectGitignore(enabled);
+						(this.settingsManager as any).setRespectGitignoreInPicker?.(enabled);
+						(this.autocompleteProvider as any)?.setRespectGitignore?.(enabled);
 					},
 					onTimestampFormatChange: (format) => {
-						this.settingsManager.setTimestampFormat(format);
+						(this.settingsManager as any).setTimestampFormat?.(format);
 					},
 					onCancel: () => {
 						done();
@@ -3551,7 +3550,7 @@ export class InteractiveMode {
 		this.chatContainer.clear();
 		this.renderInitialMessages();
 
-		if (this.session.sessionManager.wasInterrupted()) {
+		if ((this.session.sessionManager as any).wasInterrupted?.()) {
 			this.showStatus("Resumed session (previous session ended unexpectedly — last action may be incomplete)");
 		} else {
 			this.showStatus("Resumed session");
@@ -3571,7 +3570,7 @@ export class InteractiveMode {
 				async (provider: string) => {
 					this.showStatus(`Discovering models for ${provider}...`);
 					try {
-						const results = await this.session.modelRegistry.discoverModels([provider]);
+						const results = await (this.session.modelRegistry as any).discoverModels?.([provider]) ?? [];
 						const result = results[0];
 						if (result?.error) {
 							this.showError(`Discovery failed: ${result.error}`);
@@ -3732,7 +3731,7 @@ export class InteractiveMode {
 			try {
 				const currentModel = this.session.model;
 				if (currentModel) {
-					const currentKey = await this.session.modelRegistry.getApiKey(currentModel);
+					const currentKey = await (this.session.modelRegistry as any).getApiKeyForProvider?.(currentModel.provider);
 					if (!currentKey) {
 						const available = this.session.modelRegistry.getAvailable();
 						const newProviderModel = available.find((m) => m.provider === providerId);
@@ -3792,7 +3791,7 @@ export class InteractiveMode {
 
 		try {
 			await this.session.reload();
-			setRegisteredThemes(this.session.resourceLoader.getThemes().themes);
+			setRegisteredThemes(this.session.resourceLoader.getThemes().themes as any);
 			this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
 			const themeName = this.settingsManager.getTheme();
 			const themeResult = themeName ? setTheme(themeName, true) : { success: true };

@@ -1,8 +1,8 @@
 import type { OAuthProviderInterface } from "@gsd/pi-ai";
 import { getOAuthProviders } from "@gsd/pi-ai/oauth";
-import { Container, getEditorKeybindings, Spacer, TruncatedText } from "@gsd/pi-tui";
+import { Container, getKeybindings, Spacer, TruncatedText } from "@gsd/pi-tui";
 import type { AuthStorage } from "@gsd/pi-coding-agent";
-import { theme } from "@gsd/pi-coding-agent";
+import { theme } from "../../../theme.js";
 import { DynamicBorder } from "./dynamic-border.js";
 
 /**
@@ -95,26 +95,26 @@ export class OAuthSelectorComponent extends Container {
 	}
 
 	handleInput(keyData: string): void {
-		const kb = getEditorKeybindings();
+		const kb = getKeybindings();
 		// Up arrow (wrap)
-		if (kb.matches(keyData, "selectUp")) {
+		if (kb.matches(keyData, "tui.select.up")) {
 			this.selectedIndex = this.selectedIndex === 0 ? this.allProviders.length - 1 : this.selectedIndex - 1;
 			this.updateList();
 		}
 		// Down arrow (wrap)
-		else if (kb.matches(keyData, "selectDown")) {
+		else if (kb.matches(keyData, "tui.select.down")) {
 			this.selectedIndex = this.selectedIndex === this.allProviders.length - 1 ? 0 : this.selectedIndex + 1;
 			this.updateList();
 		}
 		// Enter
-		else if (kb.matches(keyData, "selectConfirm")) {
+		else if (kb.matches(keyData, "tui.select.confirm")) {
 			const selectedProvider = this.allProviders[this.selectedIndex];
 			if (selectedProvider) {
 				this.onSelectCallback(selectedProvider.id);
 			}
 		}
 		// Escape or Ctrl+C
-		else if (kb.matches(keyData, "selectCancel")) {
+		else if (kb.matches(keyData, "tui.select.cancel")) {
 			this.onCancelCallback();
 		}
 	}

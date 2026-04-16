@@ -3,7 +3,7 @@
  */
 
 import { type Component, type TUI, visibleWidth } from "@gsd/pi-tui";
-import { theme } from "@gsd/pi-coding-agent";
+import { theme } from "../../../theme.js";
 
 // XBM image: 31x36 pixels, LSB first, 1=background, 0=foreground
 const WIDTH = 31;

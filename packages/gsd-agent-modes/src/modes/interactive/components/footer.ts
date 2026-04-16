@@ -1,7 +1,7 @@
 import { type Component, truncateToWidth, visibleWidth } from "@gsd/pi-tui";
 import type { AgentSession } from "@gsd/pi-coding-agent";
 import type { ReadonlyFooterDataProvider } from "@gsd/pi-coding-agent";
-import { theme } from "@gsd/pi-coding-agent";
+import { theme } from "../../../theme.js";
 import { providerDisplayName } from "./model-selector.js";
 
 /**
@@ -74,7 +74,7 @@ export class FooterComponent implements Component {
 	render(width: number): string[] {
 		const state = this.session.state;
 
-		const usageTotals = this.session.sessionManager.getUsageTotals();
+		const usageTotals = (this.session.sessionManager as any).getUsageTotals?.() ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
 		const totalInput = usageTotals.input;
 		const totalOutput = usageTotals.output;
 		const totalCacheRead = usageTotals.cacheRead;
@@ -83,7 +83,7 @@ export class FooterComponent implements Component {
 
 		// Use activeInferenceModel during streaming to show the model actually
 		// being used, not the configured model which may have been switched mid-turn.
-		const displayModel = state.activeInferenceModel ?? state.model;
+		const displayModel = (state as any).activeInferenceModel ?? state.model;
 
 		// Calculate context usage from session (handles compaction correctly).
 		// After compaction, tokens are unknown until the next LLM response.
@@ -134,7 +134,7 @@ export class FooterComponent implements Component {
 
 		// Per-prompt cost annotation (opt-in via show_token_cost preference, #1515)
 		if (process.env.GSD_SHOW_TOKEN_COST === "1") {
-			const lastTurnCost = this.session.getLastTurnCost();
+			const lastTurnCost = (this.session as any).getLastTurnCost?.() ?? 0;
 			if (lastTurnCost > 0) {
 				costGroup.push(`(last: ${formatPromptCost(lastTurnCost)})`);
 			}

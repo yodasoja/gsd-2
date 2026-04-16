@@ -10,7 +10,8 @@ import {
 	Spacer,
 	Text,
 } from "@gsd/pi-tui";
-import { getSelectListTheme, getSettingsListTheme, theme } from "@gsd/pi-coding-agent";
+import { getSelectListTheme, getSettingsListTheme } from "@gsd/pi-coding-agent";
+import { theme } from "../../../theme.js";
 import { DynamicBorder } from "./dynamic-border.js";
 
 export const THINKING_DESCRIPTIONS: Record<ThinkingLevel, string> = {

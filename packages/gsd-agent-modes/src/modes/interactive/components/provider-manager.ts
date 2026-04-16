@@ -6,17 +6,16 @@
 import {
 	Container,
 	type Focusable,
-	getEditorKeybindings,
+	getKeybindings,
 	Spacer,
 	Text,
 	type TUI,
 } from "@gsd/pi-tui";
 import type { AuthStorage } from "@gsd/pi-coding-agent";
-import { getDiscoverableProviders } from "@gsd/pi-coding-agent";
+// getDiscoverableProviders and ModelsJsonWriter removed in pi-coding-agent 0.67.2
 import { providerDisplayName } from "./model-selector.js";
 import type { ModelRegistry } from "@gsd/pi-coding-agent";
-import { ModelsJsonWriter } from "@gsd/pi-coding-agent";
-import { theme } from "@gsd/pi-coding-agent";
+import { theme } from "../../../theme.js";
 import { rawKeyHint } from "./keybinding-hints.js";
 
 interface ProviderInfo {
@@ -41,7 +40,6 @@ export class ProviderManagerComponent extends Container implements Focusable {
 	private tui: TUI;
 	private authStorage: AuthStorage;
 	private modelRegistry: ModelRegistry;
-	private modelsJsonWriter: ModelsJsonWriter;
 	private onDone: () => void;
 	private onDiscover: (provider: string) => void;
 	private onSetupAuth: (provider: string) => void;
@@ -61,7 +59,6 @@ export class ProviderManagerComponent extends Container implements Focusable {
 		this.tui = tui;
 		this.authStorage = authStorage;
 		this.modelRegistry = modelRegistry;
-		this.modelsJsonWriter = new ModelsJsonWriter(this.modelRegistry.modelsJsonPath);
 		this.onDone = onDone;
 		this.onDiscover = onDiscover;
 		this.onSetupAuth = onSetupAuth ?? (() => {});
@@ -85,7 +82,7 @@ export class ProviderManagerComponent extends Container implements Focusable {
 	}
 
 	private loadProviders(): void {
-		const discoverableSet = new Set(getDiscoverableProviders());
+		// getDiscoverableProviders removed in 0.67.2 — treat all providers as non-discoverable
 		const allModels = this.modelRegistry.getAll();
 
 		// Group models by provider
@@ -94,18 +91,12 @@ export class ProviderManagerComponent extends Container implements Focusable {
 			providerModelCounts.set(model.provider, (providerModelCounts.get(model.provider) ?? 0) + 1);
 		}
 
-		// Build provider list from all known providers
-		const providerNames = new Set([
-			...providerModelCounts.keys(),
-			...discoverableSet,
-		]);
-
-		this.providers = Array.from(providerNames)
+		this.providers = Array.from(providerModelCounts.keys())
 			.sort()
 			.map((name) => ({
 				name,
 				hasAuth: this.authStorage.hasAuth(name),
-				supportsDiscovery: discoverableSet.has(name),
+				supportsDiscovery: false,
 				modelCount: providerModelCounts.get(name) ?? 0,
 			}));
 		this.clampSelectedIndex();
@@ -165,19 +156,19 @@ export class ProviderManagerComponent extends Container implements Focusable {
 	}
 
 	handleInput(keyData: string): void {
-		const kb = getEditorKeybindings();
+		const kb = getKeybindings();
 
-		if (kb.matches(keyData, "selectUp")) {
+		if (kb.matches(keyData, "tui.select.up")) {
 			if (this.providers.length === 0) return;
 			this.selectedIndex = this.selectedIndex === 0 ? this.providers.length - 1 : this.selectedIndex - 1;
 			this.updateList();
 			this.tui.requestRender();
-		} else if (kb.matches(keyData, "selectDown")) {
+		} else if (kb.matches(keyData, "tui.select.down")) {
 			if (this.providers.length === 0) return;
 			this.selectedIndex = this.selectedIndex === this.providers.length - 1 ? 0 : this.selectedIndex + 1;
 			this.updateList();
 			this.tui.requestRender();
-		} else if (kb.matches(keyData, "selectCancel")) {
+		} else if (kb.matches(keyData, "tui.select.cancel")) {
 			if (this.confirmingRemove) {
 				this.confirmingRemove = false;
 				this.updateHints();
@@ -196,7 +187,7 @@ export class ProviderManagerComponent extends Container implements Focusable {
 				if (this.confirmingRemove) {
 					this.confirmingRemove = false;
 					this.authStorage.remove(provider.name);
-					this.modelsJsonWriter.removeProvider(provider.name);
+					// ModelsJsonWriter removed in 0.67.2 — auth removal is sufficient
 					this.modelRegistry.refresh();
 					this.loadProviders();
 					this.updateHints();
@@ -208,7 +199,7 @@ export class ProviderManagerComponent extends Container implements Focusable {
 					this.tui.requestRender();
 				}
 			}
-		} else if (kb.matches(keyData, "selectConfirm")) {
+		} else if (kb.matches(keyData, "tui.select.confirm")) {
 			// Enter key → initiate auth setup for the selected provider (#3579)
 			const provider = this.providers[this.selectedIndex];
 			if (provider) {

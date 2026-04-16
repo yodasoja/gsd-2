@@ -30,23 +30,13 @@ function formatTokenCount(count: number): string {
 
 /**
  * Discover models from provider APIs and print results.
+ * Note: discoverModels was removed from ModelRegistry in pi-coding-agent 0.67.2.
  */
 export async function discoverAndPrintModels(
-	modelRegistry: ModelRegistry,
-	provider?: string,
+	_modelRegistry: ModelRegistry,
+	_provider?: string,
 ): Promise<void> {
-	const providers = provider ? [provider] : undefined;
-
-	console.log("Discovering models...");
-	const results = await modelRegistry.discoverModels(providers);
-
-	for (const result of results) {
-		if (result.error) {
-			console.log(`  ${result.provider}: error - ${result.error}`);
-		} else {
-			console.log(`  ${result.provider}: ${result.models.length} models found`);
-		}
-	}
+	console.log("Model discovery is not available in this version.");
 }
 
 /**
@@ -62,15 +52,8 @@ export async function listModels(
 			? { searchPattern: optionsOrSearch }
 			: optionsOrSearch ?? {};
 
-	// If discover flag is set, run discovery first
-	if (options.discover) {
-		await modelRegistry.discoverModels();
-	}
-
-	// Get models — include discovered if discovery was run
-	const models = options.discover
-		? modelRegistry.getAllWithDiscovered()
-		: modelRegistry.getAvailable();
+	// discoverModels removed in 0.67.2 — skip discovery
+	const models: Model<Api>[] = modelRegistry.getAvailable();
 
 	if (models.length === 0) {
 		console.log("No models available. Set API keys in environment variables.");
@@ -98,19 +81,15 @@ export async function listModels(
 	});
 
 	// Calculate column widths
-	const rows = filteredModels.map((m) => {
-		const isDiscovered = options.discover && modelRegistry.isDiscovered(m);
-		return {
-			provider: m.provider,
-			model: m.id,
-			name: m.name,
-			context: formatTokenCount(m.contextWindow),
-			maxOut: formatTokenCount(m.maxTokens),
-			thinking: m.reasoning ? "yes" : "no",
-			images: m.input.includes("image") ? "yes" : "no",
-			badge: isDiscovered ? "[discovered]" : "",
-		};
-	});
+	const rows = filteredModels.map((m) => ({
+		provider: m.provider,
+		model: m.id,
+		name: m.name,
+		context: formatTokenCount(m.contextWindow),
+		maxOut: formatTokenCount(m.maxTokens),
+		thinking: m.reasoning ? "yes" : "no",
+		images: m.input.includes("image") ? "yes" : "no",
+	}));
 
 	const headers = {
 		provider: "provider",
@@ -120,7 +99,6 @@ export async function listModels(
 		maxOut: "max-out",
 		thinking: "thinking",
 		images: "images",
-		badge: "",
 	};
 
 	const widths = {
@@ -155,7 +133,6 @@ export async function listModels(
 			row.maxOut.padEnd(widths.maxOut),
 			row.thinking.padEnd(widths.thinking),
 			row.images.padEnd(widths.images),
-			row.badge,
 		]
 			.join("  ")
 			.trimEnd();

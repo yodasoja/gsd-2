@@ -30,7 +30,15 @@ function registerTempCleanup(): void {
 	});
 }
 import { processStreamChunk, type StreamState } from "@gsd/native";
-import { getShellConfig, getShellEnv, killProcessTree, sanitizeCommand, DEFAULT_MAX_BYTES, truncateTail } from "@gsd/pi-coding-agent";
+import { getShellConfig, getShellEnv, killProcessTree, DEFAULT_MAX_BYTES, truncateTail } from "@gsd/pi-coding-agent";
+
+// sanitizeCommand was removed from @gsd/pi-coding-agent 0.67.2. The function
+// stripped null bytes and other control characters that could confuse the shell.
+// Phase 09: move to @gsd/agent-types or inline permanently.
+function sanitizeCommand(cmd: string): string {
+	// Remove null bytes and ASCII control characters (except newline/tab which are valid in scripts)
+	return cmd.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+}
 import type { BashOperations } from "@gsd/pi-coding-agent";
 
 // ============================================================================

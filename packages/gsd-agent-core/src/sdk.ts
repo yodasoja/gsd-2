@@ -50,12 +50,6 @@ import {
 	editTool,
 	findTool,
 	grepTool,
-	hashlineCodingTools,
-	hashlineEditTool,
-	hashlineReadTool,
-	createHashlineCodingTools,
-	createHashlineEditTool,
-	createHashlineReadTool,
 	lsTool,
 	readOnlyTools,
 	readTool,
@@ -119,7 +113,6 @@ export type {
 	ExtensionContext,
 	ExtensionFactory,
 	SlashCommandInfo,
-	SlashCommandLocation,
 	SlashCommandSource,
 	ToolDefinition,
 } from "@gsd/pi-coding-agent";
@@ -149,13 +142,6 @@ export {
 	createGrepTool,
 	createFindTool,
 	createLsTool,
-	// Hashline edit mode
-	hashlineCodingTools,
-	hashlineEditTool,
-	hashlineReadTool,
-	createHashlineCodingTools,
-	createHashlineEditTool,
-	createHashlineReadTool,
 };
 
 // Helper Functions
@@ -240,8 +226,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	// If session has data, try to restore model from it
 	if (!model && hasExistingSession && existingSession.model) {
 		const restoredModel = modelRegistry.find(existingSession.model.provider, existingSession.model.modelId);
-		if (restoredModel && (await modelRegistry.getApiKey(restoredModel))) {
-			model = restoredModel;
+		if (restoredModel) {
+			const authResult = await modelRegistry.getApiKeyAndHeaders(restoredModel);
+			if (authResult.ok) {
+				model = restoredModel;
+			}
 		}
 		if (!model) {
 			modelFallbackMessage = `Could not restore model ${existingSession.model.provider}/${existingSession.model.modelId}`;
@@ -295,10 +284,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		thinkingLevel = "off";
 	}
 
-	const editMode = settingsManager.getEditMode();
-	const defaultActiveToolNames: ToolName[] = editMode === "hashline"
-		? ["hashline_read", "bash", "hashline_edit", "write", "lsp"]
-		: ["read", "bash", "edit", "write", "lsp"];
+	// getEditMode() was removed from SettingsManager in 0.67.2; use the standard tool set.
+	const defaultActiveToolNames: ToolName[] = ["read", "bash", "edit", "write"];
 	const initialActiveToolNames: ToolName[] = options.tools
 		? options.tools.map((t) => t.name).filter((n): n is ToolName => n in allTools)
 		: defaultActiveToolNames;
@@ -357,7 +344,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			if (!runner?.hasHandlers("before_provider_request")) {
 				return payload;
 			}
-			return runner.emitBeforeProviderRequest(payload, currentModel);
+			return runner.emitBeforeProviderRequest(payload);
 		},
 		sessionId: sessionManager.getSessionId(),
 		transformContext: async (messages) => {
@@ -370,15 +357,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		transport: settingsManager.getTransport(),
 		thinkingBudgets: settingsManager.getThinkingBudgets(),
 		maxRetryDelayMs: settingsManager.getRetrySettings().maxDelayMs,
-		externalToolExecution: (m) => modelRegistry.getProviderAuthMode(m.provider) === "externalCli",
-		getProviderOptions: async (currentModel) => {
-			if (currentModel.provider !== "claude-code") return undefined;
-			const runner = extensionRunnerRef.current;
-			if (!runner?.hasUI()) return undefined;
-			return {
-				extensionUIContext: runner.getUIContext(),
-			};
-		},
 		getApiKey: async (provider) => {
 			// Use the provider argument from the in-flight request;
 			// agent.state.model may already be switched mid-turn.
@@ -386,65 +364,54 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			if (!resolvedProvider) {
 				throw new Error("No model selected");
 			}
-			const authMode = modelRegistry.getProviderAuthMode(resolvedProvider);
-			if (authMode === "externalCli" || authMode === "none") {
-				return undefined;
-			}
 
-			// Retry key resolution with backoff to handle transient network failures
-			// (e.g., OAuth token refresh failing due to brief connectivity loss).
-			// When credentials are in a cooldown window (e.g., after a 429), wait
-			// for the backoff to expire instead of using fixed delays that are
-			// shorter than the cooldown duration.
+			// GSD extension: cast to access GSD-added methods absent from 0.67.2 AuthStorage.
+			// These methods were present in 0.57.1 and provide cooldown-aware retry behavior.
+			// In 0.67.2 they are removed; optional chaining makes the call a no-op when absent.
+			const gsdAuthStorage = modelRegistry.authStorage as unknown as {
+				getEarliestBackoffExpiry?: (provider: string) => number | undefined;
+				hasLegacyOAuthCredential?: (provider: string) => boolean;
+				areAllCredentialsBackedOff?: (provider: string) => boolean;
+			};
+
+			// Retry key resolution with backoff to handle transient network failures.
 			const maxAttempts = 3;
 			const baseDelayMs = 2000;
-			const maxCooldownWaitMs = 60_000; // Don't wait longer than 60s (skip quota-exhausted 30min backoffs)
+			const maxCooldownWaitMs = 60_000;
 			for (let attempt = 1; attempt <= maxAttempts; attempt++) {
 				const key = await modelRegistry.getApiKeyForProvider(resolvedProvider);
 				if (key) return key;
 
-				// On the last attempt, fall through to error handling below
 				if (attempt >= maxAttempts) break;
 
-				// Only retry if credentials exist (network issue) — no point retrying
-				// when there are genuinely no credentials configured.
 				const hasAuth = modelRegistry.authStorage.hasAuth(resolvedProvider);
 				const model = agent.state.model;
 				const isOAuth = model && modelRegistry.isUsingOAuth(model);
 				if (!hasAuth && !isOAuth) break;
 
-				// If credentials are in a cooldown window, wait for the earliest
-				// one to expire rather than using a fixed delay that's too short.
-				const backoffExpiry = modelRegistry.authStorage.getEarliestBackoffExpiry(resolvedProvider);
+				// If credentials are in a cooldown window, wait for the earliest to expire.
+				const backoffExpiry = gsdAuthStorage.getEarliestBackoffExpiry?.(resolvedProvider);
 				if (backoffExpiry !== undefined) {
-					const waitMs = backoffExpiry - Date.now() + 500; // 500ms buffer
+					const waitMs = backoffExpiry - Date.now() + 500;
 					if (waitMs > 0 && waitMs <= maxCooldownWaitMs) {
 						await new Promise(resolve => setTimeout(resolve, waitMs));
-						continue; // Retry immediately after cooldown clears
+						continue;
 					}
 					if (waitMs > maxCooldownWaitMs) {
-						break; // Quota-exhausted or very long backoff — don't block
+						break;
 					}
 				}
 
-				// Standard exponential backoff for non-cooldown transient failures
 				await new Promise(resolve => setTimeout(resolve, baseDelayMs * attempt));
 			}
 
-			// All retries exhausted — throw descriptive error.
-			// Check if credentials exist but are temporarily in a backoff window
-			// (e.g., after a 429). This message intentionally avoids phrases like
-			// "rate limit" / "429" to prevent isRetryableError() from re-entering
-			// the retry handler and creating cascading error entries (#3429).
+			// All retries exhausted — surface a descriptive error.
 			const hasAuth = modelRegistry.authStorage.hasAuth(resolvedProvider);
 			if (hasAuth) {
-				// Anthropic OAuth was removed in v2.74.0 for TOS compliance (#3952).
-				// Users who upgraded from an older version may still have OAuth
-				// credentials in auth.json that will never resolve to a valid API key.
-				// Surface a targeted migration message instead of the generic cooldown.
+				// Detect stale Anthropic OAuth credentials (removed in v2.74.0, #3952).
 				if (
 					resolvedProvider === "anthropic" &&
-					modelRegistry.authStorage.hasLegacyOAuthCredential(resolvedProvider)
+					gsdAuthStorage.hasLegacyOAuthCredential?.(resolvedProvider)
 				) {
 					throw new Error(
 						`Your Anthropic credentials were set up via OAuth, which is no longer supported. ` +
@@ -452,17 +419,15 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 							`Alternatively, switch to the Claude Code CLI provider.`,
 					);
 				}
-				const expiry = modelRegistry.authStorage.getEarliestBackoffExpiry(resolvedProvider);
+				const expiry = gsdAuthStorage.getEarliestBackoffExpiry?.(resolvedProvider);
 				const retryAfterMs = expiry !== undefined ? Math.max(0, expiry - Date.now()) : undefined;
 				throw new CredentialCooldownError(resolvedProvider, retryAfterMs);
 			}
 			const model = agent.state.model;
 			const isOAuth = model && modelRegistry.isUsingOAuth(model);
 			if (isOAuth) {
-				// If credentials exist but are all in a backoff window (quota / rate-limit),
-				// surface a specific message instead of the misleading "Authentication failed".
-				if (modelRegistry.authStorage.areAllCredentialsBackedOff(resolvedProvider)) {
-					const expiry = modelRegistry.authStorage.getEarliestBackoffExpiry(resolvedProvider);
+				if (gsdAuthStorage.areAllCredentialsBackedOff?.(resolvedProvider)) {
+					const expiry = gsdAuthStorage.getEarliestBackoffExpiry?.(resolvedProvider);
 					const retryAfterMs = expiry !== undefined ? Math.max(0, expiry - Date.now()) : undefined;
 					throw new CredentialCooldownError(resolvedProvider, retryAfterMs);
 				}
@@ -481,7 +446,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 
 	// Restore messages if session has existing data
 	if (hasExistingSession) {
-		agent.replaceMessages(existingSession.messages);
+		agent.state.messages = existingSession.messages;
 		if (!hasThinkingEntry) {
 			sessionManager.appendThinkingLevelChange(thinkingLevel);
 		}

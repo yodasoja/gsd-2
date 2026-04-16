@@ -9,11 +9,14 @@ import {
 	CONFIG_DIR_NAME,
 	ENV_AGENT_DIR,
 	allTools,
-	isValidThinkingLevel,
-	VALID_THINKING_LEVELS,
 } from "@gsd/pi-coding-agent";
 import type { ToolName } from "@gsd/pi-coding-agent";
-export { isValidThinkingLevel, VALID_THINKING_LEVELS };
+
+// isValidThinkingLevel and VALID_THINKING_LEVELS removed from pi-coding-agent 0.67.2 — define locally.
+export const VALID_THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+export function isValidThinkingLevel(value: string): value is ThinkingLevel {
+	return (VALID_THINKING_LEVELS as string[]).includes(value);
+}
 
 export type Mode = "text" | "json" | "rpc";
 

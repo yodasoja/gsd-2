@@ -1,5 +1,5 @@
 import { truncateToWidth } from "@gsd/pi-tui";
-import { theme } from "@gsd/pi-coding-agent";
+import { theme } from "../../../theme.js";
 
 // ── Tree connector characters ────────────────────────────────────────
 export const TREE_BRANCH = "\u251C\u2500 "; // "├─ "

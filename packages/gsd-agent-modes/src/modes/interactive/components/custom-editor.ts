@@ -1,5 +1,6 @@
 import { Editor, type EditorOptions, type EditorTheme, type TUI, isKittyProtocolActive } from "@gsd/pi-tui";
-import type { AppAction, KeybindingsManager } from "@gsd/pi-coding-agent";
+import type { AppAction } from "@gsd/pi-coding-agent";
+import { KeybindingsManager } from "@gsd/agent-core";
 
 /**
  * Custom editor that handles app-level keybindings for coding-agent.

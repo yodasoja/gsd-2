@@ -7,7 +7,7 @@
  */
 
 import type { AssistantMessage, ImageContent } from "@gsd/pi-ai";
-import type { AgentSession } from "@gsd/pi-coding-agent";
+import type { AgentSession } from "@gsd/agent-core";
 import { createDefaultCommandContextActions } from "./shared/command-context-actions.js";
 
 /**

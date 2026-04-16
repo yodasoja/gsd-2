@@ -8,7 +8,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import type { AgentEvent, AgentMessage, ThinkingLevel } from "@gsd/pi-agent-core";
 import type { ImageContent } from "@gsd/pi-ai";
 import type { SessionStats, BashResult, CompactionResult } from "@gsd/pi-coding-agent";
-import { attachJsonlLineReader, serializeJsonLine } from "@gsd/pi-coding-agent";
+import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.js";
 import type { RpcCommand, RpcInitResult, RpcResponse, RpcSessionState, RpcSlashCommand } from "./rpc-types.js";
 
 // ============================================================================
@@ -95,7 +95,7 @@ export class RpcClient {
 		this.process.stderr?.on("data", this._stderrHandler);
 
 		// Set up strict JSONL reader for stdout.
-		this.stopReadingStdout = attachJsonlLineReader(this.process.stdout!, (line) => {
+		this.stopReadingStdout = attachJsonlLineReader(this.process.stdout!, (line: string) => {
 			this.handleLine(line);
 		});
 

@@ -6,7 +6,8 @@
  * RPC and print modes use them as-is.
  */
 
-import type { AgentSession, ExtensionCommandContextActions } from "@gsd/pi-coding-agent";
+import type { AgentSession } from "@gsd/agent-core";
+import type { ExtensionCommandContextActions } from "@gsd/pi-coding-agent";
 
 /**
  * Create the default set of command context actions that simply delegate

@@ -1,5 +1,6 @@
 import { Container, Markdown, type MarkdownTheme, Spacer, Text } from "@gsd/pi-tui";
-import { getMarkdownTheme, theme } from "@gsd/pi-coding-agent";
+import { getMarkdownTheme } from "@gsd/pi-coding-agent";
+import { theme } from "../../../theme.js";
 import { formatTimestamp, type TimestampFormat } from "./timestamp.js";
 import { renderChatFrame } from "./chat-frame.js";
 

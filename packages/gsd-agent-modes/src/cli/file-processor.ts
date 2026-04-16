@@ -60,12 +60,20 @@ export async function processFileArguments(fileArgs: string[], options?: Process
 
 			if (autoResizeImages) {
 				const resized = await resizeImage({ type: "image", data: base64Content, mimeType });
-				dimensionNote = formatDimensionNote(resized);
-				attachment = {
-					type: "image",
-					mimeType: resized.mimeType,
-					data: resized.data,
-				};
+				if (resized !== null) {
+					dimensionNote = formatDimensionNote(resized);
+					attachment = {
+						type: "image",
+						mimeType: resized.mimeType,
+						data: resized.data,
+					};
+				} else {
+					attachment = {
+						type: "image",
+						mimeType,
+						data: base64Content,
+					};
+				}
 			} else {
 				attachment = {
 					type: "image",

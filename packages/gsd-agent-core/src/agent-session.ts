@@ -27,9 +27,12 @@ import type { AssistantMessage, ImageContent, Message, Model, TextContent } from
 import { modelsAreEqual, resetApiProviders, supportsXhigh } from "@gsd/pi-ai";
 import { Type } from "@sinclair/typebox";
 import { getDocsPath, getAgentDir } from "@gsd/pi-coding-agent";
-import { getErrorMessage } from "@gsd/pi-coding-agent";
-import { theme } from "@gsd/pi-coding-agent";
-import { stripFrontmatter } from "@gsd/pi-coding-agent";
+import { Theme, getThemeByName, stripFrontmatter } from "@gsd/pi-coding-agent";
+
+/** Extract a human-readable error message from an unknown thrown value. */
+function getErrorMessage(e: unknown): string {
+	return e instanceof Error ? e.message : String(e);
+}
 import { type BashResult, executeBash as executeBashCommand, executeBashWithOperations } from "./bash-executor.js";
 import {
 	type CompactionResult,
@@ -43,25 +46,18 @@ import { DEFAULT_THINKING_LEVEL } from "@gsd/pi-coding-agent";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.js";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.js";
 import {
+	type AgentEndEvent,
+	type AgentStartEvent,
 	type ContextUsage,
 	type ExtensionCommandContextActions,
-	type ExtensionErrorListener,
 	ExtensionRunner,
 	type ExtensionUIContext,
 	type InputSource,
-	type MessageEndEvent,
-	type MessageStartEvent,
-	type MessageUpdateEvent,
-	type SessionBeforeForkResult,
-	type SessionBeforeSwitchResult,
-	type SessionBeforeTreeResult,
-	type ShutdownHandler,
+	type SessionBeforeForkEvent,
+	type SessionBeforeSwitchEvent,
+	type SessionBeforeTreeEvent,
 	type ToolDefinition,
-	type ToolExecutionEndEvent,
-	type ToolExecutionStartEvent,
-	type ToolExecutionUpdateEvent,
 	type ToolInfo,
-	type TreePreparation,
 	type TurnEndEvent,
 	type TurnStartEvent,
 	wrapRegisteredTools,
@@ -71,12 +67,12 @@ import { FallbackResolver } from "./fallback-resolver.js";
 import type { ModelRegistry } from "@gsd/pi-coding-agent";
 import { expandPromptTemplate, type PromptTemplate } from "@gsd/pi-coding-agent";
 import type { ResourceExtensionPaths, ResourceLoader } from "@gsd/pi-coding-agent";
-import { RetryHandler } from "@gsd/pi-coding-agent";
+import { RetryHandler } from "./retry-handler.js";
 import { isImageDimensionError, downsizeConversationImages } from "./image-overflow-recovery.js";
 import type { BranchSummaryEntry, SessionManager } from "@gsd/pi-coding-agent";
 import { getLatestCompactionEntry } from "@gsd/pi-coding-agent";
 import type { SettingsManager } from "@gsd/pi-coding-agent";
-import { BUILTIN_SLASH_COMMANDS, type SlashCommandInfo, type SlashCommandLocation } from "@gsd/pi-coding-agent";
+import { BUILTIN_SLASH_COMMANDS, type SlashCommandInfo } from "@gsd/pi-coding-agent";
 import { buildSystemPrompt } from "./system-prompt.js";
 import type { BashOperations } from "@gsd/pi-coding-agent";
 import { createAllTools } from "@gsd/pi-coding-agent";
@@ -86,6 +82,110 @@ import {
 	type CreateAgentSessionRuntimeFactory,
 	type AgentSessionServices,
 } from "@gsd/pi-coding-agent";
+
+// ============================================================================
+// Local type shims for types absent from @gsd/pi-coding-agent 0.67.2 public API.
+// Phase 09 moves these to @gsd/agent-types or resolves via upstream PR.
+// ============================================================================
+
+/** Handler called when extension requests session shutdown. */
+export type ShutdownHandler = () => void;
+
+/** Listener for extension errors. */
+export type ExtensionErrorListener = (error: { extensionPath: string; event: string; error: string }) => void;
+
+/** Fired when tool starts executing (not in 0.67.2 public API). */
+export interface ToolExecutionStartEvent {
+	type: "tool_execution_start";
+	toolCallId: string;
+	toolName: string;
+	args: unknown;
+}
+
+/** Fired during tool execution with partial/streaming output (not in 0.67.2 public API). */
+export interface ToolExecutionUpdateEvent {
+	type: "tool_execution_update";
+	toolCallId: string;
+	toolName: string;
+	args: unknown;
+	partialResult: unknown;
+}
+
+/** Fired when a tool finishes executing (not in 0.67.2 public API). */
+export interface ToolExecutionEndEvent {
+	type: "tool_execution_end";
+	toolCallId: string;
+	toolName: string;
+	result: unknown;
+	isError: boolean;
+}
+
+/** Fired when a message starts (user, assistant, toolResult) — not in 0.67.2 public API. */
+interface MessageStartEvent {
+	type: "message_start";
+	message: AgentMessage;
+}
+
+/** Fired during assistant streaming with partial updates — not in 0.67.2 public API. */
+interface MessageUpdateEvent {
+	type: "message_update";
+	message: AgentMessage;
+	assistantMessageEvent: import("@gsd/pi-ai").AssistantMessageEvent;
+}
+
+/** Fired when a message ends — not in 0.67.2 public API. */
+interface MessageEndEvent {
+	type: "message_end";
+	message: AgentMessage;
+}
+
+/** Result from session_before_switch extension handler — not in 0.67.2 public API. */
+interface SessionBeforeSwitchResult {
+	cancel?: boolean;
+}
+
+/** Result from session_before_fork extension handler — not in 0.67.2 public API. */
+interface SessionBeforeForkResult {
+	cancel?: boolean;
+	skipConversationRestore?: boolean;
+}
+
+/** Result from session_before_tree extension handler — not in 0.67.2 public API. */
+interface SessionBeforeTreeResult {
+	cancel?: boolean;
+	summary?: { summary: string; details?: unknown };
+	customInstructions?: string;
+	replaceInstructions?: boolean;
+	label?: string;
+}
+
+/** Tree navigation preparation data (not in 0.67.2 public API). */
+export interface TreePreparation {
+	targetId: string;
+	oldLeafId: string | null;
+	commonAncestorId: string | null;
+	entriesToSummarize: import("@gsd/pi-coding-agent").SessionEntry[];
+	userWantsSummary: boolean;
+	customInstructions?: string;
+	replaceInstructions?: boolean;
+	label?: string;
+}
+
+/** Extended SettingsManager with GSD edit mode support (absent from 0.67.2). */
+interface SettingsManagerWithEditMode extends SettingsManager {
+	setEditMode(mode: "standard" | "hashline"): void;
+	getEditMode(): "standard" | "hashline";
+}
+
+/** Extended ModelRegistry with GSD provider readiness and API key access. */
+interface ModelRegistryWithReadiness extends ModelRegistry {
+	isProviderRequestReady(provider: string): boolean;
+	getApiKeyAndHeaders(model: import("@gsd/pi-ai").Model<import("@gsd/pi-ai").Api>): Promise<{
+		ok: true;
+		apiKey?: string;
+		headers?: Record<string, string>;
+	} | { ok: false; error: string }>;
+}
 
 // ============================================================================
 // Skill Block Parsing
@@ -292,7 +392,7 @@ export class AgentSession {
 	private _extensionErrorUnsubscriber?: () => void;
 
 	// Model registry for API key resolution
-	private _modelRegistry: ModelRegistry;
+	private _modelRegistry: ModelRegistryWithReadiness;
 
 	// Provider fallback resolver
 	private _fallbackResolver: FallbackResolver;
@@ -316,11 +416,11 @@ export class AgentSession {
 		this._resourceLoader = config.resourceLoader;
 		this._customTools = config.customTools ?? [];
 		this._cwd = config.cwd;
-		this._modelRegistry = config.modelRegistry;
+		this._modelRegistry = config.modelRegistry as ModelRegistryWithReadiness;
 		this._fallbackResolver = new FallbackResolver(
-			this.settingsManager,
-			this._modelRegistry.authStorage,
-			this._modelRegistry,
+			this.settingsManager as any,
+			this._modelRegistry.authStorage as any,
+			this._modelRegistry as any,
 		);
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
@@ -416,7 +516,8 @@ export class AgentSession {
 
 	private _createRetryPromiseForAgentEnd(event: AgentEvent): void {
 		if (event.type !== "agent_end") return;
-		this._retryHandler.createRetryPromiseForAgentEnd(event.messages);
+		// AgentMessage[] satisfies the { role: string; [key: string]: unknown }[] shape at runtime.
+		this._retryHandler.createRetryPromiseForAgentEnd(event.messages as unknown as ReadonlyArray<{ role: string; [key: string]: unknown }>);
 	}
 
 	private async _processAgentEvent(event: AgentEvent): Promise<void> {
@@ -515,7 +616,7 @@ export class AgentSession {
 				if (result.processed) {
 					// Remove the trailing error assistant message, then replace
 					if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
-						this.agent.replaceMessages(messages.slice(0, -1));
+						this.agent.state.messages = messages.slice(0, -1);
 					}
 
 					this._emit({
@@ -546,7 +647,7 @@ export class AgentSession {
 	 * see stale agent state.
 	 */
 	private _installAgentToolHooks(): void {
-		this.agent.setBeforeToolCall(async ({ toolCall, args }) => {
+		this.agent.beforeToolCall = async ({ toolCall, args }: { toolCall: { name: string; id: string }; args: unknown }) => {
 			// Wait for all queued agent events to settle before emitting to extensions
 			await this._agentEventQueue;
 
@@ -571,9 +672,9 @@ export class AgentSession {
 			}
 
 			return undefined;
-		});
+		};
 
-		this.agent.setAfterToolCall(async ({ toolCall, args, result, isError }) => {
+		this.agent.afterToolCall = async ({ toolCall, args, result, isError }: { toolCall: { name: string; id: string }; args: unknown; result: { content: unknown; details?: unknown }; isError: boolean }) => {
 			// Wait for all queued agent events to settle
 			await this._agentEventQueue;
 
@@ -584,7 +685,7 @@ export class AgentSession {
 				toolName: toolCall.name,
 				toolCallId: toolCall.id,
 				input: args as Record<string, unknown>,
-				content: result.content,
+				content: result.content as (import("@gsd/pi-ai").ImageContent | import("@gsd/pi-ai").TextContent)[],
 				details: result.details,
 				isError,
 			});
@@ -597,7 +698,7 @@ export class AgentSession {
 			}
 
 			return undefined;
-		});
+		};
 	}
 
 	/** Extract text content from a message */
@@ -974,6 +1075,7 @@ export class AgentSession {
 			name: t.name,
 			description: t.description,
 			parameters: t.parameters,
+			sourceInfo: { path: "", source: "builtin", scope: "temporary" as const, origin: "top-level" as const },
 		}));
 	}
 
@@ -994,12 +1096,12 @@ export class AgentSession {
 				validToolNames.push(name);
 			}
 		}
-		this.agent.setTools(tools);
+		this.agent.state.tools = tools;
 
 
 		// Rebuild base system prompt with new tool set
 		this._baseSystemPrompt = this._rebuildSystemPrompt(validToolNames);
-		this.agent.setSystemPrompt(this._baseSystemPrompt);
+		this.agent.state.systemPrompt = this._baseSystemPrompt;
 	}
 
 	/** Whether compaction or branch summarization is currently running */
@@ -1012,7 +1114,7 @@ export class AgentSession {
 	 * Swaps the active read/edit tools and rebuilds the system prompt.
 	 */
 	setEditMode(mode: "standard" | "hashline"): void {
-		this.settingsManager.setEditMode(mode);
+		(this.settingsManager as SettingsManagerWithEditMode).setEditMode(mode);
 
 		// Get current active tool registry keys
 		const currentKeys = new Set<string>();
@@ -1040,7 +1142,7 @@ export class AgentSession {
 
 	/** Current edit mode */
 	get editMode(): "standard" | "hashline" {
-		return this.settingsManager.getEditMode();
+		return (this.settingsManager as SettingsManagerWithEditMode).getEditMode();
 	}
 
 	/** All messages including custom types like BashExecutionMessage */
@@ -1050,12 +1152,12 @@ export class AgentSession {
 
 	/** Current steering mode */
 	get steeringMode(): "all" | "one-at-a-time" {
-		return this.agent.getSteeringMode();
+		return this.agent.steeringMode;
 	}
 
 	/** Current follow-up mode */
 	get followUpMode(): "all" | "one-at-a-time" {
-		return this.agent.getFollowUpMode();
+		return this.agent.followUpMode;
 	}
 
 	/** Current session file path, or undefined if sessions are disabled */
@@ -1271,7 +1373,7 @@ export class AgentSession {
 		const restoration = await this._fallbackResolver.checkForRestoration(this.model);
 		if (restoration) {
 			const previousProvider = `${this.model.provider}/${this.model.id}`;
-			this.agent.setModel(restoration.model);
+			this.agent.state.model = restoration.model;
 			this.sessionManager.appendModelChange(restoration.model.provider, restoration.model.id);
 			this._emit({
 				type: "fallback_provider_restored",
@@ -1344,10 +1446,10 @@ export class AgentSession {
 			}
 			// Apply extension-modified system prompt, or reset to base
 			if (result?.systemPrompt) {
-				this.agent.setSystemPrompt(result.systemPrompt);
+				this.agent.state.systemPrompt = result.systemPrompt;
 			} else {
 				// Ensure we're using the base prompt (in case previous turn had modifications)
-				this.agent.setSystemPrompt(this._baseSystemPrompt);
+				this.agent.state.systemPrompt = this._baseSystemPrompt;
 			}
 		}
 
@@ -1520,14 +1622,11 @@ export class AgentSession {
 		if (images) {
 			content.push(...images);
 		}
-		this.agent.steer(
-			{
-				role: "user",
-				content,
-				timestamp: Date.now(),
-			},
-			"user",
-		);
+		this.agent.steer({
+			role: "user",
+			content,
+			timestamp: Date.now(),
+		});
 	}
 
 	/**
@@ -1539,14 +1638,11 @@ export class AgentSession {
 		if (images) {
 			content.push(...images);
 		}
-		this.agent.followUp(
-			{
-				role: "user",
-				content,
-				timestamp: Date.now(),
-			},
-			"user",
-		);
+		this.agent.followUp({
+			role: "user",
+			content,
+			timestamp: Date.now(),
+		});
 	}
 
 	/**
@@ -1601,7 +1697,7 @@ export class AgentSession {
 		} else if (options?.triggerTurn) {
 			await this.agent.prompt(appMessage);
 		} else {
-			this.agent.appendMessage(appMessage);
+			this.agent.state.messages = [...this.agent.state.messages, appMessage];
 			this.sessionManager.appendCustomMessageEntry(
 				message.customType,
 				message.content,
@@ -1659,28 +1755,15 @@ export class AgentSession {
 	 * @returns Object with steering and followUp arrays
 	 */
 	clearQueue(): { steering: string[]; followUp: string[] } {
-		// Drain user-origin messages from agent queues before clearing.
-		// This preserves messages the user explicitly typed during streaming,
-		// while system-generated messages (extension notifications, etc.) are discarded.
-		const userMessages = this.agent.drainUserMessages();
-
-		// Extract text content from preserved user messages
-		const extractText = (m: AgentMessage): string => {
-			if (!("content" in m) || !Array.isArray(m.content)) return "";
-			const textPart = m.content.find((c: { type: string }) => c.type === "text");
-			return textPart && "text" in textPart ? (textPart as { text: string }).text : "";
-		};
-		const preservedSteering = userMessages.steering.map(extractText).filter((t) => t.length > 0);
-		const preservedFollowUp = userMessages.followUp.map(extractText).filter((t) => t.length > 0);
-
-		// Session-level string arrays track what was queued for display purposes.
-		// Return the full set (session-tracked + any agent-only user messages).
-		const steering = [...this._steeringMessages, ...preservedSteering];
-		const followUp = [...this._followUpMessages, ...preservedFollowUp];
+		// In 0.67.2, drainUserMessages() was removed. Agent queues no longer distinguish
+		// user-origin messages from system messages. Clear all queues and return
+		// the session-tracked string arrays for display purposes.
+		const steering = [...this._steeringMessages];
+		const followUp = [...this._followUpMessages];
 		this._steeringMessages = [];
 		this._followUpMessages = [];
 
-		// Clear remaining system messages from agent queues
+		// Clear all agent queues
 		this.agent.clearAllQueues();
 		return { steering, followUp };
 	}
@@ -1818,7 +1901,7 @@ export class AgentSession {
 		// previous provider/model. Otherwise stale provider backoff errors can
 		// continue to land after the user or runtime has already switched models.
 		this._retryHandler.abortRetry();
-		this.agent.setModel(model);
+		this.agent.state.model = model;
 		this.sessionManager.appendModelChange(model.provider, model.id);
 		if (options?.persist !== false) {
 			this.settingsManager.setDefaultModelAndProvider(model.provider, model.id);
@@ -1915,7 +1998,7 @@ export class AgentSession {
 		// Only persist if actually changing
 		const isChanging = effectiveLevel !== this.agent.state.thinkingLevel;
 
-		this.agent.setThinkingLevel(effectiveLevel);
+		this.agent.state.thinkingLevel = effectiveLevel;
 
 		if (isChanging) {
 			this.sessionManager.appendThinkingLevelChange(effectiveLevel);
@@ -2002,7 +2085,7 @@ export class AgentSession {
 	 * Saves to settings.
 	 */
 	setSteeringMode(mode: "all" | "one-at-a-time"): void {
-		this.agent.setSteeringMode(mode);
+		this.agent.steeringMode = mode;
 		this.settingsManager.setSteeringMode(mode);
 		this._emitSessionStateChanged("set_steering_mode");
 	}
@@ -2012,7 +2095,7 @@ export class AgentSession {
 	 * Saves to settings.
 	 */
 	setFollowUpMode(mode: "all" | "one-at-a-time"): void {
-		this.agent.setFollowUpMode(mode);
+		this.agent.followUpMode = mode;
 		this.settingsManager.setFollowUpMode(mode);
 		this._emitSessionStateChanged("set_follow_up_mode");
 	}
@@ -2067,7 +2150,7 @@ export class AgentSession {
 
 		if (this._extensionRunner) {
 			this._applyExtensionBindings(this._extensionRunner);
-			await this._extensionRunner.emit({ type: "session_start" });
+			await this._extensionRunner.emit({ type: "session_start", reason: "new" });
 			await this.extendResourcesFromExtensions("startup");
 		}
 	}
@@ -2094,7 +2177,7 @@ export class AgentSession {
 
 		this._resourceLoader.extendResources(extensionPaths);
 		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
-		this.agent.setSystemPrompt(this._baseSystemPrompt);
+		this.agent.state.systemPrompt = this._baseSystemPrompt;
 	}
 
 	private buildExtensionResourcePaths(entries: Array<{ path: string; extensionPath: string }>): Array<{
@@ -2140,40 +2223,31 @@ export class AgentSession {
 	}
 
 	private _bindExtensionCore(runner: ExtensionRunner): void {
-		const normalizeLocation = (source: string): SlashCommandLocation | undefined => {
-			if (source === "user" || source === "project" || source === "path") {
-				return source;
-			}
-			return undefined;
-		};
-
 		const reservedBuiltins = new Set(BUILTIN_SLASH_COMMANDS.map((command) => command.name));
 
 		const getCommands = (): SlashCommandInfo[] => {
 			const extensionCommands: SlashCommandInfo[] = runner
-				.getRegisteredCommandsWithPaths()
-				.filter(({ command }) => !reservedBuiltins.has(command.name))
-				.map(({ command, extensionPath }) => ({
+				.getRegisteredCommands()
+				.filter((command) => !reservedBuiltins.has(command.name))
+				.map((command) => ({
 					name: command.name,
 					description: command.description,
-					source: "extension",
-					path: extensionPath,
+					source: "extension" as const,
+					sourceInfo: command.sourceInfo,
 				}));
 
 			const templates: SlashCommandInfo[] = this.promptTemplates.map((template) => ({
 				name: template.name,
 				description: template.description,
-				source: "prompt",
-				location: normalizeLocation(template.source),
-				path: template.filePath,
+				source: "prompt" as const,
+				sourceInfo: template.sourceInfo,
 			}));
 
 			const skills: SlashCommandInfo[] = this._resourceLoader.getSkills().skills.map((skill) => ({
 				name: `skill:${skill.name}`,
 				description: skill.description,
-				source: "skill",
-				location: normalizeLocation(skill.source),
-				path: skill.filePath,
+				source: "skill" as const,
+				sourceInfo: skill.sourceInfo,
 			}));
 
 			return [...extensionCommands, ...templates, ...skills];
@@ -2199,25 +2273,6 @@ export class AgentSession {
 						});
 					});
 				},
-				retryLastTurn: () => {
-					const messages = this.agent.state.messages;
-					const last = messages[messages.length - 1];
-					if (last?.role === "assistant" && (last as AssistantMessage).stopReason === "error") {
-						// If the error was an image dimension overflow, downsize images
-						// before retrying so the retry doesn't hit the same error (#2874)
-						if (isImageDimensionError((last as AssistantMessage).errorMessage)) {
-							downsizeConversationImages(messages as Message[]);
-						}
-						this.agent.replaceMessages(messages.slice(0, -1));
-						this.agent.continue().catch((err) => {
-							runner.emitError({
-								extensionPath: "<runtime>",
-								event: "retry_last_turn",
-								error: getErrorMessage(err),
-							});
-						});
-					}
-				},
 				appendEntry: (customType, data) => {
 					this.sessionManager.appendCustomEntry(customType, data);
 				},
@@ -2235,9 +2290,9 @@ export class AgentSession {
 				setActiveTools: (toolNames) => this.setActiveToolsByName(toolNames),
 				refreshTools: () => this._refreshToolRegistry(),
 				getCommands,
-				setModel: async (model, options) => {
-					if (!this.modelRegistry.isProviderRequestReady(model.provider)) return false;
-					await this.setModel(model, options);
+				setModel: async (model) => {
+					if (!(this.modelRegistry as ModelRegistryWithReadiness).isProviderRequestReady(model.provider)) return false;
+					await this.setModel(model);
 					return true;
 				},
 				getThinkingLevel: () => this.thinkingLevel,
@@ -2246,6 +2301,7 @@ export class AgentSession {
 			{
 				getModel: () => this.model,
 				isIdle: () => !this.isStreaming,
+				getSignal: () => this.agent.signal,
 				abort: () => this.abort(),
 				hasPendingMessages: () => this.pendingMessageCount > 0,
 				shutdown: () => {
@@ -2275,7 +2331,10 @@ export class AgentSession {
 		const registeredTools = this._extensionRunner?.getAllRegisteredTools() ?? [];
 		const allCustomTools = [
 			...registeredTools,
-			...this._customTools.map((def) => ({ definition: def, extensionPath: "<sdk>" })),
+			...this._customTools.map((def) => ({
+				definition: def,
+				sourceInfo: { path: "<sdk>", source: "sdk", scope: "temporary" as const, origin: "top-level" as const },
+			})),
 		];
 		this._toolPromptSnippets = new Map(
 			allCustomTools
@@ -2345,11 +2404,6 @@ export class AgentSession {
 					read: { autoResizeImages },
 					bash: {
 						commandPrefix: shellCommandPrefix,
-						interceptor: {
-							enabled: this.settingsManager.getBashInterceptorEnabled(),
-							rules: this.settingsManager.getBashInterceptorRules(),
-						},
-						availableToolNames: () => this.getActiveToolNames(),
 					},
 				});
 
@@ -2410,7 +2464,7 @@ export class AgentSession {
 			this._extensionShutdownHandler ||
 			this._extensionErrorListener;
 		if (this._extensionRunner && hasBindings) {
-			await this._extensionRunner.emit({ type: "session_start" });
+			await this._extensionRunner.emit({ type: "session_start", reason: "resume" });
 			await this.extendResourcesFromExtensions("reload");
 		}
 	}
@@ -2509,7 +2563,7 @@ export class AgentSession {
 			this._pendingBashMessages.push(bashMessage);
 		} else {
 			// Add to agent state immediately
-			this.agent.appendMessage(bashMessage);
+			this.agent.state.messages = [...this.agent.state.messages, bashMessage];
 
 			// Save to session
 			this.sessionManager.appendMessage(bashMessage);
@@ -2542,7 +2596,7 @@ export class AgentSession {
 
 		for (const bashMessage of this._pendingBashMessages) {
 			// Add to agent state
-			this.agent.appendMessage(bashMessage);
+			this.agent.state.messages = [...this.agent.state.messages, bashMessage];
 
 			// Save to session
 			this.sessionManager.appendMessage(bashMessage);
@@ -2598,7 +2652,7 @@ export class AgentSession {
 
 		// Reload messages and restore model/thinking level (GSD-specific logic not in pi runtime).
 		const sessionContext = this.sessionManager.buildSessionContext();
-		this.agent.replaceMessages(sessionContext.messages);
+		this.agent.state.messages = sessionContext.messages;
 
 		if (sessionContext.model) {
 			const previousModel = this.model;
@@ -2607,7 +2661,7 @@ export class AgentSession {
 				(m) => m.provider === sessionContext.model!.provider && m.id === sessionContext.model!.modelId,
 			);
 			if (match) {
-				this.agent.setModel(match);
+				this.agent.state.model = match;
 				await this._emitModelSelect(match, previousModel, "restore");
 			}
 		}
@@ -2623,7 +2677,7 @@ export class AgentSession {
 			const effectiveLevel = availableLevels.includes(defaultThinkingLevel)
 				? defaultThinkingLevel
 				: this._clampThinkingLevel(defaultThinkingLevel, availableLevels);
-			this.agent.setThinkingLevel(effectiveLevel);
+			this.agent.state.thinkingLevel = effectiveLevel;
 			this.sessionManager.appendThinkingLevelChange(effectiveLevel);
 		}
 
@@ -2702,7 +2756,7 @@ export class AgentSession {
 		}
 
 		if (!skipConversationRestore) {
-			this.agent.replaceMessages(sessionContext.messages);
+			this.agent.state.messages = sessionContext.messages;
 		}
 
 		// Restore listener and message queue state that survived the transition (D-14).
@@ -2813,7 +2867,8 @@ export class AgentSession {
 			if (!this._modelRegistry.isProviderRequestReady(model.provider)) {
 				throw new Error(`No API key for ${model.provider}`);
 			}
-			const apiKey = await this._modelRegistry.getApiKey(model, this.sessionId);
+			const authResult = await this._modelRegistry.getApiKeyAndHeaders(model);
+			const apiKey = authResult.ok ? authResult.apiKey : undefined;
 			const branchSummarySettings = this.settingsManager.getBranchSummarySettings();
 			const result = await generateBranchSummary(entriesToSummarize, {
 				model,
@@ -2890,7 +2945,7 @@ export class AgentSession {
 
 		// Update agent state
 		const sessionContext = this.sessionManager.buildSessionContext();
-		this.agent.replaceMessages(sessionContext.messages);
+		this.agent.state.messages = sessionContext.messages;
 
 		// Emit session_tree event
 		if (this._extensionRunner) {
@@ -3049,10 +3104,16 @@ export class AgentSession {
 	async exportToHtml(outputPath?: string): Promise<string> {
 		const themeName = this.settingsManager.getTheme();
 
+		// Resolve the current theme instance; fall back to "dark" if the named theme is unavailable.
+		// getThemeByName("dark") always resolves since "dark" is a builtin theme.
+		// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+		const currentTheme = ((themeName ? getThemeByName(themeName) : undefined) ?? getThemeByName("dark"))!;
+
 		// Create tool renderer for extension and built-in tool HTML rendering
+		// The `as any` cast bypasses the dual-module-path Theme mismatch (dist vs src).
 		const toolRenderer = createToolHtmlRenderer({
 			getToolDefinition: (name) => this.getRenderableToolDefinition(name),
-			theme,
+			theme: currentTheme as any,
 		});
 
 		return await exportSessionToHtml(this.sessionManager, this.state, {

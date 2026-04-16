@@ -1,6 +1,7 @@
 import type { AssistantMessage } from "@gsd/pi-ai";
 import { Container, Markdown, type MarkdownTheme, Spacer, Text } from "@gsd/pi-tui";
-import { getMarkdownTheme, theme } from "@gsd/pi-coding-agent";
+import { getMarkdownTheme } from "@gsd/pi-coding-agent";
+import { theme } from "../../../theme.js";
 import { formatTimestamp, type TimestampFormat } from "./timestamp.js";
 import { renderChatFrame } from "./chat-frame.js";
 
@@ -89,7 +90,7 @@ export class AssistantMessageComponent extends Container {
 			(c) => (c.type === "text" && c.text.trim()) || (c.type === "thinking" && c.thinking.trim()),
 		);
 		const hasTextContent = message.content.some((c) => c.type === "text" && c.text.trim().length > 0);
-		const hasToolContent = message.content.some((c) => c.type === "toolCall" || c.type === "serverToolUse");
+		const hasToolContent = message.content.some((c) => c.type === "toolCall" || (c as any).type === "serverToolUse");
 		// Claude Code often emits long reasoning blocks ahead of user-visible text/tool
 		// output in the same lifecycle. Keep chat output visible without requiring a
 		// manual thinking toggle every turn.
@@ -121,11 +122,7 @@ export class AssistantMessageComponent extends Container {
 						color: (text: string) => theme.fg("thinkingText", text),
 						italic: true,
 					});
-					// Keep visible chat output readable when thinking traces are long.
-					// Tool-bearing turns can stream text in a later assistant message.
-					if (shouldCapThinking) {
-						thinkingMarkdown.maxLines = 8;
-					}
+					// maxLines removed in pi-tui 0.67.2 — thinking blocks render at full height.
 					this.contentContainer.addChild(thinkingMarkdown);
 					if (hasVisibleContentAfter) {
 						this.contentContainer.addChild(new Spacer(1));

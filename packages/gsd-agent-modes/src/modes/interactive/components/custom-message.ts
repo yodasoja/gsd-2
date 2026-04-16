@@ -3,7 +3,8 @@ import type { Component } from "@gsd/pi-tui";
 import { Box, Container, Markdown, type MarkdownTheme, Spacer, Text } from "@gsd/pi-tui";
 import type { MessageRenderer } from "@gsd/pi-coding-agent";
 import type { CustomMessage } from "@gsd/pi-coding-agent";
-import { getMarkdownTheme, theme } from "@gsd/pi-coding-agent";
+import { getMarkdownTheme } from "@gsd/pi-coding-agent";
+import { theme } from "../../../theme.js";
 
 /**
  * Component that renders a custom message entry from extensions.

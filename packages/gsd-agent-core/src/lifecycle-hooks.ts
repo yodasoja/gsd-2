@@ -4,16 +4,14 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseGitUrl } from "@gsd/pi-coding-agent";
-import {
-	importExtensionModule,
-	loadExtensions,
-	type LifecycleHookContext,
-	type LifecycleHookMap,
-	type LifecycleHookHandler,
-	type LifecycleHookPhase,
-	type LifecycleHookScope,
-} from "@gsd/pi-coding-agent";
 import type { PackageManager } from "@gsd/pi-coding-agent";
+import type {
+	LifecycleHookContext,
+	LifecycleHookMap,
+	LifecycleHookHandler,
+	LifecycleHookPhase,
+	LifecycleHookScope,
+} from "./lifecycle-hook-types.js";
 
 interface ExtensionManifest {
 	dependencies?: {
@@ -152,14 +150,14 @@ export async function prepareLifecycleHooks(
 		verifyRuntimeDependencies(runtimeDeps, options.source, options.appName);
 	}
 
-	const loaded = await loadExtensions(entryPaths, options.cwd);
-	for (const { path, error } of loaded.errors) {
-		options.stderr.write(`[lifecycle-hooks] Failed to load extension "${path}": ${error}\n`);
-	}
-
+	// extension.lifecycleHooks and the loadExtensions-based registration path were
+	// removed from the Extension interface in 0.67.2. Only the legacy export path
+	// (runLegacyExportHook via dynamic import()) is used now. Pre-populate hooksByPath
+	// with empty maps so runLifecycleHooks falls through to runLegacyExportHook for
+	// every entry path.
 	const hooksByPath = new Map<string, LifecycleHookMap>();
-	for (const extension of loaded.extensions) {
-		hooksByPath.set(extension.path, extension.lifecycleHooks);
+	for (const entryPath of entryPaths) {
+		hooksByPath.set(entryPath, {});
 	}
 
 	return {
@@ -201,9 +199,10 @@ async function runLegacyExportHook(
 	context: LifecycleHookContext,
 ): Promise<LifecycleHookHandler | null> {
 	try {
-		let module = _legacyModuleCache.get(entryPath);
+		let module: Record<string, unknown> | undefined = _legacyModuleCache.get(entryPath);
 		if (!module) {
-			module = await importExtensionModule<Record<string, unknown>>(import.meta.url, pathToFileURL(entryPath).href);
+			module = (await import(pathToFileURL(entryPath).href)) as Record<string, unknown>;
+			if (!module) return null;
 			_legacyModuleCache.set(entryPath, module);
 		}
 		for (const exportName of getLegacyExportCandidates(phase)) {
@@ -240,9 +239,9 @@ export async function runLifecycleHooks(
 		scope: loaded.scope,
 		cwd: loaded.cwd,
 		interactive: Boolean(process.stdin.isTTY && process.stdout.isTTY),
-		log: (message) => loaded.stdout.write(`${message}\n`),
-		warn: (message) => loaded.stderr.write(`${message}\n`),
-		error: (message) => loaded.stderr.write(`${message}\n`),
+		log: (message: string) => loaded.stdout.write(`${message}\n`),
+		warn: (message: string) => loaded.stderr.write(`${message}\n`),
+		error: (message: string) => loaded.stderr.write(`${message}\n`),
 	};
 
 	let hooksRun = 0;

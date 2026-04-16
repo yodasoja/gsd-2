@@ -12,11 +12,13 @@
  */
 
 import * as crypto from "node:crypto";
-import type { AgentSession, ExtensionUIContext, ExtensionUIDialogOptions, ExtensionWidgetOptions } from "@gsd/pi-coding-agent";
+import type { AgentSession } from "@gsd/agent-core";
+import type { ExtensionUIContext, ExtensionUIDialogOptions, ExtensionWidgetOptions } from "@gsd/pi-coding-agent";
 import { InteractiveMode } from "../interactive/interactive-mode.js";
-import { type Theme, theme } from "@gsd/pi-coding-agent";
+import type { Theme } from "@gsd/pi-coding-agent";
+import { theme } from "../../theme.js";
 import { createDefaultCommandContextActions } from "../shared/command-context-actions.js";
-import { attachJsonlLineReader, serializeJsonLine } from "@gsd/pi-coding-agent";
+import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.js";
 import { RemoteTerminal } from "./remote-terminal.js";
 import type {
 	RpcCommand,
@@ -99,7 +101,7 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 		: null;
 	let embeddedInteractiveMode: InteractiveMode | null = null;
 	let embeddedInteractiveInitPromise: Promise<void> | null = null;
-	const startupNotifications: Array<{ message: string; type?: "info" | "warning" | "error" | "success" }> = [];
+	const startupNotifications: Array<{ message: string; type?: "info" | "warning" | "error" }> = [];
 	const statusState = new Map<string, string | undefined>();
 	const widgetState = new Map<string, { content: unknown; options?: ExtensionWidgetOptions }>();
 	let footerFactory: Parameters<ExtensionUIContext["setFooter"]>[0] | undefined;
@@ -215,8 +217,8 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 	 */
 	const createExtensionUIContext = (): ExtensionUIContext => ({
 		select: (title, options, opts) =>
-			createDialogPromise(opts, undefined, { method: "select", title, options, timeout: opts?.timeout, allowMultiple: opts?.allowMultiple }, (r) =>
-				"cancelled" in r && r.cancelled ? undefined : "values" in r ? r.values : "value" in r ? r.value : undefined,
+			createDialogPromise(opts, undefined, { method: "select", title, options, timeout: opts?.timeout, allowMultiple: (opts as any)?.allowMultiple }, (r) =>
+				"cancelled" in r && r.cancelled ? undefined : "values" in r ? (Array.isArray(r.values) ? r.values.join("\n") : r.values as string) : "value" in r ? r.value as string : undefined,
 			),
 
 		confirm: (title, message, opts) =>
@@ -225,11 +227,11 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 			),
 
 		input: (title, placeholder, opts) =>
-			createDialogPromise(opts, undefined, { method: "input", title, placeholder, timeout: opts?.timeout, secure: opts?.secure }, (r) =>
+			createDialogPromise(opts, undefined, { method: "input", title, placeholder, timeout: opts?.timeout, secure: (opts as any)?.secure }, (r) =>
 				"cancelled" in r && r.cancelled ? undefined : "value" in r ? r.value : undefined,
 			),
 
-		notify(message: string, type?: "info" | "warning" | "error" | "success"): void {
+		notify(message: string, type?: "info" | "warning" | "error"): void {
 			startupNotifications.push({ message, type });
 			if (startupNotifications.length > 20) {
 				startupNotifications.splice(0, startupNotifications.length - 20);
@@ -407,6 +409,10 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 
 		setToolsExpanded(_expanded: boolean) {
 			// Tool expansion not supported in RPC mode - no TUI
+		},
+
+		setHiddenThinkingLabel(_label: string | undefined): void {
+			// Thinking label not supported in RPC mode
 		},
 	});
 
@@ -729,12 +735,12 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 				const commands: RpcSlashCommand[] = [];
 
 				// Extension commands
-				for (const { command, extensionPath } of session.extensionRunner?.getRegisteredCommandsWithPaths() ?? []) {
+				for (const cmd of session.extensionRunner?.getRegisteredCommands() ?? []) {
 					commands.push({
-						name: command.name,
-						description: command.description,
+						name: cmd.name,
+						description: cmd.description,
 						source: "extension",
-						path: extensionPath,
+						path: (cmd as any).sourceInfo?.path,
 					});
 				}
 
@@ -744,7 +750,7 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 						name: template.name,
 						description: template.description,
 						source: "prompt",
-						location: template.source as RpcSlashCommand["location"],
+						location: template.sourceInfo.scope as RpcSlashCommand["location"],
 						path: template.filePath,
 					});
 				}
@@ -755,7 +761,7 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 						name: `skill:${skill.name}`,
 						description: skill.description,
 						source: "skill",
-						location: skill.source as RpcSlashCommand["location"],
+						location: skill.sourceInfo.scope as RpcSlashCommand["location"],
 						path: skill.filePath,
 					});
 				}

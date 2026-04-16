@@ -1,12 +1,16 @@
 import {
-	DEFAULT_EDITOR_KEYBINDINGS,
-	type EditorAction,
-	type EditorKeybindingsConfig,
-	EditorKeybindingsManager,
+	TUI_KEYBINDINGS,
+	type Keybinding,
+	type KeybindingsConfig as EditorKeybindingsConfig,
+	KeybindingsManager as EditorKeybindingsManager,
 	type KeyId,
 	matchesKey,
-	setEditorKeybindings,
+	setKeybindings as setEditorKeybindings,
 } from "@gsd/pi-tui";
+
+// EditorAction is the union of all dotted TUI keybinding IDs (e.g. "tui.editor.cursorUp").
+// Phase 09: move to @gsd/agent-types.
+type EditorAction = Keybinding;
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { getAgentDir } from "@gsd/pi-coding-agent";
@@ -74,11 +78,16 @@ const DEFAULT_APP_KEYBINDINGS: Record<AppAction, KeyId | KeyId[]> = {
 
 /**
  * All default keybindings (app + editor).
+ * TUI_KEYBINDINGS provides defaults for the editor actions; map to first default key.
  */
+const DEFAULT_EDITOR_KEYBINDING_DEFAULTS: Partial<Record<EditorAction, KeyId | KeyId[]>> = Object.fromEntries(
+	Object.entries(TUI_KEYBINDINGS).map(([k, v]) => [k, v.defaultKeys]),
+) as Partial<Record<EditorAction, KeyId | KeyId[]>>;
+
 const DEFAULT_KEYBINDINGS: Required<KeybindingsConfig> = {
-	...DEFAULT_EDITOR_KEYBINDINGS,
+	...DEFAULT_EDITOR_KEYBINDING_DEFAULTS,
 	...DEFAULT_APP_KEYBINDINGS,
-};
+} as Required<KeybindingsConfig>;
 
 // App actions list for type checking
 const APP_ACTIONS: AppAction[] = [
@@ -128,15 +137,18 @@ export class KeybindingsManager {
 		const config = KeybindingsManager.loadFromFile(configPath);
 		const manager = new KeybindingsManager(config);
 
-		// Set up editor keybindings globally
-		// Include both editor actions and expandTools (shared between app and editor)
+		// Set up editor keybindings globally.
+		// Include both editor actions and expandTools (shared between app and editor).
+		// 0.67.2 KeybindingsManager takes (definitions, userBindings) where definitions
+		// is the full keybinding definition map (TUI_KEYBINDINGS) and userBindings
+		// are the user overrides (EditorKeybindingsConfig).
 		const editorConfig: EditorKeybindingsConfig = {};
 		for (const [action, keys] of Object.entries(config)) {
 			if (!isAppAction(action) || action === "expandTools") {
 				editorConfig[action as EditorAction] = keys;
 			}
 		}
-		setEditorKeybindings(new EditorKeybindingsManager(editorConfig));
+		setEditorKeybindings(new EditorKeybindingsManager(TUI_KEYBINDINGS, editorConfig));
 
 		return manager;
 	}
