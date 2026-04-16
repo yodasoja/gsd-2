@@ -22,3 +22,6 @@ export function keyHint(keybinding: Keybinding, description: string): string {
 export function rawKeyHint(key: string, description: string): string {
 	return theme.fg("dim", key) + theme.fg("muted", ` ${description}`);
 }
+
+/** Backwards-compat alias -- editorKey was renamed to keyText in pi 0.67.2 */
+export { keyText as editorKey };

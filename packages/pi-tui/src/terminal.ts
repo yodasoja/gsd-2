@@ -34,6 +34,9 @@ export interface Terminal {
 	// Whether Kitty keyboard protocol is active
 	get kittyProtocolActive(): boolean;
 
+	/** Whether the terminal is connected to a TTY */
+	get isTTY(): boolean;
+
 	// Cursor positioning (relative to current position)
 	moveBy(lines: number): void; // Move cursor up (negative) or down (positive) by N lines
 
@@ -78,6 +81,10 @@ export class ProcessTerminal implements Terminal {
 
 	get kittyProtocolActive(): boolean {
 		return this._kittyProtocolActive;
+	}
+
+	get isTTY(): boolean {
+		return process.stdout.isTTY === true;
 	}
 
 	start(onInput: (data: string) => void, onResize: () => void): void {
