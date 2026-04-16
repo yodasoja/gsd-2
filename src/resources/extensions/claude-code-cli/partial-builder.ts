@@ -23,20 +23,99 @@ import type { BetaContentBlock, BetaRawMessageStreamEvent, NonNullableUsage } fr
 // ---------------------------------------------------------------------------
 
 /**
- * Detects XML-wrapped parameter tags in streaming tool call JSON.
+ * Detects XML parameter tags (inline <parameter name="...">...</parameter> form)
+ * or XML wrapper (<parameters>...</parameters>) in streaming tool call JSON.
  * Replaces removed pi-ai utility (removed in pi 0.67.2).
  * T-10-05: regex only detects tag presence; does not evaluate content.
  */
 function hasXmlParameterTags(s: string): boolean {
-	return /<parameters[\s>]/i.test(s);
+	return /<parameter[s\s>]/i.test(s);
 }
 
 /**
- * Extracts JSON content from XML parameter wrapper.
+ * Repairs malformed LLM-generated tool JSON using three strategies:
+ *
+ * 1. XML parameter extraction: When inline <parameter name="key">value</parameter>
+ *    tags appear inside a JSON string value, extract each as a top-level key and
+ *    clean the containing string value by truncating at the closing tag boundary.
+ *
+ * 2. YAML bullet repair: When bare "- item" patterns appear as JSON values (not
+ *    quoted), convert each bullet sequence into a JSON array.
+ *
+ * 3. XML wrapper extraction: Extract content from <parameters>...</parameters> wrapper.
+ *
  * Replaces removed pi-ai utility (removed in pi 0.67.2).
  * T-10-05: extracts text content only, no evaluation.
  */
 function repairToolJson(s: string): string {
+	// Strategy 1: XML parameter tags inside JSON string values (#3751)
+	// The raw JSON string may have escaped quotes: <parameter name=\"key\">val</parameter>
+	// or unescaped: <parameter name="key">val</parameter>
+	// We match both forms.
+	if (/<parameter\s+name=/i.test(s)) {
+		try {
+			// Match <parameter name="key"> or <parameter name=\"key\"> in raw JSON text
+			const paramPattern = /<parameter\s+name=(?:\\"|")([^"\\]+)(?:\\"|")>([\s\S]*?)<\/parameter>/gi;
+			const extracted: Record<string, unknown> = {};
+			let match: RegExpExecArray | null;
+			while ((match = paramPattern.exec(s)) !== null) {
+				const key = match[1];
+				// rawVal may contain JSON-escaped characters; unescape for parsing
+				const rawVal = match[2].trim().replace(/\\"/g, '"').replace(/\\n/g, "\n");
+				// Attempt to parse value as JSON; fall back to string
+				try {
+					extracted[key] = JSON.parse(rawVal);
+				} catch {
+					extracted[key] = rawVal;
+				}
+			}
+
+			if (Object.keys(extracted).length > 0) {
+				// Remove the XML parameter block and preceding closing tag from the raw string.
+				// The block looks like: </tagName>\n<parameter ...>...</parameter>...\n (with escaped chars)
+				// We remove from the first </...> closing tag through the last </parameter> tag.
+				const cleaned = s
+					.replace(/<\/[^>]+>(?:\\n|\n)*(?:<parameter[\s\S]*?<\/parameter>(?:\\n|\n)*)+/gi, "")
+					.trim();
+
+				// Parse cleaned base JSON and merge extracted params
+				const base = JSON.parse(cleaned) as Record<string, unknown>;
+				return JSON.stringify({ ...base, ...extracted });
+			}
+		} catch {
+			// Fall through to next strategy
+		}
+	}
+
+	// Strategy 2: YAML bullet lists as unquoted JSON values (#2660)
+	// Pattern: "key": - item1, "key2": - item2
+	if (/:\s*-\s+/.test(s)) {
+		try {
+			// Replace bare YAML bullet sequences with JSON arrays.
+			// Match: "key": - val1, - val2, "nextKey" or end
+			// We need to handle: "key": - item, "nextKey" where - item is the unquoted value
+			const repaired = s.replace(
+				// Match a quoted key followed by colon, then one or more "- item" bullets
+				// terminated by either a comma+quote (next key) or closing brace
+				/"([^"]+)":\s*((?:-\s+[^,\n\-"{}[\]]+(?:,\s*(?![-"\s*{]))?)+)/g,
+				(fullMatch: string, key: string, bulletBlock: string) => {
+					// Extract individual bullet items
+					const items = bulletBlock
+						.split(/,?\s*-\s+/)
+						.map((item: string) => item.trim().replace(/,\s*$/, "").trim())
+						.filter((item: string) => item.length > 0);
+					if (items.length === 0) return fullMatch;
+					return `"${key}": ${JSON.stringify(items)}`;
+				},
+			);
+			const parsed = JSON.parse(repaired);
+			return JSON.stringify(parsed);
+		} catch {
+			// Fall through to next strategy
+		}
+	}
+
+	// Strategy 3: XML wrapper extraction (<parameters>...</parameters>)
 	const m = /<parameters[^>]*>([\s\S]*?)<\/parameters>/i.exec(s);
 	return m ? m[1].trim() : s;
 }
