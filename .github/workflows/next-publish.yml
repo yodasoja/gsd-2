@@ -82,6 +82,12 @@ jobs:
           npm run sync-platform-versions
           echo "version=$(node -e 'process.stdout.write(require("./package.json").version)')" >> "$GITHUB_OUTPUT"
 
+      - name: Smoke test
+        run: |
+          chmod +x dist/loader.js
+          export GSD_SMOKE_BINARY="$(pwd)/dist/loader.js"
+          npm run test:smoke
+
       - name: Publish @next
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -92,9 +98,3 @@ jobs:
           else
             npm publish --tag next
           fi
-
-      - name: Smoke test
-        run: |
-          chmod +x dist/loader.js
-          export GSD_SMOKE_BINARY="$(pwd)/dist/loader.js"
-          npm run test:smoke
