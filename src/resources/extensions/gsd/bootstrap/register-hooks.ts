@@ -332,6 +332,7 @@ export function registerHooks(
   // ── Safety harness: evidence collection + destructive command warnings ──
   pi.on("tool_call", async (event, ctx) => {
     if (!isAutoActive()) return;
+    markToolStart(event.toolCallId, event.toolName);
     safetyRecordToolCall(event.toolCallId, event.toolName, event.input as Record<string, unknown>);
 
     // Destructive command classification (warn only, never block)
@@ -350,6 +351,20 @@ export function registerHooks(
   });
 
   pi.on("tool_result", async (event) => {
+    if (isAutoActive() && typeof event.toolCallId === "string") {
+      markToolEnd(event.toolCallId);
+    }
+    if (isAutoActive() && event.isError && event.toolName.startsWith("gsd_")) {
+      const resultPayload = ("result" in event ? event.result : undefined) as any;
+      const errorText = typeof resultPayload === "string"
+        ? resultPayload
+        : (typeof resultPayload?.content?.[0]?.text === "string"
+            ? resultPayload.content[0].text
+            : (typeof (event as any).content === "string"
+                ? (event as any).content
+                : String(resultPayload ?? "")));
+      recordToolInvocationError(event.toolName, errorText);
+    }
     if (event.toolName !== "ask_user_questions") return;
     const milestoneId = getDiscussionMilestoneId(process.cwd());
     const queueActive = isQueuePhaseActive();
