@@ -820,6 +820,18 @@ const projectDirParam = z
 const nonEmptyString = (field: string) =>
   z.string().trim().min(1, `${field} must be a non-empty string`);
 
+// Optional non-empty string: accepts omitted/undefined but rejects "" or
+// whitespace. Mirrors executor guards of the form
+// `value !== undefined && !isNonEmptyString(value)` — e.g. plan-task's
+// observabilityImpact. Do not preprocess "" to undefined; the executor
+// treats them differently.
+const optionalNonEmptyString = (field: string) => nonEmptyString(field).optional();
+
+// Array of non-empty strings. Mirrors executor guards that call
+// `validateStringArray` or `arr.some((item) => !isNonEmptyString(item))`.
+const nonEmptyStringArray = (field: string) =>
+  z.array(nonEmptyString(`${field}[]`));
+
 // Matches the executor's `isNonEmptyString` (trim + length>0) so Zod rejects
 // empty/whitespace fields at parse time. Without this, MCP callers pass "" for
 // the heavy planning fields, Zod accepts it, and the executor rejects one
@@ -873,13 +885,13 @@ const planMilestoneParams = {
   dependsOn: z.array(z.string()).optional().describe("Milestone dependencies"),
   successCriteria: z.array(z.string()).optional().describe("Top-level success criteria bullets"),
   keyRisks: z.array(z.object({
-    risk: z.string(),
-    whyItMatters: z.string(),
+    risk: nonEmptyString("risk"),
+    whyItMatters: nonEmptyString("whyItMatters"),
   })).optional().describe("Structured risk entries"),
   proofStrategy: z.array(z.object({
-    riskOrUnknown: z.string(),
-    retireIn: z.string(),
-    whatWillBeProven: z.string(),
+    riskOrUnknown: nonEmptyString("riskOrUnknown"),
+    retireIn: nonEmptyString("retireIn"),
+    whatWillBeProven: nonEmptyString("whatWillBeProven"),
   })).optional().describe("Structured proof strategy entries"),
   verificationContract: z.string().optional(),
   verificationIntegration: z.string().optional(),
@@ -893,19 +905,19 @@ const planMilestoneSchema = z.object(planMilestoneParams);
 
 const planSliceParams = {
   projectDir: projectDirParam,
-  milestoneId: z.string().describe("Milestone ID (e.g. M001)"),
-  sliceId: z.string().describe("Slice ID (e.g. S01)"),
-  goal: z.string().describe("Slice goal"),
+  milestoneId: nonEmptyString("milestoneId").describe("Milestone ID (e.g. M001)"),
+  sliceId: nonEmptyString("sliceId").describe("Slice ID (e.g. S01)"),
+  goal: nonEmptyString("goal").describe("Slice goal"),
   tasks: z.array(z.object({
-    taskId: z.string(),
-    title: z.string(),
-    description: z.string(),
-    estimate: z.string(),
-    files: z.array(z.string()),
-    verify: z.string(),
-    inputs: z.array(z.string()),
-    expectedOutput: z.array(z.string()),
-    observabilityImpact: z.string().optional(),
+    taskId: nonEmptyString("taskId"),
+    title: nonEmptyString("title"),
+    description: nonEmptyString("description"),
+    estimate: nonEmptyString("estimate"),
+    files: nonEmptyStringArray("files"),
+    verify: nonEmptyString("verify"),
+    inputs: nonEmptyStringArray("inputs"),
+    expectedOutput: nonEmptyStringArray("expectedOutput"),
+    observabilityImpact: optionalNonEmptyString("observabilityImpact"),
   })).describe("Planned tasks for the slice"),
   successCriteria: z.string().optional(),
   proofLevel: z.string().optional(),
@@ -916,8 +928,8 @@ const planSliceSchema = z.object(planSliceParams);
 
 const completeMilestoneParams = {
   projectDir: projectDirParam,
-  milestoneId: z.string().describe("Milestone ID (e.g. M001)"),
-  title: z.string().describe("Milestone title"),
+  milestoneId: nonEmptyString("milestoneId").describe("Milestone ID (e.g. M001)"),
+  title: nonEmptyString("title").describe("Milestone title"),
   oneLiner: z.string().describe("One-sentence summary of what the milestone achieved"),
   narrative: z.string().describe("Detailed narrative of what happened during the milestone"),
   verificationPassed: z.boolean().describe("Must be true after milestone verification succeeds"),
@@ -934,7 +946,7 @@ const completeMilestoneSchema = z.object(completeMilestoneParams);
 
 const validateMilestoneParams = {
   projectDir: projectDirParam,
-  milestoneId: z.string().describe("Milestone ID (e.g. M001)"),
+  milestoneId: nonEmptyString("milestoneId").describe("Milestone ID (e.g. M001)"),
   verdict: z.enum(["pass", "needs-attention", "needs-remediation"]).describe("Validation verdict"),
   remediationRound: z.number().describe("Remediation round (0 for first validation)"),
   successCriteriaChecklist: z.string().describe("Markdown checklist of success criteria with evidence"),
@@ -948,8 +960,8 @@ const validateMilestoneParams = {
 const validateMilestoneSchema = z.object(validateMilestoneParams);
 
 const roadmapSliceChangeSchema = z.object({
-  sliceId: z.string(),
-  title: z.string(),
+  sliceId: nonEmptyString("sliceId"),
+  title: nonEmptyString("title"),
   risk: z.string().optional(),
   depends: z.array(z.string()).optional(),
   demo: z.string().optional(),
@@ -957,10 +969,10 @@ const roadmapSliceChangeSchema = z.object({
 
 const reassessRoadmapParams = {
   projectDir: projectDirParam,
-  milestoneId: z.string().describe("Milestone ID (e.g. M001)"),
-  completedSliceId: z.string().describe("Slice ID that just completed"),
-  verdict: z.string().describe("Assessment verdict such as roadmap-confirmed or roadmap-adjusted"),
-  assessment: z.string().describe("Assessment text explaining the roadmap decision"),
+  milestoneId: nonEmptyString("milestoneId").describe("Milestone ID (e.g. M001)"),
+  completedSliceId: nonEmptyString("completedSliceId").describe("Slice ID that just completed"),
+  verdict: nonEmptyString("verdict").describe("Assessment verdict such as roadmap-confirmed or roadmap-adjusted"),
+  assessment: nonEmptyString("assessment").describe("Assessment text explaining the roadmap decision"),
   sliceChanges: z.object({
     modified: z.array(roadmapSliceChangeSchema),
     added: z.array(roadmapSliceChangeSchema),
@@ -983,14 +995,14 @@ const saveGateResultSchema = z.object(saveGateResultParams);
 
 const replanSliceParams = {
   projectDir: projectDirParam,
-  milestoneId: z.string().describe("Milestone ID (e.g. M001)"),
-  sliceId: z.string().describe("Slice ID (e.g. S01)"),
-  blockerTaskId: z.string().describe("Task ID that discovered the blocker"),
-  blockerDescription: z.string().describe("Description of the blocker"),
-  whatChanged: z.string().describe("Summary of what changed in the plan"),
+  milestoneId: nonEmptyString("milestoneId").describe("Milestone ID (e.g. M001)"),
+  sliceId: nonEmptyString("sliceId").describe("Slice ID (e.g. S01)"),
+  blockerTaskId: nonEmptyString("blockerTaskId").describe("Task ID that discovered the blocker"),
+  blockerDescription: nonEmptyString("blockerDescription").describe("Description of the blocker"),
+  whatChanged: nonEmptyString("whatChanged").describe("Summary of what changed in the plan"),
   updatedTasks: z.array(z.object({
-    taskId: z.string(),
-    title: z.string(),
+    taskId: nonEmptyString("taskId"),
+    title: nonEmptyString("title"),
     description: z.string(),
     estimate: z.string(),
     files: z.array(z.string()),
@@ -1005,8 +1017,8 @@ const replanSliceSchema = z.object(replanSliceParams);
 
 const sliceCompleteParams = {
   projectDir: projectDirParam,
-  sliceId: z.string().describe("Slice ID (e.g. S01)"),
-  milestoneId: z.string().describe("Milestone ID (e.g. M001)"),
+  sliceId: nonEmptyString("sliceId").describe("Slice ID (e.g. S01)"),
+  milestoneId: nonEmptyString("milestoneId").describe("Milestone ID (e.g. M001)"),
   sliceTitle: z.string().describe("Title of the slice"),
   oneLiner: z.string().describe("One-line summary of what the slice accomplished"),
   narrative: z.string().describe("Detailed narrative of what happened across all tasks"),
@@ -1101,17 +1113,17 @@ const milestoneGenerateIdSchema = z.object(milestoneGenerateIdParams);
 
 const planTaskParams = {
   projectDir: projectDirParam,
-  milestoneId: z.string().describe("Milestone ID (e.g. M001)"),
-  sliceId: z.string().describe("Slice ID (e.g. S01)"),
-  taskId: z.string().describe("Task ID (e.g. T01)"),
-  title: z.string().describe("Task title"),
-  description: z.string().describe("Task description / steps block"),
-  estimate: z.string().describe("Task estimate"),
+  milestoneId: nonEmptyString("milestoneId").describe("Milestone ID (e.g. M001)"),
+  sliceId: nonEmptyString("sliceId").describe("Slice ID (e.g. S01)"),
+  taskId: nonEmptyString("taskId").describe("Task ID (e.g. T01)"),
+  title: nonEmptyString("title").describe("Task title"),
+  description: nonEmptyString("description").describe("Task description / steps block"),
+  estimate: nonEmptyString("estimate").describe("Task estimate"),
   files: z.array(z.string()).describe("Files likely touched"),
-  verify: z.string().describe("Verification command or block"),
+  verify: nonEmptyString("verify").describe("Verification command or block"),
   inputs: z.array(z.string()).describe("Input files or references"),
   expectedOutput: z.array(z.string()).describe("Expected output files or artifacts"),
-  observabilityImpact: z.string().optional().describe("Task observability impact"),
+  observabilityImpact: optionalNonEmptyString("observabilityImpact").describe("Task observability impact"),
 };
 const planTaskSchema = z.object(planTaskParams);
 
@@ -1125,9 +1137,9 @@ const skipSliceSchema = z.object(skipSliceParams);
 
 const taskCompleteParams = {
   projectDir: projectDirParam,
-  taskId: z.string().describe("Task ID (e.g. T01)"),
-  sliceId: z.string().describe("Slice ID (e.g. S01)"),
-  milestoneId: z.string().describe("Milestone ID (e.g. M001)"),
+  taskId: nonEmptyString("taskId").describe("Task ID (e.g. T01)"),
+  sliceId: nonEmptyString("sliceId").describe("Slice ID (e.g. S01)"),
+  milestoneId: nonEmptyString("milestoneId").describe("Milestone ID (e.g. M001)"),
   oneLiner: z.string().describe("One-line summary of what was accomplished"),
   narrative: z.string().describe("Detailed narrative of what happened during the task"),
   verification: z.string().describe("What was verified and how"),

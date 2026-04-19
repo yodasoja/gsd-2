@@ -386,6 +386,156 @@ describe("workflow MCP tools", () => {
     }
   });
 
+  it("other workflow tools reject empty required strings at the schema layer", async () => {
+    const base = makeTmpBase();
+    try {
+      const server = makeMockServer();
+      registerWorkflowTools(server as any);
+
+      const expectRejection = async (toolName: string, args: Record<string, unknown>, expectedField: string) => {
+        const tool = server.tools.find((t) => t.name === toolName);
+        assert.ok(tool, `${toolName} should be registered`);
+        let caught: unknown;
+        try {
+          await tool!.handler(args);
+        } catch (err) {
+          caught = err;
+        }
+        assert.ok(caught, `${toolName} should reject empty ${expectedField}`);
+        const message = caught instanceof Error ? caught.message : String(caught);
+        assert.ok(
+          message.includes(expectedField),
+          `${toolName} error should mention ${expectedField}, got: ${message}`,
+        );
+      };
+
+      // Empty sliceId top-level
+      await expectRejection("gsd_plan_slice", {
+        projectDir: base,
+        milestoneId: "M001",
+        sliceId: "",
+        goal: "Persist slice plan.",
+        tasks: [],
+      }, "sliceId");
+
+      // Empty task verify inside tasks array
+      await expectRejection("gsd_plan_slice", {
+        projectDir: base,
+        milestoneId: "M001",
+        sliceId: "S01",
+        goal: "Persist slice plan.",
+        tasks: [
+          {
+            taskId: "T01",
+            title: "Add bridge",
+            description: "Implement bridge.",
+            estimate: "15m",
+            files: ["src/x.ts"],
+            verify: "",
+            inputs: ["ROADMAP.md"],
+            expectedOutput: ["S01-PLAN.md"],
+          },
+        ],
+      }, "verify");
+
+      // Empty element inside files[] array
+      await expectRejection("gsd_plan_slice", {
+        projectDir: base,
+        milestoneId: "M001",
+        sliceId: "S01",
+        goal: "Persist slice plan.",
+        tasks: [
+          {
+            taskId: "T01",
+            title: "Add bridge",
+            description: "Implement bridge.",
+            estimate: "15m",
+            files: ["src/x.ts", "   "],
+            verify: "node --test",
+            inputs: ["ROADMAP.md"],
+            expectedOutput: ["S01-PLAN.md"],
+          },
+        ],
+      }, "files");
+
+      // Empty milestoneId on gsd_plan_task
+      await expectRejection("gsd_plan_task", {
+        projectDir: base,
+        milestoneId: "",
+        sliceId: "S01",
+        taskId: "T01",
+        title: "t",
+        description: "d",
+        estimate: "1m",
+        files: [],
+        verify: "v",
+        inputs: [],
+        expectedOutput: [],
+      }, "milestoneId");
+
+      // Empty observabilityImpact explicitly rejected (optional-but-non-empty)
+      await expectRejection("gsd_plan_task", {
+        projectDir: base,
+        milestoneId: "M001",
+        sliceId: "S01",
+        taskId: "T01",
+        title: "t",
+        description: "d",
+        estimate: "1m",
+        files: [],
+        verify: "v",
+        inputs: [],
+        expectedOutput: [],
+        observabilityImpact: "   ",
+      }, "observabilityImpact");
+
+      // Empty assessment on gsd_reassess_roadmap
+      await expectRejection("gsd_reassess_roadmap", {
+        projectDir: base,
+        milestoneId: "M001",
+        completedSliceId: "S01",
+        verdict: "roadmap-confirmed",
+        assessment: "",
+        sliceChanges: { modified: [], added: [], removed: [] },
+      }, "assessment");
+
+      // Empty keyRisks[i].risk on gsd_plan_milestone top-level arrays
+      await expectRejection("gsd_plan_milestone", {
+        projectDir: base,
+        milestoneId: "M001",
+        title: "T",
+        vision: "V",
+        slices: [],
+        keyRisks: [{ risk: "", whyItMatters: "because." }],
+      }, "risk");
+
+      // Empty blockerDescription on gsd_replan_slice
+      await expectRejection("gsd_replan_slice", {
+        projectDir: base,
+        milestoneId: "M001",
+        sliceId: "S01",
+        blockerTaskId: "T01",
+        blockerDescription: "",
+        whatChanged: "x",
+        updatedTasks: [],
+        removedTaskIds: [],
+      }, "blockerDescription");
+
+      // Empty milestoneId on gsd_task_complete
+      await expectRejection("gsd_task_complete", {
+        projectDir: base,
+        taskId: "T01",
+        sliceId: "S01",
+        milestoneId: "",
+        oneLiner: "ol",
+        narrative: "n",
+        verification: "v",
+      }, "milestoneId");
+    } finally {
+      cleanup(base);
+    }
+  });
+
   it("gsd_plan_milestone rejects empty slice fields up front with all violations", async () => {
     const base = makeTmpBase();
     try {
