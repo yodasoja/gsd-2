@@ -41,13 +41,19 @@ const ELICIT_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 /**
  * Race a promise against a timeout. Rejects with a typed error on timeout so
  * callers can return a specific MCP error response rather than hanging.
+ *
+ * @param timeoutMs - override for testing; defaults to ELICIT_TIMEOUT_MS
  */
-async function withElicitTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+export async function withElicitTimeout<T>(
+  promise: Promise<T>,
+  label: string,
+  timeoutMs = ELICIT_TIMEOUT_MS,
+): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(
-      () => reject(new Error(`${label} timed out after ${ELICIT_TIMEOUT_MS / 60000} minutes — no user response received`)),
-      ELICIT_TIMEOUT_MS,
+      () => reject(new Error(`${label} timed out after ${timeoutMs / 60000} minutes — no user response received`)),
+      timeoutMs,
     );
   });
   try {
