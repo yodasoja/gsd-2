@@ -178,7 +178,7 @@ test("safety-harness-bug3: validateFileChanges works on merge commit", (t) => {
   const base = mkdtempSync(join(tmpdir(), "gsd-merge-commit-"));
   t.after(() => rmSync(base, { recursive: true, force: true }));
 
-  execFileSync("git", ["init"], { cwd: base });
+  execFileSync("git", ["init", "-b", "main"], { cwd: base });
   execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: base });
   execFileSync("git", ["config", "user.name", "Test User"], { cwd: base });
 
