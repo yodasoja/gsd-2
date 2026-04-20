@@ -55,7 +55,7 @@ import { hasPendingCaptures, loadPendingCaptures, revertExecutorResolvedCaptures
 import { debugLog } from "./debug-logger.js";
 import { runSafely } from "./auto-utils.js";
 import type { AutoSession, SidecarItem } from "./auto/session.js";
-import { getEvidence } from "./safety/evidence-collector.js";
+import { getEvidence, clearEvidenceFromDisk } from "./safety/evidence-collector.js";
 import { validateFileChanges } from "./safety/file-change-validator.js";
 // crossReferenceEvidence available for future use when verification_evidence is stored in DB
 // import { crossReferenceEvidence, type ClaimedEvidence } from "./safety/evidence-cross-ref.js";
@@ -709,6 +709,16 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
             }
           } catch (e) {
             debugLog("postUnit", { phase: "safety-content-validation", error: String(e) });
+          }
+        }
+
+        // Clear persisted evidence file now that post-unit processing is complete
+        // (Bug #4385 — prevents stale evidence from affecting retries of same unit ID).
+        if (safetyConfig.evidence_collection && s.currentUnit.type === "execute-task" && sMid && sSid && sTid) {
+          try {
+            clearEvidenceFromDisk(s.basePath, sMid, sSid, sTid);
+          } catch (e) {
+            debugLog("postUnit", { phase: "safety-evidence-clear", error: String(e) });
           }
         }
       }

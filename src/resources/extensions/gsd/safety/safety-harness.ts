@@ -92,6 +92,9 @@ export {
   getFilePaths,
   recordToolCall,
   recordToolResult,
+  saveEvidenceToDisk,
+  loadEvidenceFromDisk,
+  clearEvidenceFromDisk,
 } from "./evidence-collector.js";
 
 export type { EvidenceEntry, BashEvidence, FileWriteEvidence, FileEditEvidence } from "./evidence-collector.js";

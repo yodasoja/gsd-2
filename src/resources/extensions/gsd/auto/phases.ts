@@ -54,7 +54,8 @@ import type { MinimalModelRegistry } from "../context-budget.js";
 import { ensurePlanV2Graph } from "../uok/plan-v2.js";
 import { resolveUokFlags } from "../uok/flags.js";
 import { UokGateRunner } from "../uok/gate-runner.js";
-import { resetEvidence } from "../safety/evidence-collector.js";
+import { resetEvidence, loadEvidenceFromDisk } from "../safety/evidence-collector.js";
+import { parseUnitId } from "../unit-id.js";
 import { createCheckpoint, cleanupCheckpoint, rollbackToCheckpoint } from "../safety/git-checkpoint.js";
 import { resolveSafetyHarnessConfig } from "../safety/safety-harness.js";
 import {
@@ -1385,6 +1386,14 @@ export async function runUnitPhase(
   );
   if (safetyConfig.enabled && safetyConfig.evidence_collection) {
     resetEvidence();
+    // Restore persisted evidence so session-restart resumes don't produce
+    // false-positive "no bash calls" warnings (Bug #4385).
+    if (s.basePath && unitType === "execute-task") {
+      const { milestone: eMid, slice: eSid, task: eTid } = parseUnitId(unitId);
+      if (eMid && eSid && eTid) {
+        loadEvidenceFromDisk(s.basePath, eMid, eSid, eTid);
+      }
+    }
   }
   // Only checkpoint code-executing units (not lifecycle/planning units)
   if (safetyConfig.enabled && safetyConfig.checkpoints && unitType === "execute-task") {

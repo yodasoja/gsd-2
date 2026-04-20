@@ -28,8 +28,29 @@ const QUEUE_SAFE_TOOLS = new Set([
 /**
  * Bash commands that are read-only / investigative — safe during queue mode.
  * Matches the leading command in a bash invocation.
+ *
+ * Extension policy: add commands here when they are read-only / diagnostic.
+ * Never add commands that mutate project state (write files, run builds that
+ * emit artifacts, install packages, etc.).
+ *
+ * Current read-only additions (Bug #4385):
+ *   npm run <diagnostic> — read-only diagnostic scripts: test, lint, typecheck, etc.
+ *                         NOT: build, install, compile, generate, deploy (artifact-producing)
+ *   npm ls/list/info    — inspect installed packages (read-only)
+ *   npm outdated/audit  — security/update checks (read-only)
+ *   npx <pkg>           — run a package binary without installing globally
+ *   tsx                 — TypeScript runner used for dry-run / inspection scripts
+ *   node --print        — evaluate and print an expression, no side effects
+ *   python / python3    — script inspection, version checks
+ *   pip / pip3 show     — show installed package info (read-only)
+ *   jq                  — read-only JSON query
+ *   yq                  — read-only YAML query
+ *   curl -s / curl --silent — fetch for inspection (no -o / no output redirect)
+ *   openssl version     — version / certificate inspection
+ *   env / printenv      — print environment variables
+ *   true / false        — shell no-ops / test exit codes
  */
-const BASH_READ_ONLY_RE = /^\s*(cat|head|tail|less|more|wc|file|stat|du|df|which|type|echo|printf|ls|find|grep|rg|awk|sed\b(?!.*-i)|sort|uniq|diff|comm|tr|cut|tee\s+-a\s+\/dev\/null|git\s+(log|show|diff|status|branch|tag|remote|rev-parse|ls-files|blame|shortlog|describe|stash\s+list|config\s+--get|cat-file)|gh\s+(issue|pr|api|repo|release)\s+(view|list|diff|status|checks)|mkdir\s+-p\s+\.gsd|rtk\s)/;
+const BASH_READ_ONLY_RE = /^\s*(cat|head|tail|less|more|wc|file|stat|du|df|which|type|echo|printf|ls|find|grep|rg|awk|sed\b(?!.*-i)|sort|uniq|diff|comm|tr|cut|tee\s+-a\s+\/dev\/null|git\s+(log|show|diff|status|branch|tag|remote|rev-parse|ls-files|blame|shortlog|describe|stash\s+list|config\s+--get|cat-file)|gh\s+(issue|pr|api|repo|release)\s+(view|list|diff|status|checks)|mkdir\s+-p\s+\.gsd|rtk\s|npm\s+run\s+(test|test:\w+|lint|lint:\w+|typecheck|type-check|type-check:\w+|check|verify|audit|outdated|format:check|ci|validate)\b|npm\s+(ls|list|info|view|show|outdated|audit|explain|doctor|ping|--version|-v)\b|npx\s|tsx\s|node\s+(--print|--version|-v\b)|python[23]?\s+(-c\s+'[^']*'|--version|-V\b|-m\s+(pip\s+show|pip\s+list|site))|pip[23]?\s+(show|list|freeze|check|index\s+versions)\b|jq\s|yq\s|curl\s+(-s\b|--silent\b)(?!\s+[^|>]*\s-[oO]\b)(?!\s+[^|>]*\s--output\b)[^|>]*$|openssl\s+(version|x509|s_client)|env\b|printenv\b|true\b|false\b)/;
 
 const verifiedDepthMilestones = new Set<string>();
 let activeQueuePhase = false;
