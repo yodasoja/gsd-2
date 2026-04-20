@@ -2012,21 +2012,38 @@ export function mergeMilestoneToMain(
   // When a milestone only produced .gsd/ metadata (summaries, roadmaps) but no
   // real code, the user sees "milestone complete" but nothing changed in their
   // codebase. Surface this so the caller can warn the user.
+  //
+  // Bug #4385 fix: use `git diff-tree --root` instead of `git diff HEAD~1 HEAD`.
+  // `HEAD~1` does not exist on initial commits and is unreliable on shallow clones
+  // and merge commits. `diff-tree --root` handles all three cases correctly.
+  // The empty-tree hash (4b825dc…) is the universal fallback for refs that don't exist.
+  const GIT_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
   let codeFilesChanged = false;
   if (!nothingToCommit) {
     try {
-      const mergedFiles = nativeDiffNumstat(
-        originalBasePath_,
-        "HEAD~1",
-        "HEAD",
-      );
-      codeFilesChanged = mergedFiles.some(
-        (entry) => !entry.path.startsWith(".gsd/"),
-      );
+      const diffTreeOutput = execFileSync(
+        "git",
+        ["diff-tree", "--root", "--no-commit-id", "-r", "--name-only", "HEAD"],
+        { cwd: originalBasePath_, stdio: ["ignore", "pipe", "pipe"], encoding: "utf-8" },
+      ).trim();
+      const mergedFiles = diffTreeOutput ? diffTreeOutput.split("\n").filter(Boolean) : [];
+      codeFilesChanged = mergedFiles.some((f) => !f.startsWith(".gsd/"));
     } catch (e) {
-      // If HEAD~1 doesn't exist (first commit), assume code was changed
-      logWarning("worktree", `diff numstat failed (assuming code changed): ${(e as Error).message}`);
-      codeFilesChanged = true;
+      // diff-tree failed (e.g. unborn HEAD in a brand-new repo) — fall back to
+      // comparing against the empty tree so initial-commit repos still report changes.
+      try {
+        const fallbackOutput = execFileSync(
+          "git",
+          ["diff", "--name-only", GIT_EMPTY_TREE, "HEAD"],
+          { cwd: originalBasePath_, stdio: ["ignore", "pipe", "pipe"], encoding: "utf-8" },
+        ).trim();
+        const fallbackFiles = fallbackOutput ? fallbackOutput.split("\n").filter(Boolean) : [];
+        codeFilesChanged = fallbackFiles.some((f) => !f.startsWith(".gsd/"));
+      } catch {
+        // Truly unable to determine — assume code was changed to avoid silent data loss
+        logWarning("worktree", `diff-tree and empty-tree fallback both failed (assuming code changed): ${(e as Error).message}`);
+        codeFilesChanged = true;
+      }
     }
   }
 

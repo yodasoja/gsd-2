@@ -23,7 +23,8 @@ import { isParallelActive, shutdownParallel } from "../parallel-orchestrator.js"
 import { checkToolCallLoop, resetToolCallLoopGuard } from "./tool-call-loop-guard.js";
 import { saveActivityLog } from "../activity-log.js";
 import { resetAskUserQuestionsCache } from "../../ask-user-questions.js";
-import { recordToolCall as safetyRecordToolCall, recordToolResult as safetyRecordToolResult } from "../safety/evidence-collector.js";
+import { recordToolCall as safetyRecordToolCall, recordToolResult as safetyRecordToolResult, saveEvidenceToDisk } from "../safety/evidence-collector.js";
+import { parseUnitId } from "../unit-id.js";
 import { classifyCommand } from "../safety/destructive-guard.js";
 import { logWarning as safetyLogWarning } from "../workflow-logger.js";
 import { installNotifyInterceptor } from "./notify-interceptor.js";
@@ -496,6 +497,15 @@ export function registerHooks(
     // Safety harness: record tool execution results for evidence cross-referencing
     if (isAutoActive()) {
       safetyRecordToolResult(event.toolCallId, event.toolName, event.result, event.isError);
+      // Persist evidence to disk after each tool result so it survives a session
+      // restart mid-unit (Bug #4385 — non-persisted evidence false positives).
+      const dash = getAutoDashboardData();
+      if (dash.basePath && dash.currentUnit?.type === "execute-task") {
+        const { milestone: pMid, slice: pSid, task: pTid } = parseUnitId(dash.currentUnit.id);
+        if (pMid && pSid && pTid) {
+          saveEvidenceToDisk(dash.basePath, pMid, pSid, pTid);
+        }
+      }
     }
   });
 

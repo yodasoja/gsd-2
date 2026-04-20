@@ -4,7 +4,9 @@
  *
  * Uses tasks.expected_output (DB column, populated from per-task ## Expected Output)
  * and tasks.files (from slice PLAN.md - Files: subline) as the expected set.
- * Compares against git diff HEAD~1 --name-only after auto-commit.
+ * Compares against `git diff-tree --root --no-commit-id -r --name-only HEAD` after auto-commit.
+ * Using diff-tree --root handles initial commits, shallow clones, and merge commits correctly
+ * (Bug #4385 — git diff HEAD~1 failed on initial commits).
  *
  * Copyright (c) 2026 Jeremy McSpadden <jeremy@fluxlabs.net>
  */
