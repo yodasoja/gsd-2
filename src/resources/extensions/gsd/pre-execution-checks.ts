@@ -492,7 +492,8 @@ export function checkTaskOrdering(
     const task = tasks[i];
     for (const file of task.expected_output) {
       const normalizedFile = normalizeFilePath(file);
-      if (!fileCreators.has(normalizedFile)) {
+      const existing = fileCreators.get(normalizedFile);
+      if (!existing || (!existing.completed && task.status === "completed")) {
         fileCreators.set(normalizedFile, {
           taskId: task.id,
           index: i,

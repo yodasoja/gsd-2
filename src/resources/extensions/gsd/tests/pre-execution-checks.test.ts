@@ -1645,6 +1645,54 @@ describe("checkTaskOrdering false positive for pre-execution refs (#4071)", () =
     assert.ok(results[0].message.includes("sequence violation"));
   });
 
+  test("pending-first then completed-later: completed replaces pending in fileCreators (#4572)", () => {
+    // Regression for CodeRabbit Major finding on PR #4572:
+    // fileCreators only stored the FIRST task for a given path. If a PENDING task at
+    // array index 1 was registered first, and a COMPLETED task at array index 2 also
+    // declared the same output path, the completed entry was discarded. Line ~529 then
+    // saw a pending creator with index > i and incorrectly fired a sequence violation
+    // for the reader at array index 0.
+    //
+    // Scenario: path first declared by pending task (index 1), then by completed task
+    // (index 2). Reader is at index 0. Without the fix a violation fires; with the fix
+    // the completed entry replaces the pending entry and grants the exemption.
+    const tasks = [
+      // array index 0 — reads the shared path
+      createTask({
+        id: "T_READER",
+        sequence: 1,
+        status: "pending",
+        inputs: ["shared/artifact.json"],
+        expected_output: [],
+      }),
+      // array index 1 — pending producer (visited first during map build)
+      createTask({
+        id: "T_PENDING_PRODUCER",
+        sequence: 5,
+        status: "pending",
+        inputs: [],
+        expected_output: ["shared/artifact.json"],
+      }),
+      // array index 2 — completed producer (visited second; must replace pending entry)
+      createTask({
+        id: "T_COMPLETED_PRODUCER",
+        sequence: 2,
+        status: "completed",
+        inputs: [],
+        expected_output: ["shared/artifact.json"],
+      }),
+    ];
+
+    // Without the fix: creator = T_PENDING_PRODUCER (index 1), !creator.completed && 1 > 0 → violation.
+    // With the fix:    creator = T_COMPLETED_PRODUCER (index 2), creator.completed → no violation.
+    const results = checkTaskOrdering(tasks, "/tmp");
+    assert.equal(
+      results.length,
+      0,
+      "completed producer must replace pending producer in fileCreators and suppress false violation",
+    );
+  });
+
   test("completed task output exemption applies regardless of whether file exists on disk", (t) => {
     // The completed-task exemption must work even when the file is not on disk
     // (e.g., the file was a temporary artifact that was cleaned up after the task ran).
