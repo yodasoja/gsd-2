@@ -644,6 +644,50 @@ export function validatePreferences(preferences: GSDPreferences): {
     }
   }
 
+  // ─── Context Mode (gsd_exec sandbox) ────────────────────────────────────
+  if (preferences.context_mode !== undefined) {
+    if (typeof preferences.context_mode === "object" && preferences.context_mode !== null) {
+      const cmode = preferences.context_mode as unknown as Record<string, unknown>;
+      const validCmode: Record<string, unknown> = {};
+
+      if (cmode.enabled !== undefined) {
+        if (typeof cmode.enabled === "boolean") validCmode.enabled = cmode.enabled;
+        else errors.push("context_mode.enabled must be a boolean");
+      }
+      if (cmode.exec_timeout_ms !== undefined) {
+        const t = cmode.exec_timeout_ms;
+        if (typeof t === "number" && t >= 1000 && t <= 600_000) validCmode.exec_timeout_ms = Math.floor(t);
+        else errors.push("context_mode.exec_timeout_ms must be a number between 1000 and 600000");
+      }
+      if (cmode.exec_stdout_cap_bytes !== undefined) {
+        const b = cmode.exec_stdout_cap_bytes;
+        if (typeof b === "number" && b >= 4096 && b <= 16_777_216) validCmode.exec_stdout_cap_bytes = Math.floor(b);
+        else errors.push("context_mode.exec_stdout_cap_bytes must be a number between 4096 and 16777216");
+      }
+      if (cmode.exec_digest_chars !== undefined) {
+        const c = cmode.exec_digest_chars;
+        if (typeof c === "number" && c >= 0 && c <= 4000) validCmode.exec_digest_chars = Math.floor(c);
+        else errors.push("context_mode.exec_digest_chars must be a number between 0 and 4000");
+      }
+      if (cmode.exec_env_allowlist !== undefined) {
+        if (
+          Array.isArray(cmode.exec_env_allowlist) &&
+          cmode.exec_env_allowlist.every((v) => typeof v === "string" && /^[A-Z_][A-Z0-9_]*$/i.test(v))
+        ) {
+          validCmode.exec_env_allowlist = cmode.exec_env_allowlist;
+        } else {
+          errors.push("context_mode.exec_env_allowlist must be an array of valid env var names");
+        }
+      }
+
+      if (Object.keys(validCmode).length > 0) {
+        validated.context_mode = validCmode as any;
+      }
+    } else {
+      errors.push("context_mode must be an object");
+    }
+  }
+
   // ─── Parallel Config ────────────────────────────────────────────────────
   if (preferences.parallel && typeof preferences.parallel === "object") {
     const p = preferences.parallel as unknown as Record<string, unknown>;
