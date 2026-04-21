@@ -328,6 +328,16 @@ function extractPathFromAnnotation(raw: string): string {
     return backtickMatch[2].trim();
   }
 
+  // Strip leading/trailing double or single quotes wrapping the whole value.
+  // Plan documents sometimes emit `"src/foo.ts"` or `'src/bar.ts'` as input
+  // annotations. Stripping the wrapper allows the inner path to be checked
+  // correctly instead of producing a false-positive "file not found" error
+  // for a literal string with quote characters in it (#3747).
+  const quoteMatch = trimmed.match(/^(["'])([^"']+)\1$/);
+  if (quoteMatch) {
+    return quoteMatch[2].trim();
+  }
+
   const annotatedMatch = trimmed.match(/^(.+?)\s+[—–-]\s+.+$/);
   if (annotatedMatch) {
     const prefix = annotatedMatch[1].trim();

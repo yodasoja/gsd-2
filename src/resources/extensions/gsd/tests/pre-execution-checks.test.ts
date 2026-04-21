@@ -1879,3 +1879,125 @@ describe("checkFilePathConsistency self-referential inputs (#4459)", () => {
     );
   });
 });
+
+// ─── Regression Tests: quote-wrapped inputs treated as literal paths (#3747) ──
+
+describe("checkFilePathConsistency quote-wrapped annotation (#3747)", () => {
+  test("double-quoted path annotation is stripped before path check", (t) => {
+    // Plan documents sometimes emit `"src/foo.ts"` (double-quote wrapped) as an
+    // input value. The checker must strip the quotes before checking existence so
+    // it doesn't produce a false-positive "file not found" error.
+    const tempDir = join(tmpdir(), `pre-exec-quote-${Date.now()}`);
+    mkdirSync(join(tempDir, "src"), { recursive: true });
+    writeFileSync(join(tempDir, "src/foo.ts"), "// content");
+    t.after(() => rmSync(tempDir, { recursive: true, force: true }));
+
+    const tasks = [
+      createTask({
+        id: "T01",
+        inputs: ['"src/foo.ts"'],
+        expected_output: [],
+      }),
+    ];
+
+    const results = checkFilePathConsistency(tasks, tempDir);
+    assert.equal(
+      results.length,
+      0,
+      "Double-quoted path should be stripped and resolved to the real file",
+    );
+  });
+
+  test("single-quoted path annotation is stripped before path check", (t) => {
+    const tempDir = join(tmpdir(), `pre-exec-squote-${Date.now()}`);
+    mkdirSync(join(tempDir, "src"), { recursive: true });
+    writeFileSync(join(tempDir, "src/bar.ts"), "// content");
+    t.after(() => rmSync(tempDir, { recursive: true, force: true }));
+
+    const tasks = [
+      createTask({
+        id: "T01",
+        inputs: ["'src/bar.ts'"],
+        expected_output: [],
+      }),
+    ];
+
+    const results = checkFilePathConsistency(tasks, tempDir);
+    assert.equal(
+      results.length,
+      0,
+      "Single-quoted path should be stripped and resolved to the real file",
+    );
+  });
+
+  test("backtick-only wrapped path without annotation resolves correctly", (t) => {
+    // The bare form `src/foo.ts` (no dash annotation) must also work
+    const tempDir = join(tmpdir(), `pre-exec-backtick-bare-${Date.now()}`);
+    mkdirSync(join(tempDir, "src"), { recursive: true });
+    writeFileSync(join(tempDir, "src/baz.ts"), "// content");
+    t.after(() => rmSync(tempDir, { recursive: true, force: true }));
+
+    const tasks = [
+      createTask({
+        id: "T01",
+        inputs: ["`src/baz.ts`"],
+        expected_output: [],
+      }),
+    ];
+
+    const results = checkFilePathConsistency(tasks, tempDir);
+    assert.equal(
+      results.length,
+      0,
+      "Bare backtick-wrapped path should resolve to the real file",
+    );
+  });
+
+  test("prose value with spaces inside quotes is skipped (not a path)", () => {
+    // "some description text" contains spaces — should not be checked as a path
+    const tasks = [
+      createTask({
+        id: "T01",
+        inputs: ['"some description text"'],
+        expected_output: [],
+      }),
+    ];
+
+    const results = checkFilePathConsistency(tasks, "/tmp");
+    assert.equal(
+      results.length,
+      0,
+      "Quoted prose with spaces should not be treated as a file path",
+    );
+  });
+
+  test("17-error scenario: mixed annotated inputs produce 0 blocking errors", (t) => {
+    // Reproduces the M004-ej6j88/S07 scenario from issue #3747 where a plan with
+    // multiple backtick- and quote-wrapped input strings causes 17 false blocking errors.
+    const tempDir = join(tmpdir(), `pre-exec-3747-scenario-${Date.now()}`);
+    mkdirSync(join(tempDir, "src"), { recursive: true });
+    writeFileSync(join(tempDir, "src/foo.ts"), "// content");
+    writeFileSync(join(tempDir, "src/bar.ts"), "// content");
+    t.after(() => rmSync(tempDir, { recursive: true, force: true }));
+
+    const tasks = [
+      createTask({
+        id: "T01",
+        inputs: [
+          "`src/foo.ts`",
+          '"src/bar.ts"',
+          "some description text",
+          "Existing enum definition",
+        ],
+        expected_output: [],
+      }),
+    ];
+
+    const results = checkFilePathConsistency(tasks, tempDir);
+    assert.equal(
+      results.length,
+      0,
+      "Annotated file paths and prose inputs should produce zero blocking errors",
+    );
+  });
+});
