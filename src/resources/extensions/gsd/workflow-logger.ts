@@ -59,7 +59,8 @@ export type LogComponent =
   | "memory-ingest"     // Memory layer ingestion pipeline
   | "memory-backfill"   // ADR-013: decisions->memories backfill
   | "context-mode"     // Context-mode exec sandbox and compaction snapshot
-  | "preflight";       // Clean-root preflight gate at milestone completion
+  | "preflight"        // Clean-root preflight gate at milestone completion
+  | "postUnit";     // Post-unit processing (abandon detection, overrides)
 
 export interface LogEntry {
   ts: string;

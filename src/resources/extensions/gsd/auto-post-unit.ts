@@ -71,6 +71,7 @@ import { resolveUokFlags } from "./uok/flags.js";
 import { UokGateRunner } from "./uok/gate-runner.js";
 import { writeTurnGitTransaction } from "./uok/gitops.js";
 import { isClosedStatus } from "./status-guards.js";
+import { detectAbandonMilestone } from "./abandon-detect.js";
 
 /** Maximum verification retry attempts before escalating to blocker placeholder (#2653). */
 const MAX_VERIFICATION_RETRIES = 3;
@@ -569,6 +570,35 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
     // Rewrite-docs completion
     if (s.currentUnit.type === "rewrite-docs") {
       await runSafely("postUnit", "rewrite-docs-resolve", async () => {
+        // Detect abandon/descope overrides BEFORE resolving them (#3490).
+        // If an override is about abandoning the milestone, park it so the
+        // state engine skips it. Without this, rewrite-docs only edits
+        // markdown but the DB still has the milestone as active.
+        try {
+          const { loadActiveOverrides } = await import("./files.js");
+          const overrides = await loadActiveOverrides(s.basePath);
+          const decision = detectAbandonMilestone(overrides, s.currentMilestoneId);
+          if (decision.shouldPark && s.currentMilestoneId) {
+            const { parkMilestone } = await import("./milestone-actions.js");
+            const parked = parkMilestone(s.basePath, s.currentMilestoneId, decision.reason);
+            if (parked) {
+              ctx.ui.notify(`Milestone ${s.currentMilestoneId} parked: "${decision.reason}"`, "info");
+            } else {
+              // Park refused: milestone directory missing, milestone already
+              // completed (SUMMARY present), or PARKED.md already exists.
+              // resolveAllOverrides below will still consume the override —
+              // surface this loudly so the user notices state drift rather
+              // than silently losing the abandon directive.
+              const msg = `Abandon detected for ${s.currentMilestoneId} but park refused (milestone is completed, already parked, or missing). Override will be resolved anyway — verify state is correct.`;
+              logError("engine", msg);
+              ctx.ui.notify(msg, "warning");
+            }
+          }
+        } catch (err) {
+          logError("engine", `abandon-detect failed: ${(err as Error).message}`);
+          ctx.ui.notify(`Abandon detection failed — check logs. Overrides will still be resolved.`, "warning");
+        }
+
         await resolveAllOverrides(s.basePath);
         // Reset both disk and in-memory counters. Disk counter is authoritative
         // (survives restarts); in-memory is kept in sync for the current session.
