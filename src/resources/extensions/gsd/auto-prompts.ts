@@ -530,7 +530,12 @@ export async function inlineKnowledgeBudgeted(
   keywords: string[],
   options?: { maxChars?: number },
 ): Promise<string | null> {
-  const maxChars = options?.maxChars ?? 30_000;
+  const DEFAULT_MAX_CHARS = 30_000;
+  const HARD_MAX_CHARS = 100_000;
+  const raw = Number(options?.maxChars ?? DEFAULT_MAX_CHARS);
+  const maxChars = Number.isFinite(raw)
+    ? Math.max(0, Math.min(Math.floor(raw), HARD_MAX_CHARS))
+    : DEFAULT_MAX_CHARS;
 
   const knowledgePath = resolveGsdRootFile(base, "KNOWLEDGE");
   if (!existsSync(knowledgePath)) return null;

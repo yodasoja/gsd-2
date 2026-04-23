@@ -306,6 +306,11 @@ test('inlineKnowledgeBudgeted: caps payload below budget for large files', async
     result!.length < content.length / 4,
     `payload should be much smaller than full content (${content.length} chars)`,
   );
+  assert.match(
+    result!,
+    /\[\.\.\.truncated \d+ chars; rerun with narrower scope if needed\]/,
+    'should include truncation note when budget is exceeded',
+  );
 
   rmSync(tmp, { recursive: true, force: true });
 });

@@ -243,7 +243,14 @@ export async function queryKnowledge(content: string, keywords: string[]): Promi
   if (sections.size === 0) return '';
   const prefix = useH3 ? '###' : '##';
 
-  const normalizedKeywords = keywords.map(k => k.toLowerCase());
+  // Trim, lowercase, drop empties, and de-dupe so callers can pass raw
+  // user-provided strings without risking empty-string / whitespace matches.
+  const normalizedKeywords = [...new Set(
+    keywords
+      .map(k => k.trim().toLowerCase())
+      .filter(k => k.length > 0),
+  )];
+  if (normalizedKeywords.length === 0) return '';
 
   const matchingSections: string[] = [];
 
