@@ -830,8 +830,13 @@ export async function showHeadlessMilestoneCreation(
   // Set pending auto start (auto-mode triggers on "Milestone X ready." via checkAutoStartAfterDiscuss)
   pendingAutoStartMap.set(basePath, { ctx, pi, basePath, milestoneId: nextId, createdAt: Date.now() });
 
-  // Dispatch — headless milestone creation is a planning activity
-  await dispatchWorkflow(pi, prompt, "gsd-run", ctx, "plan-milestone");
+  // Dispatch as discuss-milestone. The LLM writes PROJECT.md, REQUIREMENTS.md,
+  // and CONTEXT.md, then calls gsd_plan_milestone — this is semantically the
+  // discuss path, just non-interactive. Using "plan-milestone" here caused
+  // model/tool routing to skip discuss-flow tool scoping and
+  // `checkAutoStartAfterDiscuss` guardrails that rely on the
+  // "discuss-"-prefixed unitType.
+  await dispatchWorkflow(pi, prompt, "gsd-run", ctx, "discuss-milestone");
 }
 
 
