@@ -342,7 +342,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
       // is essential for roadmap integrity. Opt-out via explicit `false`.
       const reassessEnabled = prefs?.phases?.reassess_after_slice ?? true;
       if (!reassessEnabled) return null;
-      const needsReassess = await checkNeedsReassessment(basePath, mid, state, prefs);
+      const needsReassess = await checkNeedsReassessment(basePath, mid, state);
       if (!needsReassess) return null;
       return {
         action: "dispatch",

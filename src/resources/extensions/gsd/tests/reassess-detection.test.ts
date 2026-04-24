@@ -5,10 +5,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 
-import { checkNeedsReassessment, isSummaryCleanForSkip } from "../auto-prompts.ts";
+import { checkNeedsReassessment } from "../auto-prompts.ts";
 import { invalidateAllCaches } from "../cache.ts";
 import type { GSDState } from "../types.ts";
-import type { GSDPreferences } from "../preferences-types.ts";
 
 function makeTmpBase(): string {
   const base = join(tmpdir(), `gsd-test-reassess-${randomUUID()}`);
@@ -29,54 +28,6 @@ function writeSummary(base: string, sid: string): void {
   writeFileSync(
     join(base, ".gsd", "milestones", "M001", "slices", sid, `${sid}-SUMMARY.md`),
     `---\nid: ${sid}\n---\n# ${sid} Summary\nDone.`,
-  );
-}
-
-function writeCleanSummary(base: string, sid: string): void {
-  writeFileSync(
-    join(base, ".gsd", "milestones", "M001", "slices", sid, `${sid}-SUMMARY.md`),
-    `---
-id: ${sid}
-parent: M001
-milestone: M001
-key_decisions:
-  - (none)
-verification_result: passed
-blocker_discovered: false
----
-
-# ${sid}: Clean
-
-**One-liner.**
-
-## What Happened
-
-Nothing structural changed.
-`,
-  );
-}
-
-function writeDirtySummary(base: string, sid: string, body: string): void {
-  writeFileSync(
-    join(base, ".gsd", "milestones", "M001", "slices", sid, `${sid}-SUMMARY.md`),
-    `---
-id: ${sid}
-parent: M001
-milestone: M001
-key_decisions:
-  - (none)
-verification_result: passed
-blocker_discovered: false
----
-
-# ${sid}: Dirty
-
-**One-liner.**
-
-## What Happened
-
-${body}
-`,
   );
 }
 
@@ -200,101 +151,4 @@ test("checkNeedsReassessment returns null when all slices are complete", async (
   } finally {
     cleanup(base);
   }
-});
-
-// ─── #4778: skip_clean_reassess preference gate ──────────────────────────
-
-const prefsOptIn: GSDPreferences = { skip_clean_reassess: true };
-const prefsOptOut: GSDPreferences = {};
-
-test("#4778 skips reassessment when preference is on and summary is clean", async () => {
-  const base = makeTmpBase();
-  try {
-    invalidateAllCaches();
-    writeRoadmap(base, ROADMAP_S01_DONE_S02_TODO);
-    writeCleanSummary(base, "S01");
-
-    const result = await checkNeedsReassessment(base, "M001", dummyState, prefsOptIn);
-    assert.strictEqual(result, null, "clean summary + opt-in → skip");
-  } finally {
-    cleanup(base);
-  }
-});
-
-test("#4778 dispatches when preference is off even on clean summary (default)", async () => {
-  const base = makeTmpBase();
-  try {
-    invalidateAllCaches();
-    writeRoadmap(base, ROADMAP_S01_DONE_S02_TODO);
-    writeCleanSummary(base, "S01");
-
-    const result = await checkNeedsReassessment(base, "M001", dummyState, prefsOptOut);
-    assert.deepStrictEqual(result, { sliceId: "S01" }, "opt-out (default) → always dispatch");
-  } finally {
-    cleanup(base);
-  }
-});
-
-test("#4778 dispatches when body contains roadmap-change marker despite opt-in", async () => {
-  const base = makeTmpBase();
-  try {
-    invalidateAllCaches();
-    writeRoadmap(base, ROADMAP_S01_DONE_S02_TODO);
-    writeDirtySummary(base, "S01", "During work we should add slice for a follow-up API.");
-
-    const result = await checkNeedsReassessment(base, "M001", dummyState, prefsOptIn);
-    assert.deepStrictEqual(result, { sliceId: "S01" }, "roadmap-change marker → dispatch");
-  } finally {
-    cleanup(base);
-  }
-});
-
-test("#4778 dispatches when blocker_discovered is true", async () => {
-  const base = makeTmpBase();
-  try {
-    invalidateAllCaches();
-    writeRoadmap(base, ROADMAP_S01_DONE_S02_TODO);
-    writeFileSync(
-      join(base, ".gsd", "milestones", "M001", "slices", "S01", "S01-SUMMARY.md"),
-      `---\nid: S01\nparent: M001\nmilestone: M001\nkey_decisions:\n  - (none)\nverification_result: passed\nblocker_discovered: true\n---\n\n# S01: Blocked\n\n**One-liner.**\n\n## What Happened\n\nHit a blocker.\n`,
-    );
-
-    const result = await checkNeedsReassessment(base, "M001", dummyState, prefsOptIn);
-    assert.deepStrictEqual(result, { sliceId: "S01" }, "blocker_discovered=true → dispatch");
-  } finally {
-    cleanup(base);
-  }
-});
-
-test("#4778 dispatches when key_decisions is non-empty", async () => {
-  const base = makeTmpBase();
-  try {
-    invalidateAllCaches();
-    writeRoadmap(base, ROADMAP_S01_DONE_S02_TODO);
-    writeFileSync(
-      join(base, ".gsd", "milestones", "M001", "slices", "S01", "S01-SUMMARY.md"),
-      `---\nid: S01\nparent: M001\nmilestone: M001\nkey_decisions:\n  - chose SQLite over Postgres for local storage\nverification_result: passed\nblocker_discovered: false\n---\n\n# S01: Decided\n\n**One-liner.**\n\n## What Happened\n\nMade a cross-slice decision.\n`,
-    );
-
-    const result = await checkNeedsReassessment(base, "M001", dummyState, prefsOptIn);
-    assert.deepStrictEqual(result, { sliceId: "S01" }, "non-empty key_decisions → dispatch");
-  } finally {
-    cleanup(base);
-  }
-});
-
-// ─── isSummaryCleanForSkip unit tests ────────────────────────────────────
-
-test("isSummaryCleanForSkip: clean summary → true", () => {
-  const content = `---\nid: S01\nparent: M001\nmilestone: M001\nkey_decisions:\n  - (none)\nblocker_discovered: false\n---\n\n# S01\n\n**x.**\n\n## What Happened\n\nclean.\n`;
-  assert.strictEqual(isSummaryCleanForSkip(content), true);
-});
-
-test("isSummaryCleanForSkip: 'dependency discovered' marker → false", () => {
-  const content = `---\nid: S01\nparent: M001\nmilestone: M001\nkey_decisions:\n  - (none)\nblocker_discovered: false\n---\n\n# S01\n\n**x.**\n\n## What Happened\n\nA new dependency discovered between S03 and S05.\n`;
-  assert.strictEqual(isSummaryCleanForSkip(content), false);
-});
-
-test("isSummaryCleanForSkip: garbage input → false (conservative)", () => {
-  assert.strictEqual(isSummaryCleanForSkip(""), false);
 });

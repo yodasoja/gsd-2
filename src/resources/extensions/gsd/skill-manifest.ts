@@ -83,15 +83,17 @@ export function filterSkillsByManifest<T extends { name: string }>(
  * Dev-mode guard: warn once per process if a manifest entry references a name
  * that is not currently installed. Silent in production.
  */
-let warnedMissing: Set<string> | undefined;
+const warnedMissing = new Set<string>();
+
 export function warnIfManifestHasMissingSkills(
   unitType: string | undefined,
   installedNames: Set<string>,
 ): void {
-  if (!process.env.GSD_SKILL_MANIFEST_STRICT) return;
+  // Strict mode is intentionally opt-in via exactly "1"; values like "0" or
+  // "false" must preserve the normal silent manifest behavior.
+  if (process.env.GSD_SKILL_MANIFEST_STRICT !== "1") return;
   const allowlist = resolveSkillManifest(unitType);
   if (!allowlist) return;
-  warnedMissing ??= new Set();
   for (const name of allowlist) {
     const key = `${unitType}:${name}`;
     if (warnedMissing.has(key)) continue;
@@ -101,6 +103,3 @@ export function warnIfManifestHasMissingSkills(
     }
   }
 }
-
-/** Exposed for tests. */
-export const __INTERNAL__ = { UNIT_TYPE_SKILL_MANIFEST };

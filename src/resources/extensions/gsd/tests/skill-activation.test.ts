@@ -4,7 +4,13 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadSkills } from "@gsd/pi-coding-agent";
-import { buildSkillActivationBlock } from "../auto-prompts.js";
+import {
+  buildPlanMilestonePrompt,
+  buildResearchMilestonePrompt,
+  buildSkillActivationBlock,
+} from "../auto-prompts.js";
+import { warnIfManifestHasMissingSkills } from "../skill-manifest.js";
+import { _resetLogs, drainLogs, setStderrLoggingEnabled } from "../workflow-logger.js";
 import type { GSDPreferences } from "../preferences.js";
 
 function makeTempBase(): string {
@@ -23,6 +29,11 @@ function writeSkill(base: string, name: string, description: string): void {
 
 function loadOnlyTestSkills(base: string): void {
   loadSkills({ cwd: base, includeDefaults: false, skillPaths: [join(base, "skills")] });
+}
+
+function writeProjectPreferences(base: string, preferences: string): void {
+  mkdirSync(join(base, ".gsd"), { recursive: true });
+  writeFileSync(join(base, ".gsd", "PREFERENCES.md"), `---\n${preferences}---\n`);
 }
 
 function buildBlock(
@@ -287,4 +298,52 @@ test("buildSkillActivationBlock without unitType preserves pre-manifest behavior
   } finally {
     cleanup(base);
   }
+});
+
+test("milestone prompt builders pass their unit type to the skill manifest", async () => {
+  const base = makeTempBase();
+  try {
+    writeSkill(base, "write-docs", "Use when writing docs or RFCs.");
+    writeSkill(base, "swiftui", "Use for SwiftUI views.");
+    writeProjectPreferences(base, "always_use_skills:\n  - write-docs\n  - swiftui\n");
+    loadOnlyTestSkills(base);
+
+    const researchPrompt = await buildResearchMilestonePrompt("M001", "Test", base);
+    assert.match(researchPrompt, /Call Skill\(\{ skill: 'write-docs' \}\)/);
+    assert.doesNotMatch(researchPrompt, /swiftui/);
+
+    const planPrompt = await buildPlanMilestonePrompt("M001", "Test", base);
+    assert.match(planPrompt, /Call Skill\(\{ skill: 'write-docs' \}\)/);
+    assert.doesNotMatch(planPrompt, /swiftui/);
+  } finally {
+    cleanup(base);
+  }
+});
+
+test("skill manifest strict warnings require GSD_SKILL_MANIFEST_STRICT=1", (t) => {
+  const previousStrict = process.env.GSD_SKILL_MANIFEST_STRICT;
+  const previousStderr = setStderrLoggingEnabled(false);
+  t.after(() => {
+    if (previousStrict === undefined) {
+      delete process.env.GSD_SKILL_MANIFEST_STRICT;
+    } else {
+      process.env.GSD_SKILL_MANIFEST_STRICT = previousStrict;
+    }
+    setStderrLoggingEnabled(previousStderr);
+    _resetLogs();
+  });
+
+  process.env.GSD_SKILL_MANIFEST_STRICT = "0";
+  _resetLogs();
+  warnIfManifestHasMissingSkills("research-milestone", new Set());
+  assert.equal(drainLogs().length, 0, "strict=0 must preserve silent behavior");
+
+  process.env.GSD_SKILL_MANIFEST_STRICT = "1";
+  _resetLogs();
+  warnIfManifestHasMissingSkills("research-milestone", new Set());
+  const logs = drainLogs();
+  assert.ok(
+    logs.some(log => log.message.includes("skill-manifest: references uninstalled skill")),
+    "strict=1 should warn about missing manifest entries",
+  );
 });

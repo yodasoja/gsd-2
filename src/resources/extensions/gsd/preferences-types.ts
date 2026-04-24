@@ -103,7 +103,6 @@ export const KNOWN_PREFERENCE_KEYS = new Set<string>([
   "skill_staleness_days",
   "auto_supervisor",
   "uat_dispatch",
-  "skip_clean_reassess",
   "unique_milestone_ids",
   "budget_ceiling",
   "budget_enforcement",
@@ -310,13 +309,6 @@ export interface GSDPreferences {
   skill_staleness_days?: number;  // Skills unused for N days get deprioritized (#599). 0 = disabled. Default: 60.
   auto_supervisor?: AutoSupervisorConfig;
   uat_dispatch?: boolean;
-  /**
-   * When true, skip the reassess-roadmap unit after a slice whose SUMMARY
-   * shows no blockers, no key decisions, and no roadmap-change markers in
-   * the body. Opt-in — default false preserves current always-dispatch
-   * behavior. Conservative: any parse ambiguity falls back to dispatch.
-   */
-  skip_clean_reassess?: boolean;
   unique_milestone_ids?: boolean;
   budget_ceiling?: number;
   budget_enforcement?: BudgetEnforcementMode;

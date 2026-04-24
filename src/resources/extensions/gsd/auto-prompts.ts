@@ -670,7 +670,7 @@ export function buildSkillActivationBlock(params: {
    */
   unitType?: string;
 }): string {
-  const prefs = params.preferences ?? loadEffectiveGSDPreferences()?.preferences;
+  const prefs = params.preferences ?? loadEffectiveGSDPreferences(params.base)?.preferences;
   const contextTokens = tokenizeSkillContext(
     params.milestoneId,
     params.milestoneTitle,
@@ -932,12 +932,9 @@ export async function getDependencyTaskSummaryPaths(
  * - No slices are completed
  * - The last completed slice already has an assessment file
  * - All slices are complete (milestone done — no point reassessing)
- * - Preference `skip_clean_reassess` is true AND the slice SUMMARY signals
- *   a structurally clean completion (see isSummaryCleanForSkip). Opt-in;
- *   any parse ambiguity falls back to dispatch (#4778).
  */
 export async function checkNeedsReassessment(
-  base: string, mid: string, state: GSDState, prefs?: GSDPreferences,
+  base: string, mid: string, state: GSDState,
 ): Promise<{ sliceId: string } | null> {
   // DB primary path — fall through to file-based when DB has no data for this milestone
   try {
@@ -953,9 +950,8 @@ export async function checkNeedsReassessment(
         const hasAssessment = !!(assessmentFile && await loadFile(assessmentFile));
         if (hasAssessment) return null;
         const summaryFile = resolveSliceFile(base, mid, lastCompleted, "SUMMARY");
-        const summaryContent = summaryFile ? await loadFile(summaryFile) : null;
-        if (!summaryContent) return null;
-        if (prefs?.skip_clean_reassess && isSummaryCleanForSkip(summaryContent)) return null;
+        const hasSummary = !!(summaryFile && await loadFile(summaryFile));
+        if (!hasSummary) return null;
         return { sliceId: lastCompleted };
       }
     }
@@ -977,64 +973,9 @@ export async function checkNeedsReassessment(
   const hasAssess = !!(assessFile && await loadFile(assessFile));
   if (hasAssess) return null;
   const summFile = resolveSliceFile(base, mid, lastDone, "SUMMARY");
-  const summContent = summFile ? await loadFile(summFile) : null;
-  if (!summContent) return null;
-  if (prefs?.skip_clean_reassess && isSummaryCleanForSkip(summContent)) return null;
+  const hasSumm = !!(summFile && await loadFile(summFile));
+  if (!hasSumm) return null;
   return { sliceId: lastDone };
-}
-
-/**
- * Return true when a slice SUMMARY signals a structurally clean completion
- * that makes reassess-roadmap dispatch unnecessary. Gated behind the
- * `skip_clean_reassess` preference — default behavior preserves today's
- * always-dispatch. Conservative: returns false on any parse ambiguity.
- *
- * Clean requires ALL of:
- *  - frontmatter `blocker_discovered` is false/absent
- *  - frontmatter `key_decisions` empty or the sentinel "(none)"
- *  - body contains no roadmap-change markers
- *
- * Body markers are matched as case-insensitive substrings. This is
- * intentionally unconditional: negation phrases like "no scope expansion
- * was required" will also mark the summary dirty and dispatch. That's the
- * safe direction — over-dispatch costs a unit, missed dispatch risks a
- * stale roadmap. If the marker list needs to grow, add conservative
- * synonyms only; anything ambiguous should err toward dispatch.
- */
-export function isSummaryCleanForSkip(content: string): boolean {
-  try {
-    const summary = parseSummary(content);
-    // Require a recognizable summary — empty/garbage content parses to an
-    // empty frontmatter, which must not count as "clean".
-    if (!summary.frontmatter.id) return false;
-    if (summary.frontmatter.blocker_discovered === true) return false;
-
-    const decisions = (summary.frontmatter.key_decisions ?? [])
-      .map(d => d.trim())
-      .filter(d => d.length > 0 && d.toLowerCase() !== "(none)");
-    if (decisions.length > 0) return false;
-
-    const ROADMAP_CHANGE_MARKERS = [
-      "add slice",
-      "added slice",
-      "remove slice",
-      "removed slice",
-      "new slice",
-      "scope expansion",
-      "scope change",
-      "scope widened",
-      "dependency discovered",
-      "added dependency",
-      "new dependency",
-    ];
-    const haystack = content.toLowerCase();
-    for (const marker of ROADMAP_CHANGE_MARKERS) {
-      if (haystack.includes(marker)) return false;
-    }
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /**
