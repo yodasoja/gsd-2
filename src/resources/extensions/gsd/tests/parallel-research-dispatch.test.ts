@@ -11,20 +11,21 @@
  * replaced.
  */
 
-// Point GSD_HOME at a throwaway directory *before* the prompt-loader
-// module is imported so templates resolve from the in-tree prompts/
-// directory instead of a developer's ~/.gsd/ copy (which may be a stale
-// cached version from a prior install — see #4784 fallout). Set via
-// globalThis assignment + dynamic import so the value is live at the
-// top-level of the loader module.
-process.env.GSD_HOME = process.env.GSD_HOME_TEST_OVERRIDE
-  ?? `/tmp/gsd-test-home-${process.pid}-${Date.now()}`;
-
 import { describe, test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+
+// Point GSD_HOME at a throwaway directory *before* the prompt-loader
+// module is imported (via the dynamic imports below) so templates
+// resolve from the in-tree prompts/ directory instead of a developer's
+// ~/.gsd/ copy (which may be a stale cached version from a prior
+// install — see #4784 fallout). Static imports above are hoisted, so
+// `tmpdir` and `join` are already available at this point; the dynamic
+// imports below observe the value we set here.
+process.env.GSD_HOME = process.env.GSD_HOME_TEST_OVERRIDE
+  ?? join(tmpdir(), `gsd-test-home-${process.pid}-${Date.now()}`);
 
 const { resolveDispatch } = await import("../auto-dispatch.ts");
 const { buildParallelResearchSlicesPrompt } = await import("../auto-prompts.ts");
@@ -274,12 +275,12 @@ describe("buildParallelResearchSlicesPrompt", () => {
 
     // Anti-pattern: the unbounded "re-run it individually" instruction
     // that caused the original infinite loop must not appear on its own.
-    // (It is allowed when paired with a retry bound — e.g.
-    // "retry it **once** individually" — so match the unbounded form
-    // explicitly.)
+    // The negative lookahead is bounded to the surrounding 100
+    // characters so a later unrelated "once" elsewhere in the prompt
+    // cannot falsely satisfy the "paired with a retry bound" exception.
     assert.doesNotMatch(
       prompt,
-      /re-run it individually(?!.*\bonce\b)/i,
+      /re-run it individually(?![\s\S]{0,100}\bonce\b)/i,
       "rendered prompt must not contain the unbounded re-run instruction",
     );
   });
