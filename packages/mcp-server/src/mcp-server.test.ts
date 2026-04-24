@@ -807,9 +807,33 @@ describe('withElicitTimeout', () => {
     );
   });
 
-  it('clears the timer when the promise resolves (no dangling timer)', async () => {
-    const start = Date.now();
-    await withElicitTimeout(Promise.resolve('done'), 'test', 50);
-    assert.ok(Date.now() - start < 40, 'should not wait for the timeout');
+  it('clears the timer when the promise resolves (no dangling timer)', async (t) => {
+    // Deterministic test using node:test mock timers. Under a large timeout,
+    // the wrapped promise resolves synchronously; we then advance virtual
+    // time past the timeout and assert no stray rejection surfaces — which
+    // is the observable proof that `clearTimeout` ran in the `finally`.
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+
+    let strayRejection: unknown = null;
+    const catcher = (reason: unknown) => {
+      strayRejection = reason;
+    };
+    process.on('unhandledRejection', catcher);
+
+    try {
+      const value = await withElicitTimeout(Promise.resolve('done'), 'test', 50_000);
+      assert.equal(value, 'done');
+
+      // Advance virtual time well past the would-be timeout.
+      t.mock.timers.tick(60_000);
+
+      // Flush microtasks to let any pending rejection surface.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      assert.equal(strayRejection, null, 'timer should have been cleared — no rejection should fire');
+    } finally {
+      process.removeListener('unhandledRejection', catcher);
+    }
   });
 });
