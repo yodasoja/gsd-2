@@ -765,42 +765,33 @@ export const executeTaskComplete = async (params, projectDir) => {
       }
 
       // Arm 2: sketch slice (isSketch=true + sketchScope) with heavy fields
-      // omitted must NOT reject at schema validation — the handler may still
-      // surface domain-level errors (e.g. disk/gate state), but the
-      // rejection must not come from the same heavy-field names, proving the
-      // conditional path is live.
-      let sketchError: unknown;
-      try {
-        await milestoneTool!.handler({
-          projectDir: base,
-          milestoneId: "M002",
-          title: "Sketch slice path",
-          vision: "Behavioral test for isSketch conditional.",
-          slices: [
-            {
-              sliceId: "S01",
-              title: "Sketch slice",
-              risk: "medium",
-              depends: [],
-              demo: "Demo.",
-              goal: "Goal.",
-              isSketch: true,
-              sketchScope: "Two-sentence scope. Boundary defined.",
-            },
-          ],
-        });
-      } catch (err) {
-        sketchError = err;
-      }
-      if (sketchError) {
-        const sketchMsg = sketchError instanceof Error ? sketchError.message : String(sketchError);
-        for (const field of ["successCriteria", "proofLevel", "integrationClosure", "observabilityImpact"]) {
-          assert.ok(
-            !sketchMsg.includes(field),
-            `sketch slice with isSketch=true must not be rejected for missing ${field}; got: ${sketchMsg}`,
-          );
-        }
-      }
+      // omitted must be accepted — proving the conditional is live. Assert
+      // success directly rather than just checking a thrown message omits
+      // the heavy-field names: a generic failure would otherwise silently
+      // pass this arm.
+      const sketchResult = await milestoneTool!.handler({
+        projectDir: base,
+        milestoneId: "M002",
+        title: "Sketch slice path",
+        vision: "Behavioral test for isSketch conditional.",
+        slices: [
+          {
+            sliceId: "S01",
+            title: "Sketch slice",
+            risk: "medium",
+            depends: [],
+            demo: "Demo.",
+            goal: "Goal.",
+            isSketch: true,
+            sketchScope: "Two-sentence scope. Boundary defined.",
+          },
+        ],
+      });
+      assert.match(
+        (sketchResult as any).content[0].text as string,
+        /Planned milestone M002/,
+        "sketch slice with isSketch=true must be accepted by the handler",
+      );
     } finally {
       cleanup(base);
     }

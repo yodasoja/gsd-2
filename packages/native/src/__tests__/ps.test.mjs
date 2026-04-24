@@ -72,12 +72,16 @@ describe("native ps: killTree()", () => {
     // will find something to kill.
     await once(child, "spawn");
 
+    // Register the exit listener BEFORE killTree: Node EventEmitter does
+    // not buffer events, so if the process exits between the kill and the
+    // once() call the promise never resolves and the test hangs.
+    const exited = once(child, "exit");
     const killed = native.killTree(child.pid, 9);
     assert.ok(killed >= 1, `should kill at least 1 process, killed: ${killed}`);
 
     // Verify the child is actually dead. `once` waits deterministically
     // for the exit signal rather than a wall-clock timeout.
-    await once(child, "exit");
+    await exited;
   });
 
   test("returns 0 for non-existent PID", () => {
