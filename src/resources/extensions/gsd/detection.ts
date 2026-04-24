@@ -1141,12 +1141,13 @@ export function hasProjectFileInAncestor(
   let checkDir = dirname(startDir);
   const { root } = parsePath(checkDir);
   while (checkDir !== root) {
-    // Stop at git repository boundary — ancestors above the repo root
-    // may contain unrelated project files.
-    if (existsFn(join(checkDir, ".git"))) return false;
     if (PROJECT_FILES.some((f) => existsFn(join(checkDir, f)))) {
       return true;
     }
+    // Stop at git repository boundary — ancestors above the repo root
+    // may contain unrelated project files. Check AFTER project-file scan
+    // so a repo root containing both .git and a marker is still recognized.
+    if (existsFn(join(checkDir, ".git"))) return false;
     checkDir = dirname(checkDir);
   }
   return false;
@@ -1171,6 +1172,7 @@ export function hasGsdBootstrapArtifacts(
   return (
     existsFn(gsdPath) &&
     (existsFn(join(gsdPath, "PREFERENCES.md")) ||
+      existsFn(join(gsdPath, "preferences.md")) ||
       existsFn(join(gsdPath, "milestones")))
   );
 }

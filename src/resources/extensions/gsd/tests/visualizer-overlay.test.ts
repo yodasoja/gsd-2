@@ -339,9 +339,15 @@ test("overlay scrollOffsets array has one slot per tab (10 tabs total)", (t) => 
 
 // ─── Dispose cleanup ─────────────────────────────────────────────────────
 
-test("overlay dispose clears its refresh timer and resize listener", () => {
+test("overlay dispose is idempotent and flips the disposed flag", (t) => {
   const { tui } = makeTui();
   const overlay = new GSDVisualizerOverlay(tui as any, mockTheme, () => {});
+  // Ensure constructor-owned resources are released even if an assertion
+  // below fails — dispose() is documented as idempotent, so a teardown
+  // call after the body's explicit dispose is a no-op.
+  t.after(() => {
+    try { overlay.dispose(); } catch { /* already disposed */ }
+  });
 
   // Sanity: disposed flag flips
   assert.equal(overlay.disposed, false);

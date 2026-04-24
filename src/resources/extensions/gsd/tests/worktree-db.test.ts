@@ -127,7 +127,8 @@ test("copyWorktreeDb returns false when source doesn't exist", (t) => {
   const destDir = tempDir();
   registerCleanup(t, destDir);
 
-  const result = copyWorktreeDb("/nonexistent/path/gsd.db", path.join(destDir, "gsd.db"));
+  const missingSrc = path.join(destDir, "missing", "gsd.db");
+  const result = copyWorktreeDb(missingSrc, path.join(destDir, "gsd.db"));
   assert.equal(result, false, "returns false for missing source");
 });
 
@@ -251,7 +252,10 @@ test("reconcileWorktreeDb merges new artifacts from worktree into main", (t) => 
   assert.ok(result.artifacts > 0, "artifacts merged count > 0");
   const adapter = _getAdapter()!;
   const row = adapter.prepare("SELECT * FROM artifacts WHERE path = ?").get("docs/api.md");
-  assert.ok(row !== null, "artifact from worktree now in main");
+  // Statement#get returns undefined (not null) when no row matches, so use
+  // loose inequality to catch both — strict `!== null` would silently let a
+  // missing artifact row pass this assertion.
+  assert.ok(row != null, "artifact from worktree now in main");
   assert.equal((row as any)["artifact_type"], "reference", "artifact data correct after merge");
 });
 
@@ -299,7 +303,8 @@ test("reconcileWorktreeDb handles missing worktree DB gracefully", (t) => {
   const mainDb = path.join(mainDir, "gsd.db");
   seedMainDb(mainDb);
 
-  const result = reconcileWorktreeDb(mainDb, "/nonexistent/worktree.db");
+  const missingWt = path.join(mainDir, "missing-worktree.db");
+  const result = reconcileWorktreeDb(mainDb, missingWt);
   assert.equal(result.decisions, 0, "no decisions merged for missing worktree DB");
   assert.equal(result.requirements, 0, "no requirements merged for missing worktree DB");
   assert.equal(result.artifacts, 0, "no artifacts merged for missing worktree DB");
