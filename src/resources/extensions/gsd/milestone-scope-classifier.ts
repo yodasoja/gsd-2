@@ -128,14 +128,22 @@ function extractFileCountHint(text: string): number | null {
   return null;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function containsAnyKeyword(haystack: string, keywords: ReadonlyArray<string>): string[] {
   const lower = haystack.toLowerCase();
   const hits: string[] = [];
   for (const kw of keywords) {
-    // Substring match, not word-boundary — keyword list is curated so that
-    // substring hits rarely overmatch. Phrases like "no authentication" still
-    // match "authentication" and force standard — that's the safe direction.
-    if (lower.includes(kw)) hits.push(kw);
+    // Word-boundary match to prevent substring collisions (e.g. "auth"
+    // must not match "author", "api" must not match "capital"). Phrases
+    // containing non-word characters (hyphens, slashes) still work because
+    // `\b` sits at the word-char / non-word-char transition, so
+    // `\bbrowser-based\b` matches "browser-based" bounded by whitespace
+    // or punctuation on either side.
+    const pattern = new RegExp(String.raw`\b${escapeRegExp(kw)}\b`, "i");
+    if (pattern.test(lower)) hits.push(kw);
   }
   return hits;
 }
@@ -190,11 +198,14 @@ function mentionsBackend(haystack: string): boolean {
 /**
  * Classify a milestone's pipeline variant based on its planning inputs.
  *
- * Precedence:
- *  1. Override keyword → `standard` (at minimum). Prevents trivial
- *     misclassification of security / auth / migration work.
- *  2. Complex-signal keyword OR ≥ 8 file hint OR architecture/refactor-core
+ * Precedence (matches implementation order — complex-first so that
+ * security-sensitive architecture refactors correctly route to complex
+ * rather than standard; the override hit is still recorded in
+ * `signals.triggeredOverride` for telemetry):
+ *  1. Complex-signal keyword OR ≥ 8 file hint OR architecture/refactor-core
  *     language → `complex`.
+ *  2. Override keyword → `standard` (at minimum). Prevents trivial
+ *     misclassification of security / auth / migration work.
  *  3. Trivial-signal keyword AND ≤ 2 file hint AND no tests mentioned AND
  *     no backend mentioned → `trivial`.
  *  4. Otherwise → `standard`.

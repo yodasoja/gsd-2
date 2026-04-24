@@ -57,17 +57,16 @@ test("#4781 classifier: security review scope → standard (even if small)", () 
   assert.ok(r.signals.triggeredOverride);
 });
 
-test("#4781 classifier: schema migration mentioned → complex (overrides override)", () => {
+test("#4781 classifier: schema migration mentioned → standard (override-level signal)", () => {
   const r = classifyMilestoneScope({
     title: "User profile v2",
     vision: "Perform schema migration to split user.name into first_name and last_name across the users table.",
     successCriteria: ["Migration lands", "Existing rows backfilled", "Rollback path validated"],
   });
-  // schema change + migrate both hit COMPLEX_KEYWORDS ("schema redesign" no; "migration" is in OVERRIDE).
-  // But COMPLEX_KEYWORDS also contains "schema redesign" and "breaking change" — this copy triggers OVERRIDE only.
-  // The classifier precedence puts complex BEFORE override on complex keywords; since none of the
-  // COMPLEX_KEYWORDS fire here ("migration" is only in OVERRIDE), the result is standard, not complex.
-  // This is the correct safe behavior: migration is override-level, not complex-level.
+  // "migration" / "migrate" / "backfill" are OVERRIDE_KEYWORDS, not
+  // COMPLEX_KEYWORDS — migration is override-level (forces at least
+  // `standard`), not complex-level. Safe behavior: migrations need the
+  // full standard pipeline but not the extra ceremony of complex.
   assert.strictEqual(r.variant, "standard", `reasons: ${r.reasons.join("; ")}`);
 });
 
