@@ -685,6 +685,12 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
           logError("engine", `slice-cadence merge failed for ${sid}`, {
             error: err instanceof Error ? err.message : String(err),
           });
+          // Non-conflict failures (dirty main, rev-walk error, etc.) can
+          // leave the checkout in an unexpected state. Stop auto-mode so
+          // the next slice doesn't dispatch on top of it.
+          const { stopAuto } = await import("./auto.js");
+          await stopAuto(ctx, undefined, `slice-merge-error on ${sid}`);
+          sliceMergeStopped = true;
         }
       });
       // Exit early after stopAuto so the rest of post-unit processing
