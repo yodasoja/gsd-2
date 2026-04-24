@@ -653,15 +653,36 @@ export function containsTypeScriptSyntax(source: string): boolean {
  * are compiled once and reused across all extensions.
  */
 let _extensionLoaderJiti: ReturnType<typeof createJiti> | null = null;
+// Tracks every extension-module path that jiti has compiled through the shared
+// singleton so resetExtensionLoaderCache() can also evict Node's global
+// require.cache entries for those modules. jiti stores compiled modules under
+// `nativeRequire.cache[filename]` when `moduleCache: true`, so a new singleton
+// still returns the stale cached module on re-import without this eviction.
+const _loadedExtensionPaths = new Set<string>();
+const _extensionRequire = createRequire(import.meta.url);
 
 /**
  * Reset the shared jiti singleton so the next call to getExtensionLoaderJiti()
  * creates a fresh instance.  This prevents memory leaks in long-running daemon
  * processes (every loaded module stays cached forever) and ensures stale modules
  * are not returned when extension source changes on disk.
+ *
+ * #3616: resetting the singleton alone is insufficient — jiti stores compiled
+ * modules in Node's global require.cache when `moduleCache: true`, which is
+ * shared across singletons. We also evict cached entries for every extension
+ * path we've previously loaded so the next import recompiles from disk.
  */
 export function resetExtensionLoaderCache(): void {
 	_extensionLoaderJiti = null;
+	for (const extensionPath of _loadedExtensionPaths) {
+		try {
+			delete _extensionRequire.cache[extensionPath];
+		} catch {
+			// require.cache is best-effort; ignore failures (e.g. path was never
+			// actually cached, or cache is frozen in some runtime).
+		}
+	}
+	_loadedExtensionPaths.clear();
 }
 
 function getExtensionLoaderJiti() {
@@ -696,6 +717,7 @@ async function loadExtensionModule(extensionPath: string) {
 	const jiti = getExtensionLoaderJiti();
 
 	const module = await jiti.import(extensionPath, { default: true });
+	_loadedExtensionPaths.add(extensionPath);
 	const factory = module as ExtensionFactory;
 	return typeof factory !== "function" ? undefined : factory;
 }
