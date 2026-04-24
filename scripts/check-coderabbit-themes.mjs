@@ -229,9 +229,28 @@ function checkOnceAfterTrigger(filePath, source) {
 
 const TS_IMPORT_RE = /(?:from\s+['"]|import\s*\(\s*['"])[^'"]+\.ts['"]/;
 
+function stripCommentsAndStrings(source) {
+  // Remove // line comments, /* */ block comments, and template/quoted
+  // string contents before scanning for actual import statements. This
+  // prevents false positives when doc comments or string fixtures contain
+  // text that looks like a .ts import.
+  let out = source.replace(/\/\*[\s\S]*?\*\//g, "");
+  out = out.replace(/(^|[^:])\/\/.*$/gm, "$1");
+  // Strip string and template-literal bodies (preserve the quote chars so
+  // import statements outside strings remain intact).
+  out = out.replace(/`(?:\\.|\$\{[^}]*\}|[^`\\])*`/g, "``");
+  out = out.replace(/'(?:\\.|[^'\\])*'/g, "''");
+  // Keep real `from "…"` import quotes — use a regex that only collapses
+  // strings NOT immediately following `from ` or `import(` (those are what
+  // we want to scan).
+  out = out.replace(/(?<!from\s|import\s*\(\s*)"(?:\\.|[^"\\])*"/g, '""');
+  return out;
+}
+
 function checkMjsTsImport(filePath, source, invocationsOverride) {
   if (extname(filePath) !== ".mjs") return [];
-  if (!TS_IMPORT_RE.test(source)) return [];
+  const scannable = stripCommentsAndStrings(source);
+  if (!TS_IMPORT_RE.test(scannable)) return [];
   const invocations =
     invocationsOverride !== undefined
       ? invocationsOverride
@@ -360,9 +379,23 @@ function findMjsInvocations(mjsPath) {
 
 // ─── Driver ────────────────────────────────────────────────────────────────
 
+function shouldSkipScannedFile(file) {
+  // The fixtures directory contains intentional bad examples; scanning it
+  // produces known "offenses" by design.
+  if (file.includes("scripts/__fixtures__/coderabbit-themes/")) return true;
+  // The checker's own test file includes bad patterns inside template
+  // literals for verification. stripCommentsAndStrings handles most, but
+  // the template-literal stripper is imperfect — skip explicitly.
+  if (file.endsWith("scripts/__tests__/check-coderabbit-themes.test.mjs")) {
+    return true;
+  }
+  return false;
+}
+
 function runChecks(files) {
   const offenders = [];
   for (const file of files) {
+    if (shouldSkipScannedFile(file)) continue;
     const abs = resolve(REPO_ROOT, file);
     if (!existsSync(abs)) continue;
     const st = statSync(abs);
