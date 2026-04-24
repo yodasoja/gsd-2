@@ -674,12 +674,33 @@ const _extensionRequire = createRequire(import.meta.url);
  */
 export function resetExtensionLoaderCache(): void {
 	_extensionLoaderJiti = null;
-	for (const extensionPath of _loadedExtensionPaths) {
+	// Build the set of cache keys to evict. We've stored raw paths as handed
+	// to jiti, but jiti / Node may key require.cache under a canonicalized
+	// form (drive-letter case, symlink-resolved, different separator on
+	// Windows). Evict every known variant plus any require.cache entry that
+	// case-insensitively matches a tracked path.
+	const variants = new Set<string>();
+	for (const raw of _loadedExtensionPaths) {
+		variants.add(raw);
 		try {
-			delete _extensionRequire.cache[extensionPath];
+			variants.add(_extensionRequire.resolve(raw));
 		} catch {
-			// require.cache is best-effort; ignore failures (e.g. path was never
-			// actually cached, or cache is frozen in some runtime).
+			// unresolvable — fall through; case-insensitive scan below may still hit it
+		}
+		try {
+			variants.add(fs.realpathSync(raw));
+		} catch {
+			// file may have been deleted already; ignore
+		}
+	}
+	const lowerTargets = new Set([..._loadedExtensionPaths].map((p) => p.toLowerCase()));
+	for (const key of Object.keys(_extensionRequire.cache)) {
+		if (variants.has(key) || lowerTargets.has(key.toLowerCase())) {
+			try {
+				delete _extensionRequire.cache[key];
+			} catch {
+				// require.cache is best-effort; ignore failures (e.g. frozen cache).
+			}
 		}
 	}
 	_loadedExtensionPaths.clear();
