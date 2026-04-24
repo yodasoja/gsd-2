@@ -175,12 +175,18 @@ test("resolveCanonicalMilestoneRoot emits nothing when it doesn't redirect", () 
   } finally { cleanup(base); }
 });
 
-test("percentile helper returns quantiles of a sorted array", () => {
+test("percentile helper returns quantiles of a sorted array (nearest-rank)", () => {
   assert.equal(percentile([], 0.5), null);
   assert.equal(percentile([10], 0.5), 10);
+  // Boundary behavior
   assert.equal(percentile([10, 20, 30, 40], 0), 10);
   assert.equal(percentile([10, 20, 30, 40], 1), 40);
-  assert.equal(percentile([10, 20, 30, 40], 0.5), 30);
+  // Nearest-rank: idx = ceil(q*n) - 1
+  // q=0.5, n=4 → idx = 2-1 = 1 → 20
+  assert.equal(percentile([10, 20, 30, 40], 0.5), 20);
+  // p95 on 20 values = idx ceil(0.95*20)-1 = 19-1 = 18 → value at index 18 (19th sample)
+  const twenty = Array.from({ length: 20 }, (_, i) => (i + 1) * 10); // [10..200]
+  assert.equal(percentile(twenty, 0.95), 190, "p95 should be the 19th of 20 sorted values, not the max");
 });
 
 test("summarizeWorktreeTelemetry supports time-window filtering", () => {

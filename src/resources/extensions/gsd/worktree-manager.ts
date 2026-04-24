@@ -161,10 +161,18 @@ export function resolveCanonicalMilestoneRoot(
   const wtPath = worktreePath(basePath, milestoneId);
   if (!existsSync(wtPath)) return basePath;
 
-  // A valid live worktree has a .git file pointing at the real gitdir.
-  // A directory without .git is a stale leftover from a prior crash and
-  // must not be trusted as a read source.
-  if (!existsSync(join(wtPath, ".git"))) return basePath;
+  // A registered git worktree has a .git *file* (not directory) containing
+  // "gitdir: <path>". A standalone .git directory indicates a copied repo
+  // or nested standalone repo — not a worktree registered with this project —
+  // and must not be treated as the canonical root.
+  const gitPath = join(wtPath, ".git");
+  if (!existsSync(gitPath)) return basePath;
+  try {
+    const stat = lstatSync(gitPath);
+    if (!stat.isFile()) return basePath;
+  } catch {
+    return basePath;
+  }
 
   // #4764 — record the redirect so we can measure how often the #4761 fix
   // would have mattered. Best-effort; emit is silent on any failure.

@@ -458,12 +458,24 @@ export class WorktreeResolver {
       return;
     }
 
+    let actuallyMerged = false;
     if (
       mode === "worktree" || inWorktree
     ) {
-      this._mergeWorktreeMode(milestoneId, ctx);
+      actuallyMerged = this._mergeWorktreeMode(milestoneId, ctx);
     } else if (mode === "branch") {
-      this._mergeBranchMode(milestoneId, ctx);
+      actuallyMerged = this._mergeBranchMode(milestoneId, ctx);
+    }
+
+    // The remainder of this function emits telemetry and runs re-squash.
+    // Both are gated on actuallyMerged — if the _merge* helper took a
+    // no-merge path (missing originalBase, no roadmap, wrong branch) the
+    // milestone branch was intentionally left unmerged and we must not
+    // emit a worktree-merged event or collapse commits on main.
+    if (!actuallyMerged) {
+      // Always clear the start-SHA tracker to avoid leaking across sessions.
+      this.s.milestoneStartShas.delete(milestoneId);
+      return;
     }
 
     // #4765 — when collapse_cadence=slice AND milestone_resquash=true, the
@@ -498,10 +510,9 @@ export class WorktreeResolver {
       });
     }
 
-    // #4764 — record merge completion (success path reaches here). Failure
-    // paths throw out of _merge* before reaching this line, so the absence
-    // of worktree-merged pairs with a prior worktree-created flags an
-    // orphan in the aggregator.
+    // #4764 — record merge completion. Only reaches here when an actual
+    // merge ran; failure paths throw out of _merge* before this point and
+    // no-merge paths returned above.
     try {
       emitWorktreeMerged(this.s.originalBasePath || this.s.basePath, milestoneId, {
         reason: "milestone-complete",
@@ -511,8 +522,12 @@ export class WorktreeResolver {
     } catch { /* silent */ }
   }
 
-  /** Worktree-mode merge: read roadmap, merge, teardown, reset paths. */
-  private _mergeWorktreeMode(milestoneId: string, ctx: NotifyCtx): void {
+  /** Worktree-mode merge: read roadmap, merge, teardown, reset paths.
+   *  Returns true when a squash-merge actually ran, false when the function
+   *  returned early (missing originalBase) or took the preserve-branch path
+   *  (no roadmap). Callers gate merged-event telemetry and milestone
+   *  re-squash on this signal. */
+  private _mergeWorktreeMode(milestoneId: string, ctx: NotifyCtx): boolean {
     const originalBase = this.s.originalBasePath;
     if (!originalBase) {
       debugLog("WorktreeResolver", {
@@ -522,9 +537,10 @@ export class WorktreeResolver {
         skipped: true,
         reason: "missing-original-base",
       });
-      return;
+      return false;
     }
 
+    let merged = false;
     try {
       const { synced } = this.deps.syncWorktreeStateBack(
         originalBase,
@@ -573,6 +589,7 @@ export class WorktreeResolver {
           milestoneId,
           roadmapContent,
         );
+        merged = true;
 
         // #2945 Bug 3: mergeMilestoneToMain performs best-effort worktree
         // cleanup internally (step 12), but it can silently fail on Windows
@@ -676,10 +693,12 @@ export class WorktreeResolver {
       result: "done",
       basePath: this.s.basePath,
     });
+    return merged;
   }
 
-  /** Branch-mode merge: check current branch, merge if on milestone branch. */
-  private _mergeBranchMode(milestoneId: string, ctx: NotifyCtx): void {
+  /** Branch-mode merge: check current branch, merge if on milestone branch.
+   *  Returns true when a merge actually ran, false on skip paths. */
+  private _mergeBranchMode(milestoneId: string, ctx: NotifyCtx): boolean {
     try {
       const currentBranch = this.deps.getCurrentBranch(this.s.basePath);
       const milestoneBranch = this.deps.autoWorktreeBranch(milestoneId);
@@ -694,7 +713,7 @@ export class WorktreeResolver {
           currentBranch,
           milestoneBranch,
         });
-        return;
+        return false;
       }
 
       const roadmapPath = this.deps.resolveMilestoneFile(
@@ -710,7 +729,7 @@ export class WorktreeResolver {
           skipped: true,
           reason: "no-roadmap",
         });
-        return;
+        return false;
       }
 
       const roadmapContent = this.deps.readFileSync(roadmapPath, "utf-8");
@@ -741,6 +760,7 @@ export class WorktreeResolver {
         mode: "branch",
         result: "success",
       });
+      return true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       debugLog("WorktreeResolver", {

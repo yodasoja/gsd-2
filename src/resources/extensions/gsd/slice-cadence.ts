@@ -105,7 +105,10 @@ export function mergeSliceToMain(
     commitsAhead = 1;
   }
   if (commitsAhead === 0) {
-    const result: SliceMergeResult = {
+    // Do NOT emit slice-merged here — this is a no-op, not a merge. Emitting
+    // would inflate slicesMerged in telemetry/forensics and distort the
+    // conflict rate denominator.
+    return {
       commitSha: null,
       mainBranch,
       milestoneBranch,
@@ -113,10 +116,6 @@ export function mergeSliceToMain(
       skipped: true,
       skippedReason: "no-commits-ahead",
     };
-    try {
-      emitSliceMerged(projectRoot, milestoneId, sliceId, { durationMs: result.durationMs, conflict: false });
-    } catch { /* silent */ }
-    return result;
   }
 
   process.chdir(projectRoot);
@@ -219,19 +218,42 @@ export function resquashMilestoneOnMain(
   try {
     nativeCheckoutBranch(projectRoot, mainBranch);
 
-    // Count slice commits between startSha and HEAD. If zero, nothing to do.
-    let sliceCount = 0;
+    // Verify the startSha..HEAD range contains ONLY this milestone's slice-
+    // cadence commits. If any unrelated commits landed on main since the
+    // milestone started (e.g. concurrent work, cherry-picks, hotfixes), a
+    // blind `git reset --soft` would fold them into the re-squash and rewrite
+    // their attribution. Fail closed — the user can resolve manually.
+    const expectedSuffix = `(slice-cadence)`;
+    const expectedMilestoneToken = ` of ${milestoneId} `;
+    let subjectsRaw = "";
     try {
-      sliceCount = nativeCommitCountBetween(projectRoot, startSha, "HEAD");
+      subjectsRaw = execFileSync(
+        "git",
+        ["log", "--format=%s", `${startSha}..HEAD`],
+        { cwd: projectRoot, stdio: ["ignore", "pipe", "pipe"], encoding: "utf-8" },
+      );
     } catch {
-      sliceCount = 0;
+      return { resquashed: false, newSha: null };
     }
+    const subjects = subjectsRaw.split("\n").filter((s) => s.length > 0);
+    const sliceCount = subjects.length;
     if (sliceCount === 0) {
       return { resquashed: false, newSha: null };
     }
+    const foreign = subjects.filter(
+      (s) => !(s.endsWith(expectedSuffix) && s.includes(expectedMilestoneToken)),
+    );
+    if (foreign.length > 0) {
+      logWarning(
+        "worktree",
+        `slice-cadence: skipping milestone resquash for ${milestoneId} — ` +
+        `${foreign.length} non-slice-cadence commit(s) in ${startSha}..HEAD ` +
+        `would be folded in. First: "${foreign[0]}". Resolve history manually.`,
+      );
+      return { resquashed: false, newSha: null };
+    }
 
-    // Soft reset to the start SHA — HEAD moves but working tree and index
-    // keep all the slice changes staged.
+    // Safe to collapse: all commits in the range are this milestone's slices.
     execFileSync("git", ["reset", "--soft", startSha], {
       cwd: projectRoot,
       stdio: ["ignore", "pipe", "pipe"],

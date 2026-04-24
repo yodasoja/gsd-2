@@ -197,7 +197,11 @@ export function auditOrphanedMilestoneBranches(
     // work is stranded on the branch or in the worktree. Data safety first:
     // we never delete or touch; we just surface a warning so the user knows
     // where to look.
-    if (milestone.status !== "complete") {
+    //
+    // Gate on isClosedStatus so we only warn about genuinely open milestones.
+    // Parked/other closed statuses go through the legacy complete/unmerged
+    // path below where appropriate.
+    if (!isClosedStatus(milestone.status)) {
       if (isMerged) continue; // nothing to recover
       let commitsAhead = 0;
       try {
@@ -230,6 +234,11 @@ export function auditOrphanedMilestoneBranches(
 
       continue;
     }
+
+    // Only the "complete" status participates in the merged/unmerged cleanup
+    // paths below — other closed statuses (parked, etc.) are intentionally
+    // left alone.
+    if (milestone.status !== "complete") continue;
 
     if (isMerged) {
       // Branch is merged — safe to delete branch and clean up worktree dir

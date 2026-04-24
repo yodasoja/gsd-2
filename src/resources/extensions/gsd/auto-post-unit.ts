@@ -624,6 +624,7 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
       // onto main right here, so orphan risk shrinks from milestone-size to
       // slice-size. Only runs in worktree isolation mode — the feature needs
       // a milestone branch to squash from.
+      let sliceMergeStopped = false;
       await runSafely("postUnit", "slice-cadence-merge", async () => {
         const prefsResult = loadEffectiveGSDPreferences(s.basePath);
         const prefs = prefsResult?.preferences;
@@ -638,12 +639,14 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
 
         // Record the milestone start SHA before the first slice merge, so
         // resquashMilestoneOnMain has a target at milestone completion.
+        // Resolve main branch dynamically — hard-coding "main" breaks repos
+        // that use "master" or a custom default branch.
         if (!s.milestoneStartShas.has(mid)) {
           try {
-            const { nativeCommitCountBetween: _c } = await import("./native-git-bridge.js");
-            // Use plumbing directly rather than adding another native helper.
+            const { nativeDetectMainBranch } = await import("./native-git-bridge.js");
+            const mainBranch = nativeDetectMainBranch(projectRoot);
             const { execFileSync } = await import("node:child_process");
-            const sha = execFileSync("git", ["rev-parse", "main"], {
+            const sha = execFileSync("git", ["rev-parse", mainBranch], {
               cwd: projectRoot, stdio: ["ignore", "pipe", "pipe"], encoding: "utf-8",
             }).trim();
             if (sha) s.milestoneStartShas.set(mid, sha);
@@ -670,10 +673,13 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
               `Resolve manually on main and run \`/gsd auto\` to resume.`,
               "error",
             );
-            // Surface as a blocker so the auto loop stops rather than
-            // dispatching the next slice on top of a conflicted main.
+            // Stop auto AND signal the outer postUnit flow to exit early.
+            // Without the flag, subsequent hooks (triage, rogue detection,
+            // DB writes) would keep running against a conflicted main
+            // checkout after the loop was already told to stop.
             const { stopAuto } = await import("./auto.js");
             await stopAuto(ctx, undefined, `slice-merge-conflict on ${sid}`);
+            sliceMergeStopped = true;
             return;
           }
           logError("engine", `slice-cadence merge failed for ${sid}`, {
@@ -681,6 +687,11 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
           });
         }
       });
+      // Exit early after stopAuto so the rest of post-unit processing
+      // (triage, rogue detection, hook dispatch, DB writes) doesn't run
+      // against a conflicted main checkout. The auto loop will see
+      // s.active=false on the next iteration and terminate cleanly.
+      if (sliceMergeStopped) return "continue";
     }
 
     // Post-triage: execute actionable resolutions

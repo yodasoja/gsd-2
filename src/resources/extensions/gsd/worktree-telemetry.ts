@@ -143,10 +143,12 @@ export function emitCanonicalRootRedirect(
   projectRoot: string,
   milestoneId: string,
   redirectedTo: string,
+  meta: { flowId?: string } = {},
 ): void {
   emitJournalEvent(projectRoot, baseEntry("canonical-root-redirect", {
     milestoneId,
     redirectedTo,
+    flowId: meta.flowId,
   }));
 }
 
@@ -156,7 +158,7 @@ export function emitSliceMerged(
   projectRoot: string,
   milestoneId: string,
   sliceId: string,
-  meta: { durationMs?: number; conflict?: boolean; commitSha?: string } = {},
+  meta: { durationMs?: number; conflict?: boolean; commitSha?: string; flowId?: string } = {},
 ): void {
   emitJournalEvent(projectRoot, baseEntry("slice-merged", {
     milestoneId,
@@ -165,13 +167,14 @@ export function emitSliceMerged(
     durationMs: meta.durationMs,
     conflict: meta.conflict ?? false,
     commitSha: meta.commitSha,
+    flowId: meta.flowId,
   }));
 }
 
 export function emitMilestoneResquash(
   projectRoot: string,
   milestoneId: string,
-  meta: { sliceCount: number; startSha?: string; endSha?: string } = { sliceCount: 0 },
+  meta: { sliceCount: number; startSha?: string; endSha?: string; flowId?: string } = { sliceCount: 0 },
 ): void {
   emitJournalEvent(projectRoot, baseEntry("milestone-resquash", {
     milestoneId,
@@ -179,6 +182,7 @@ export function emitMilestoneResquash(
     startSha: meta.startSha,
     endSha: meta.endSha,
     resquashedAt: now(),
+    flowId: meta.flowId,
   }));
 }
 
@@ -278,11 +282,22 @@ export function summarizeWorktreeTelemetry(
   return summary;
 }
 
-/** Return the p{quantile} of a sorted array. Quantile in [0,1]. */
+/**
+ * Return the p{quantile} of a sorted array using the nearest-rank method.
+ * Quantile in [0,1].
+ *
+ * Prior implementation used Math.floor(q*n), which overstates exact-rank
+ * quantiles by one sample (e.g. p95 of 20 values returned the max instead
+ * of the 19th value). The nearest-rank index is ceil(q*n) - 1, clamped to
+ * [0, n-1].
+ */
 export function percentile(sortedValues: number[], q: number): number | null {
   if (sortedValues.length === 0) return null;
   if (q <= 0) return sortedValues[0];
   if (q >= 1) return sortedValues[sortedValues.length - 1];
-  const idx = Math.min(sortedValues.length - 1, Math.floor(q * sortedValues.length));
+  const idx = Math.min(
+    sortedValues.length - 1,
+    Math.max(0, Math.ceil(q * sortedValues.length) - 1),
+  );
   return sortedValues[idx];
 }
