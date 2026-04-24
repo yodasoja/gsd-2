@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { extractSourceRegion } from "./test-helpers.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -72,8 +73,11 @@ describe('register-hooks session_before_compact (#3696)', () => {
     // Extract the session_before_compact handler
     const compactIdx = registerHooksSrc.indexOf('session_before_compact');
     assert.ok(compactIdx > -1, 'session_before_compact hook should exist');
-    // The first check in the handler should be isAutoActive(), not isAutoPaused()
-    const afterCompact = registerHooksSrc.slice(compactIdx, compactIdx + 300);
+    // The first check in the handler should be isAutoActive(), not isAutoPaused().
+    // Bound the region to this single handler — register-hooks.ts contains
+    // multiple pi.on("session_before_compact") handlers and a later handler
+    // legitimately references isAutoPaused.
+    const afterCompact = extractSourceRegion(registerHooksSrc, 'session_before_compact', 'pi.on("');
     assert.match(afterCompact, /isAutoActive\(\)/,
       'session_before_compact should check isAutoActive()');
     // Should NOT block compaction when paused

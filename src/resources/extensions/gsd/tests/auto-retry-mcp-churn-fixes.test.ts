@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+import { extractSourceRegion } from "./test-helpers.ts";
 import {
   resetEvidence,
   getEvidence,
@@ -107,7 +108,7 @@ describe("register-hooks: skip prepareWorkflowMcpForProject inside auto-worktree
   it("session_start hook is gated on isInAutoWorktree", () => {
     const idx = src.indexOf('pi.on("session_start"');
     assert.ok(idx !== -1, "session_start handler must exist");
-    const block = src.slice(idx, idx + 2500);
+    const block = extractSourceRegion(src, 'pi.on("session_start"');
     assert.ok(
       block.includes("isInAutoWorktree"),
       "session_start must consult isInAutoWorktree before preparing MCP",
@@ -121,7 +122,7 @@ describe("register-hooks: skip prepareWorkflowMcpForProject inside auto-worktree
   it("session_switch hook is gated on isInAutoWorktree", () => {
     const idx = src.indexOf('pi.on("session_switch"');
     assert.ok(idx !== -1, "session_switch handler must exist");
-    const block = src.slice(idx, idx + 2500);
+    const block = extractSourceRegion(src, 'pi.on("session_switch"');
     assert.ok(
       block.includes("isInAutoWorktree"),
       "session_switch must consult isInAutoWorktree before preparing MCP",
@@ -192,7 +193,7 @@ describe("mcp-server workflow-tools: projectDir routing (Phase B root cause)", (
   it("projectDirParam is optional and documents the default", () => {
     const idx = src.indexOf("const projectDirParam");
     assert.ok(idx !== -1, "projectDirParam definition must exist");
-    const block = src.slice(idx, idx + 600);
+    const block = extractSourceRegion(src, "const projectDirParam");
     assert.ok(
       block.includes(".optional()"),
       "projectDirParam must be optional so the agent stops deliberating",
@@ -206,7 +207,7 @@ describe("mcp-server workflow-tools: projectDir routing (Phase B root cause)", (
   it("parseWorkflowArgs defaults projectDir to process.cwd() when omitted", () => {
     const idx = src.indexOf("function parseWorkflowArgs");
     assert.ok(idx !== -1, "parseWorkflowArgs must exist");
-    const block = src.slice(idx, idx + 1500);
+    const block = extractSourceRegion(src, "function parseWorkflowArgs");
     assert.ok(
       block.includes("parsed.projectDir ?? process.cwd()"),
       "parseWorkflowArgs must fall back to process.cwd() when projectDir is omitted",
@@ -216,7 +217,7 @@ describe("mcp-server workflow-tools: projectDir routing (Phase B root cause)", (
   it("validateProjectDir accepts external-state worktree paths via .gsd symlink target", () => {
     const idx = src.indexOf("function validateProjectDir");
     assert.ok(idx !== -1, "validateProjectDir must exist");
-    const block = src.slice(idx, idx + 2500);
+    const block = extractSourceRegion(src, "function validateProjectDir");
     assert.ok(
       block.includes("resolveExternalStateRoot"),
       "validateProjectDir must consult resolveExternalStateRoot for external-state layouts",
@@ -224,7 +225,7 @@ describe("mcp-server workflow-tools: projectDir routing (Phase B root cause)", (
 
     const helperIdx = src.indexOf("function resolveExternalStateRoot");
     assert.ok(helperIdx !== -1, "resolveExternalStateRoot helper must exist");
-    const helperBlock = src.slice(helperIdx, helperIdx + 600);
+    const helperBlock = extractSourceRegion(src, "function resolveExternalStateRoot");
     assert.ok(
       helperBlock.includes("realpathSync"),
       "resolveExternalStateRoot must use realpathSync to follow the symlink",
@@ -240,7 +241,7 @@ describe("mcp-server workflow-tools: projectDir routing (Phase B root cause)", (
     // milestone that has an auto-worktree at <projectRoot>/.gsd/worktrees/<MID>/,
     // tool writes must go to the worktree .gsd rather than the shared project .gsd.
     const parseIdx = src.indexOf("function parseWorkflowArgs");
-    const parseBlock = src.slice(parseIdx, parseIdx + 2500);
+    const parseBlock = extractSourceRegion(src, "function parseWorkflowArgs");
     assert.ok(
       parseBlock.includes("resolveActiveWorktreeBasePath"),
       "parseWorkflowArgs must consult resolveActiveWorktreeBasePath",
@@ -254,7 +255,7 @@ describe("mcp-server workflow-tools: projectDir routing (Phase B root cause)", (
   it("resolveActiveWorktreeBasePath checks .git presence to avoid hijacking stray directories", () => {
     const idx = src.indexOf("function resolveActiveWorktreeBasePath");
     assert.ok(idx !== -1, "resolveActiveWorktreeBasePath helper must exist");
-    const block = src.slice(idx, idx + 1200);
+    const block = extractSourceRegion(src, "function resolveActiveWorktreeBasePath");
     assert.ok(
       block.includes('existsSync(join(wtPath, ".git"))'),
       "resolveActiveWorktreeBasePath must verify a .git file exists in the worktree",
@@ -264,7 +265,7 @@ describe("mcp-server workflow-tools: projectDir routing (Phase B root cause)", (
   it("extractMilestoneId handles camelCase, snake_case, and short aliases", () => {
     const idx = src.indexOf("function extractMilestoneId");
     assert.ok(idx !== -1, "extractMilestoneId helper must exist");
-    const block = src.slice(idx, idx + 600);
+    const block = extractSourceRegion(src, "function extractMilestoneId");
     assert.ok(block.includes("milestoneId"), "must check milestoneId");
     assert.ok(block.includes("milestone_id"), "must check milestone_id");
     assert.ok(block.includes("mid"), "must check mid");

@@ -10,7 +10,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createTestContext } from "./test-helpers.ts";
+import {createTestContext, extractSourceRegion } from "./test-helpers.ts";
 
 const { assertTrue, report } = createTestContext();
 
@@ -58,7 +58,7 @@ const instanceofIdx = phasesSrc.indexOf("instanceof MergeConflictError");
 assertTrue(instanceofIdx > 0, "auto/phases.ts has instanceof MergeConflictError check");
 
 if (instanceofIdx > 0) {
-  const afterHandler = phasesSrc.slice(instanceofIdx, instanceofIdx + 500);
+  const afterHandler = extractSourceRegion(phasesSrc, "instanceof MergeConflictError");
   const stopsLoop =
     afterHandler.includes("stopAuto") ||
     afterHandler.includes('action: "break"') ||
