@@ -12,8 +12,8 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { extractSourceRegion } from "../test-helpers.ts";
 import {
-import { extractSourceRegion } from "./test-helpers.ts";
   mkdtempSync,
   mkdirSync,
   rmSync,

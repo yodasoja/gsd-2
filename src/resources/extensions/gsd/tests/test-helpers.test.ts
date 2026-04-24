@@ -129,3 +129,16 @@ test("findLine throws with preview when no line matches", () => {
     /First 10 lines/,
   );
 });
+
+test("findLine resets lastIndex between lines for /g regex patterns", () => {
+  // Without the reset, RegExp.test with /g flag stateful-advances lastIndex
+  // and can skip matches on subsequent calls. Verify the reset keeps
+  // per-line testing deterministic.
+  const output = "foo\nfoo\nfoo";
+  const globalRe = /foo/g;
+  const match = findLine(output, globalRe);
+  assert.equal(match.index, 0);
+  // Second call on the same pattern must also match — would fail without reset
+  const match2 = findLine(output, globalRe);
+  assert.equal(match2.index, 0);
+});

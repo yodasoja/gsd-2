@@ -183,7 +183,13 @@ export function findLine(
 ): { index: number; text: string } {
   const lines = output.split("\n");
   const fn = predicate instanceof RegExp
-    ? (l: string) => predicate.test(l)
+    ? (l: string) => {
+        // RegExp.test is stateful when the pattern has /g or /y flags
+        // (maintains lastIndex across calls). Reset before each test so
+        // matches on different lines don't silently skip.
+        if (predicate.global || predicate.sticky) predicate.lastIndex = 0;
+        return predicate.test(l);
+      }
     : predicate;
   for (let i = 0; i < lines.length; i++) {
     if (fn(lines[i]!)) return { index: i, text: lines[i]! };
