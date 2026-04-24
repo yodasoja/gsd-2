@@ -997,8 +997,16 @@ export function validatePreferences(preferences: GSDPreferences): {
       }
     }
     if (g.milestone_resquash !== undefined) {
-      if (typeof g.milestone_resquash === "boolean") git.milestone_resquash = g.milestone_resquash;
-      else errors.push("git.milestone_resquash must be a boolean");
+      if (typeof g.milestone_resquash === "boolean") {
+        git.milestone_resquash = g.milestone_resquash;
+        const cadence = (git.collapse_cadence as string | undefined)
+          ?? (typeof g.collapse_cadence === "string" ? g.collapse_cadence : undefined);
+        if (cadence !== "slice") {
+          warnings.push('git.milestone_resquash is ignored unless git.collapse_cadence is "slice"');
+        }
+      } else {
+        errors.push("git.milestone_resquash must be a boolean");
+      }
     }
 
     if (Object.keys(git).length > 0) {

@@ -37,12 +37,28 @@ function baseEntry(eventType: JournalEntry["eventType"], data: Record<string, un
   };
 }
 
+// ─── Reason literal unions ───────────────────────────────────────────────
+// Closed sets so typos at call sites are rejected at compile time and can't
+// silently fragment the telemetry buckets produced by summarizeWorktreeTelemetry.
+
+export type WorktreeCreatedReason = "create-milestone" | "enter-milestone";
+export type AutoExitReason =
+  | "pause"
+  | "stop"
+  | "blocked"
+  | "merge-conflict"
+  | "merge-failed"
+  | "slice-merge-conflict"
+  | "all-complete"
+  | "no-active-milestone"
+  | "other";
+
 // ─── Emitters ────────────────────────────────────────────────────────────
 
 export function emitWorktreeCreated(
   projectRoot: string,
   milestoneId: string,
-  meta: { flowId?: string; reason?: string } = {},
+  meta: { flowId?: string; reason?: WorktreeCreatedReason } = {},
 ): void {
   emitJournalEvent(projectRoot, baseEntry("worktree-created", {
     milestoneId,
@@ -104,7 +120,10 @@ export function emitAutoExit(
   projectRoot: string,
   meta: {
     flowId?: string;
-    reason: string; // "pause" | "stop" | "blocked" | "merge-conflict" | "merge-error" | "all-complete" | ...
+    /** Must come from the closed AutoExitReason set. Callers with free-form
+     *  reasons (e.g. stopAuto's `reason?: string` parameter) should map to
+     *  the closed set before emitting. */
+    reason: AutoExitReason;
     milestoneId?: string;
     milestoneMerged: boolean;
   },

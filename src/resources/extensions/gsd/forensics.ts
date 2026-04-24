@@ -1057,6 +1057,11 @@ function saveForensicReport(basePath: string, report: ForensicReport, problemDes
       sections.push(`  - Exit reasons: ${breakdown}`);
     }
     sections.push(`- Canonical-root redirects (#4761 fix fired): ${t.canonicalRedirects}`);
+    // #4765 slice-cadence counters
+    if (t.slicesMerged + t.sliceMergeConflicts + t.milestoneResquashes > 0) {
+      sections.push(`- Slices merged: ${t.slicesMerged} · Slice merge conflicts: ${t.sliceMergeConflicts}`);
+      sections.push(`- Milestone re-squashes: ${t.milestoneResquashes}`);
+    }
     sections.push(``);
   }
 
@@ -1210,7 +1215,8 @@ function formatReportForPrompt(report: ForensicReport): string {
     const t = report.worktreeTelemetry;
     const hasSignal =
       t.worktreesCreated + t.worktreesMerged + t.orphansDetected +
-      t.exitsWithUnmergedWork + t.canonicalRedirects > 0;
+      t.exitsWithUnmergedWork + t.canonicalRedirects +
+      t.slicesMerged + t.milestoneResquashes > 0;
     if (hasSignal) {
       sections.push("### Worktree Telemetry");
       sections.push(`- Created: ${t.worktreesCreated} · Merged: ${t.worktreesMerged} · Conflicts: ${t.mergeConflicts}`);
@@ -1219,6 +1225,10 @@ function formatReportForPrompt(report: ForensicReport): string {
         const breakdown = Object.entries(t.orphansByReason)
           .map(([r, n]) => `${r}=${n}`).join(", ");
         sections.push(`- Orphan reasons: ${breakdown}`);
+      }
+      // #4765 — slice-cadence counters (only shown when the feature was exercised)
+      if (t.slicesMerged + t.sliceMergeConflicts + t.milestoneResquashes > 0) {
+        sections.push(`- Slices merged: ${t.slicesMerged} · Slice conflicts: ${t.sliceMergeConflicts} · Re-squashes: ${t.milestoneResquashes}`);
       }
       sections.push("");
     }

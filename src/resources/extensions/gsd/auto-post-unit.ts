@@ -689,9 +689,10 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
       });
       // Exit early after stopAuto so the rest of post-unit processing
       // (triage, rogue detection, hook dispatch, DB writes) doesn't run
-      // against a conflicted main checkout. The auto loop will see
-      // s.active=false on the next iteration and terminate cleanly.
-      if (sliceMergeStopped) return "continue";
+      // against a conflicted main checkout. Return "dispatched" to match
+      // the convention used by other stop/pauseAuto paths in this function
+      // (see signal handling earlier: stop/pause also return "dispatched").
+      if (sliceMergeStopped) return "dispatched";
     }
 
     // Post-triage: execute actionable resolutions
