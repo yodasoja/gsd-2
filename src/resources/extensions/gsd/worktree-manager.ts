@@ -176,7 +176,11 @@ export function resolveCanonicalMilestoneRoot(
 
   // #4764 — record the redirect so we can measure how often the #4761 fix
   // would have mattered. Best-effort; emit is silent on any failure.
-  try { emitCanonicalRootRedirect(basePath, milestoneId, wtPath); } catch { /* silent */ }
+  try {
+    emitCanonicalRootRedirect(basePath, milestoneId, wtPath);
+  } catch (err) {
+    logWarning("worktree", `canonical-root-redirect telemetry failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   return wtPath;
 }

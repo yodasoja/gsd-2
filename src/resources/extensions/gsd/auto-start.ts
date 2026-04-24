@@ -230,7 +230,9 @@ export function auditOrphanedMilestoneBranches(
           commitsAhead,
           worktreeDirExists: wtDirExists,
         });
-      } catch { /* silent */ }
+      } catch (err) {
+        logWarning("engine", `worktree-orphaned telemetry failed for ${milestoneId}: ${err instanceof Error ? err.message : String(err)}`);
+      }
 
       continue;
     }
@@ -291,7 +293,9 @@ export function auditOrphanedMilestoneBranches(
           reason: "complete-unmerged",
           worktreeDirExists: existsSync(getWorktreeDir(basePath, milestoneId)),
         });
-      } catch { /* silent */ }
+      } catch (err) {
+        logWarning("engine", `worktree-orphaned telemetry failed for ${milestoneId}: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
   }
 

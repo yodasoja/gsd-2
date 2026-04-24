@@ -806,7 +806,9 @@ export async function stopAuto(
       milestoneId: s.currentMilestoneId ?? undefined,
       milestoneMerged: s.milestoneMergedInPhases === true,
     });
-  } catch { /* silent */ }
+  } catch (err) {
+    logWarning("engine", `auto-exit telemetry failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   try {
     // ── Step 1: Timers and locks ──

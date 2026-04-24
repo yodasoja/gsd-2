@@ -299,7 +299,13 @@ export class WorktreeResolver {
         emitWorktreeCreated(this.s.originalBasePath || this.s.basePath, milestoneId, {
           reason: existingPath ? "enter-milestone" : "create-milestone",
         });
-      } catch { /* silent */ }
+      } catch (telemetryErr) {
+        debugLog("WorktreeResolver", {
+          action: "enterMilestone",
+          phase: "telemetry-emit",
+          error: telemetryErr instanceof Error ? telemetryErr.message : String(telemetryErr),
+        });
+      }
       ctx.notify(`Entered worktree for ${milestoneId} at ${wtPath}`, "info");
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -519,14 +525,17 @@ export class WorktreeResolver {
         startedAt: mergeStartedAt,
         durationMs: Date.now() - mergeStartMs,
       });
-    } catch { /* silent */ }
+    } catch (telemetryErr) {
+      debugLog("WorktreeResolver", {
+        action: "mergeAndExit",
+        phase: "telemetry-emit",
+        error: telemetryErr instanceof Error ? telemetryErr.message : String(telemetryErr),
+      });
+    }
   }
 
   /** Worktree-mode merge: read roadmap, merge, teardown, reset paths.
-   *  Returns true when a squash-merge actually ran, false when the function
-   *  returned early (missing originalBase) or took the preserve-branch path
-   *  (no roadmap). Callers gate merged-event telemetry and milestone
-   *  re-squash on this signal. */
+   *  Returns true when a squash-merge actually ran (false on skip paths). */
   private _mergeWorktreeMode(milestoneId: string, ctx: NotifyCtx): boolean {
     const originalBase = this.s.originalBasePath;
     if (!originalBase) {
@@ -697,7 +706,7 @@ export class WorktreeResolver {
   }
 
   /** Branch-mode merge: check current branch, merge if on milestone branch.
-   *  Returns true when a merge actually ran, false on skip paths. */
+   *  Returns true when a merge actually ran (false on skip paths). */
   private _mergeBranchMode(milestoneId: string, ctx: NotifyCtx): boolean {
     try {
       const currentBranch = this.deps.getCurrentBranch(this.s.basePath);
