@@ -35,11 +35,10 @@ describe("CancellableLoader", () => {
 		assert.equal(loader.onAbort, undefined);
 	});
 
-	it("signal is aborted after dispose()", () => {
-		loader = new CancellableLoader(tui, (s) => s, (s) => s, "test");
-		const signal = loader.signal;
-		assert.equal(signal.aborted, false);
-		loader.dispose();
-		assert.equal(signal.aborted, true);
-	});
+	// Previous test "signal is aborted after dispose()" asserted the same
+	// invariant as "dispose() aborts the AbortController signal" via a
+	// different accessor — `loader.aborted` reads `signal.aborted` through a
+	// thin getter, so the two tests were tautologically equivalent. Removed
+	// per #4796. Coverage for the signal reference itself is adequate via
+	// `loader.signal` consumers in the component integration paths.
 });

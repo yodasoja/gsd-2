@@ -28,9 +28,21 @@ describe("CombinedAutocompleteProvider — slash commands", () => {
 		const provider = makeProvider(sampleCommands);
 		const result = provider.getSuggestions(["/se"], 0, 3);
 		assert.ok(result);
-		assert.equal(result!.items.length, 2); // settings, session
-		assert.ok(result!.items.some((i) => i.value === "settings"));
-		assert.ok(result!.items.some((i) => i.value === "session"));
+		// Behaviour contract: every returned item must actually start with the
+		// typed prefix, and every command whose name starts with the prefix
+		// must be returned. Previous assertion hardcoded `length === 2`, which
+		// would go stale if the sample fixture grew another /se* entry and
+		// wouldn't fail if /settings silently disappeared (only /session was
+		// checked and vice-versa). #4796.
+		const values = result!.items.map((i) => i.value);
+		for (const v of values) {
+			assert.ok(
+				typeof v === "string" && v.startsWith("se"),
+				`every filtered item must start with the typed prefix, got ${JSON.stringify(v)}`,
+			);
+		}
+		const expected = sampleCommands.filter((c) => c.name.startsWith("se")).map((c) => c.name).sort();
+		assert.deepEqual([...values].sort(), expected);
 	});
 
 	it("returns null when no commands match", () => {
@@ -43,7 +55,13 @@ describe("CombinedAutocompleteProvider — slash commands", () => {
 		const provider = makeProvider(sampleCommands);
 		const result = provider.getSuggestions(["/mod"], 0, 4);
 		assert.ok(result);
-		assert.equal(result!.items[0]?.description, "Select model");
+		// Behaviour contract: the suggestion for a matched command must carry
+		// that command's description. Previous assertion indexed `items[0]`,
+		// which silently goes stale if ordering changes. Find the item by
+		// value instead. #4796.
+		const modelItem = result!.items.find((i) => i.value === "model");
+		assert.ok(modelItem, "suggestion for /model must be present when /mod is typed");
+		assert.equal(modelItem!.description, "Select model");
 	});
 
 	it("does not offer slash command suggestions mid-line", () => {
@@ -95,8 +113,18 @@ describe("CombinedAutocompleteProvider — argument completions", () => {
 		const provider = makeProvider(commands);
 		const result = provider.getSuggestions(["/thinking m"], 0, 11);
 		assert.ok(result);
-		assert.equal(result!.items.length, 1);
-		assert.equal(result!.items[0]?.value, "medium");
+		// Behaviour contract: only levels that start with "m" are returned,
+		// and every returned level is consistent with the declared level set.
+		// Previous assertion hardcoded `length === 1` and indexed `items[0]`,
+		// which would silently pass if a second m-level were added by mistake
+		// or go stale if "medium" were renamed. #4796.
+		const values = result!.items.map((i) => i.value);
+		const levels = ["off", "low", "medium", "high"];
+		for (const v of values) {
+			assert.ok(typeof v === "string" && v.startsWith("m"), `value ${JSON.stringify(v)} must start with "m"`);
+			assert.ok(levels.includes(v), `value ${JSON.stringify(v)} must be a declared level`);
+		}
+		assert.deepEqual([...values].sort(), levels.filter((l) => l.startsWith("m")).sort());
 	});
 
 	it("returns null for commands without argument completions", () => {
@@ -122,7 +150,13 @@ describe("CombinedAutocompleteProvider — argument completions", () => {
 		const provider = makeProvider(commands);
 		const result = provider.getSuggestions(["/test "], 0, 6);
 		assert.ok(result);
-		assert.equal(result!.items.length, 3);
+		// Behaviour contract: empty prefix after the space must return every
+		// declared subcommand. Previous assertion hardcoded `length === 3`,
+		// which would silently pass if a subcommand were duplicated and go
+		// stale if the set grew. Assert the set instead. #4796.
+		const subs = ["start", "stop", "status"];
+		const values = result!.items.map((i) => i.value);
+		assert.deepEqual([...values].sort(), [...subs].sort());
 	});
 });
 
@@ -163,15 +197,22 @@ describe("CombinedAutocompleteProvider — applyCompletion", () => {
 	it("applies slash command completion with trailing space", () => {
 		const provider = makeProvider(sampleCommands);
 		const result = provider.applyCompletion(["/se"], 0, 3, { value: "settings", label: "settings" }, "/se");
-		assert.equal(result.lines[0], "/settings ");
-		assert.equal(result.cursorCol, 10); // after "/settings "
+		// Behaviour contract: the edited line (at the returned cursorLine)
+		// becomes "/settings ", the cursor lands at the end of that text,
+		// and no other lines are introduced. Previous assertion indexed
+		// `lines[0]`, which couples to fixture shape. #4796.
+		const edited = result.lines[result.cursorLine];
+		assert.equal(edited, "/settings ");
+		assert.equal(result.cursorCol, "/settings ".length);
+		assert.equal(result.lines.length, 1, "single-line input must produce single-line output");
 	});
 
 	it("preserves leading whitespace when applying slash command completion", () => {
 		const provider = makeProvider(sampleCommands);
 		const result = provider.applyCompletion(["  /se"], 0, 5, { value: "settings", label: "settings" }, "/se");
-		assert.equal(result.lines[0], "  /settings ");
-		assert.equal(result.cursorCol, 12);
+		const edited = result.lines[result.cursorLine];
+		assert.equal(edited, "  /settings ");
+		assert.equal(result.cursorCol, "  /settings ".length);
 	});
 
 	it("applies file path completion for @ prefix", () => {
@@ -183,7 +224,8 @@ describe("CombinedAutocompleteProvider — applyCompletion", () => {
 			{ value: "@src/index.ts", label: "index.ts" },
 			"@src/",
 		);
-		assert.equal(result.lines[0], "@src/index.ts ");
+		const edited = result.lines[result.cursorLine];
+		assert.equal(edited, "@src/index.ts ");
 	});
 
 	it("applies directory completion without trailing space", () => {
@@ -196,7 +238,9 @@ describe("CombinedAutocompleteProvider — applyCompletion", () => {
 			"@sr",
 		);
 		// Directories should not get trailing space so user can continue typing
-		assert.ok(!result.lines[0]!.endsWith(" "));
+		const edited = result.lines[result.cursorLine]!;
+		assert.ok(edited.endsWith("@src/"), `directory completion must end at the value, got ${JSON.stringify(edited)}`);
+		assert.ok(!edited.endsWith(" "));
 	});
 
 	it("preserves text after cursor", () => {
@@ -208,7 +252,9 @@ describe("CombinedAutocompleteProvider — applyCompletion", () => {
 			{ value: "settings", label: "settings" },
 			"/se",
 		);
-		assert.ok(result.lines[0]!.includes("and more text"));
+		const edited = result.lines[result.cursorLine]!;
+		assert.ok(edited.includes("and more text"), `trailing text must be preserved, got ${JSON.stringify(edited)}`);
+		assert.ok(edited.includes("/settings"), `completion must be inserted, got ${JSON.stringify(edited)}`);
 	});
 });
 

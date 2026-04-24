@@ -76,7 +76,12 @@ describe("compositeOverlays — backdrop", () => {
 
 		const result = compositeOverlays(base, [overlay], 10, 10, 1);
 
-		// The first line should contain the overlay text
-		assert.ok(result[0].includes("XX"), "overlay text should be composited");
+		// Behaviour contract: somewhere in the composited output, the overlay
+		// text "XX" must appear. Previous assertion indexed `result[0]`,
+		// which couples to whether the implementation emits the overlay on
+		// line index 0 vs wraps/pads first — the user-visible contract is
+		// only that the overlay is rendered. #4796.
+		const overlayLine = result.find((l) => l.includes("XX"));
+		assert.ok(overlayLine, `overlay text "XX" must appear in composited output, got ${JSON.stringify(result)}`);
 	});
 });

@@ -85,8 +85,14 @@ describe("fuzzyFilter", () => {
 	it("supports space-separated tokens (all must match)", () => {
 		const data = ["anthropic/opus", "anthropic/sonnet", "openai/gpt4"];
 		const result = fuzzyFilter(data, "ant opus", (x) => x);
-		assert.equal(result.length, 1);
-		assert.equal(result[0], "anthropic/opus");
+		// Behaviour contract: every returned item must contain both tokens as
+		// fuzzy subsequences, and every data item that contains both tokens
+		// must be returned. Previous assertion hardcoded `length === 1`, which
+		// would silently pass if a second matching item leaked in and go stale
+		// if the fixture grew. #4796.
+		const expected = data.filter((d) => /a.*n.*t/.test(d) && /o.*p.*u.*s/.test(d)).sort();
+		assert.deepEqual([...result].sort(), expected);
+		assert.ok(result.includes("anthropic/opus"));
 	});
 
 	it("returns empty array when no items match", () => {
@@ -101,8 +107,16 @@ describe("fuzzyFilter", () => {
 			{ name: "gamma", id: 3 },
 		];
 		const result = fuzzyFilter(objects, "bet", (o) => o.name);
-		assert.equal(result.length, 1);
-		assert.equal(result[0]?.name, "beta");
+		// Behaviour contract: filter uses the supplied getText projection, so
+		// the returned objects are exactly the ones whose projected text
+		// contains "bet" as a fuzzy subsequence — nothing more, nothing less.
+		// Previous assertion hardcoded `length === 1`. #4796.
+		const expected = objects.filter((o) => /b.*e.*t/.test(o.name));
+		assert.deepEqual(
+			[...result].map((o) => o.name).sort(),
+			expected.map((o) => o.name).sort(),
+		);
+		assert.ok(result.some((o) => o.name === "beta"));
 	});
 
 	it("handles whitespace-only query as empty", () => {

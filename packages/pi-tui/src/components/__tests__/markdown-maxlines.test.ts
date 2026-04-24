@@ -24,23 +24,65 @@ function noopTheme(): MarkdownTheme {
 }
 
 test("Markdown renders all lines when maxLines is not set", () => {
-	const text = "Line 1\n\nLine 2\n\nLine 3\n\nLine 4\n\nLine 5";
+	const labels = ["Line 1", "Line 2", "Line 3", "Line 4", "Line 5"];
+	const text = labels.join("\n\n");
 	const md = new Markdown(text, 0, 0, noopTheme());
 	const lines = md.render(80);
-	// Each paragraph produces a line + an inter-paragraph blank line
-	const contentLines = lines.filter((l) => l.trim().length > 0);
-	assert.ok(contentLines.length >= 5, `expected at least 5 content lines, got ${contentLines.length}`);
+	// Behaviour contract: every paragraph label must appear in the rendered
+	// output, in input order, and no label must be dropped (which would be
+	// an implicit truncation). Previous assertion (`contentLines.length >= 5`)
+	// was a lower bound only — it silently accepted arbitrary extra lines
+	// including duplicates or placeholder noise, and did not verify order.
+	// #4796.
+	const indices = labels.map((lbl) => lines.findIndex((l) => l.includes(lbl)));
+	for (let i = 0; i < labels.length; i++) {
+		assert.ok(
+			indices[i] >= 0,
+			`paragraph ${JSON.stringify(labels[i])} must appear in rendered output`,
+		);
+	}
+	for (let i = 1; i < indices.length; i++) {
+		assert.ok(
+			indices[i]! > indices[i - 1]!,
+			`paragraph ${JSON.stringify(labels[i])} must render after ${JSON.stringify(labels[i - 1])}`,
+		);
+	}
+	// No truncation indicator when maxLines is not set.
+	assert.ok(
+		!lines.some((l) => l.includes("…")),
+		"render without maxLines must not insert a truncation indicator",
+	);
 });
 
 test("Markdown truncates from the top when maxLines is exceeded", () => {
-	const text = "Line 1\n\nLine 2\n\nLine 3\n\nLine 4\n\nLine 5";
+	const labels = ["Line 1", "Line 2", "Line 3", "Line 4", "Line 5"];
+	const text = labels.join("\n\n");
 	const md = new Markdown(text, 0, 0, noopTheme());
 	md.maxLines = 3;
 	const lines = md.render(80);
 	assert.ok(lines.length <= 3, `expected at most 3 lines, got ${lines.length}`);
-	// First line should be the ellipsis indicator
-	assert.ok(lines[0].includes("…"), "first line should contain ellipsis indicator");
-	assert.ok(lines[0].includes("above"), "first line should mention lines above");
+	// Behaviour contract: truncation drops *earlier* paragraphs so the most
+	// recent content survives, and there must be a truncation indicator line
+	// carrying the ellipsis glyph. Previous assertion indexed `lines[0]`
+	// and required the English word "above", coupling the test to copy
+	// changes and layout shuffles. #4796.
+	const indicator = lines.find((l) => l.includes("…"));
+	assert.ok(indicator, `truncated output must contain an ellipsis indicator, got ${JSON.stringify(lines)}`);
+	// Earlier paragraphs must be gone; the last paragraph must survive.
+	assert.ok(
+		lines.some((l) => l.includes("Line 5")),
+		`most recent paragraph must be preserved, got ${JSON.stringify(lines)}`,
+	);
+	assert.ok(
+		!lines.some((l) => l.includes("Line 1")),
+		`earliest paragraph must be truncated away, got ${JSON.stringify(lines)}`,
+	);
+	// The indicator must carry the count of elided paragraphs (>= 1) so the
+	// user knows something was dropped. Match a digit in the indicator line.
+	assert.ok(
+		/\d+/.test(indicator!),
+		`indicator must report how many lines were truncated, got ${JSON.stringify(indicator)}`,
+	);
 });
 
 test("Markdown preserves most recent content when truncating", () => {

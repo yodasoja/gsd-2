@@ -4,6 +4,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { Input } from "../input.js";
+import { CURSOR_MARKER } from "../../tui.js";
 
 describe("Input", () => {
 	it("paste buffer is cleared when focus is lost", () => {
@@ -24,13 +25,27 @@ describe("Input", () => {
 		assert.equal(input.getValue(), "hello");
 	});
 
-	it("focused getter/setter works correctly", () => {
+	it("renders the cursor marker only when focused", () => {
+		// Previous test asserted `input.focused = x; assert input.focused === x`,
+		// which is a property round-trip with no behaviour under test. The
+		// real user-visible contract of the focused flag is that the cursor
+		// marker appears in rendered output only while focused. #4796.
 		const input = new Input();
-		assert.equal(input.focused, false);
-		input.focused = true;
-		assert.equal(input.focused, true);
+		input.handleInput("hi");
+
 		input.focused = false;
-		assert.equal(input.focused, false);
+		const unfocused = input.render(40).join("");
+		assert.ok(
+			!unfocused.includes(CURSOR_MARKER),
+			`unfocused render must not include the cursor marker, got ${JSON.stringify(unfocused)}`,
+		);
+
+		input.focused = true;
+		const focused = input.render(40).join("");
+		assert.ok(
+			focused.includes(CURSOR_MARKER),
+			`focused render must include the cursor marker, got ${JSON.stringify(focused)}`,
+		);
 	});
 
 	it("secure mode obscures typed characters in render output", () => {
