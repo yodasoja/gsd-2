@@ -397,14 +397,39 @@ export function formatAskUserQuestionsElicitResult(
  * Returns the McpServer instance — call `connect(transport)` to start serving.
  * Uses dynamic imports for the MCP SDK to avoid TS subpath resolution issues.
  */
-export async function createMcpServer(sessionManager: SessionManager): Promise<{
+/**
+ * Optional test-only DI seam for injecting a mock McpServer. Production
+ * callers (`rpc-client.ts`, `mcp-server.ts`) pass nothing; the real SDK
+ * class is loaded via dynamic import. Tests for tool handlers
+ * (e.g. secure-env-collect.test.ts, #4816) pass a mock so they can
+ * intercept the registered handler and drive it directly.
+ *
+ * The seam is minimal: a single `McpServerCtor` field. Keeping the DI
+ * surface small avoids production callers having to know about it.
+ */
+export interface CreateMcpServerOptions {
+  McpServerCtor?: new (
+    info: { name: string; version: string },
+    opts: { capabilities: Record<string, unknown> },
+  ) => McpServerInstance;
+}
+
+export async function createMcpServer(
+  sessionManager: SessionManager,
+  options: CreateMcpServerOptions = {},
+): Promise<{
   server: McpServerInstance;
 }> {
-  // Dynamic import — same workaround as src/mcp-server.ts
-  const mcpMod = await import(`${MCP_PKG}/server/mcp.js`);
-  const McpServer = mcpMod.McpServer;
+  let McpServer: CreateMcpServerOptions["McpServerCtor"];
+  if (options.McpServerCtor) {
+    McpServer = options.McpServerCtor;
+  } else {
+    // Dynamic import — same workaround as src/mcp-server.ts
+    const mcpMod = await import(`${MCP_PKG}/server/mcp.js`);
+    McpServer = mcpMod.McpServer;
+  }
 
-  const server: McpServerInstance = new McpServer(
+  const server: McpServerInstance = new McpServer!(
     { name: SERVER_NAME, version: SERVER_VERSION },
     { capabilities: { tools: {}, elicitation: {} } },
   );
