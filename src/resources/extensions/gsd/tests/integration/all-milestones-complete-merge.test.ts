@@ -13,6 +13,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+import { extractSourceRegion } from "./test-helpers.ts";
   mkdtempSync,
   mkdirSync,
   rmSync,
@@ -115,7 +116,7 @@ test("auto-loop 'all milestones complete' path merges before stopping (#962)", (
     helperIdx > -1,
     "WorktreeResolver.mergeAndExit helper should exist",
   );
-  const helperBlock = resolverSrc.slice(helperIdx, helperIdx + 2600);
+  const helperBlock = extractSourceRegion(resolverSrc, "mergeAndExit(milestoneId");
   assert.ok(
     helperBlock.includes('mode === "worktree"') ||
       helperBlock.includes('mode: "worktree"'),

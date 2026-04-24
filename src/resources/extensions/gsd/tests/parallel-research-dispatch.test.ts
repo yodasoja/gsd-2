@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 import { resolveDispatch } from "../auto-dispatch.ts";
+import { extractSourceRegion } from "./test-helpers.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -79,7 +80,7 @@ test("dispatch: parallel-research-slices requires 2+ slices", () => {
 
 test("dispatch: parallel-research-slices respects skip_research", () => {
   const ruleIdx = dispatchSrc.indexOf("parallel-research-slices");
-  const ruleBlock = dispatchSrc.slice(ruleIdx, ruleIdx + 500);
+  const ruleBlock = extractSourceRegion(dispatchSrc, "parallel-research-slices");
   assert.ok(
     ruleBlock.includes("skip_research") || dispatchSrc.slice(ruleIdx - 300, ruleIdx).includes("skip_research"),
     "rule should check skip_research preference",

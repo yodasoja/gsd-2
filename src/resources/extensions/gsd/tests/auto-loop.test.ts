@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+import { extractSourceRegion } from "./test-helpers.ts";
 import {
   resolveAgentEnd,
   resolveAgentEndCancelled,
@@ -595,7 +596,7 @@ test("auto/phases.ts: selectAndApplyModel called exactly once and before updateP
   // Extract the runUnitPhase function body
   const fnStart = src.indexOf("export async function runUnitPhase");
   assert.ok(fnStart > 0, "runUnitPhase should exist in phases.ts");
-  const fnBody = src.slice(fnStart, fnStart + 16000);
+  const fnBody = extractSourceRegion(src, "export async function runUnitPhase");
 
   // selectAndApplyModel must appear exactly once
   const allOccurrences = [...fnBody.matchAll(/selectAndApplyModel\(/g)];
@@ -1538,9 +1539,7 @@ test("auto.ts startAuto dispatches through the UOK kernel wrapper with explicit 
   // Find the startAuto function body
   const fnIdx = src.indexOf("export async function startAuto");
   assert.ok(fnIdx > -1, "startAuto must exist in auto.ts");
-  const fnEnd = src.indexOf("\n// ─── ", fnIdx + 100);
-  const fnBlock =
-    fnEnd > -1 ? src.slice(fnIdx, fnEnd) : src.slice(fnIdx, fnIdx + 5000);
+  const fnBlock = extractSourceRegion(src, "export async function startAuto", "\n// ─── ");
   assert.ok(
     fnBlock.includes("runAutoLoopWithUok("),
     "startAuto must dispatch through runAutoLoopWithUok()",
@@ -1562,9 +1561,7 @@ test("startAuto calls selfHealRuntimeRecords before autoLoop (#1727)", { skip: "
   );
   const fnIdx = src.indexOf("export async function startAuto");
   assert.ok(fnIdx > -1, "startAuto must exist in auto.ts");
-  const fnEnd = src.indexOf("\n// ─── ", fnIdx + 100);
-  const fnBlock =
-    fnEnd > -1 ? src.slice(fnIdx, fnEnd) : src.slice(fnIdx, fnIdx + 5000);
+  const fnBlock = extractSourceRegion(src, "export async function startAuto", "\n// ─── ");
 
   // Both autoLoop call sites must be preceded by selfHealRuntimeRecords
   const healIdx = fnBlock.indexOf("selfHealRuntimeRecords");
@@ -1589,7 +1586,7 @@ test("startAuto guards against concurrent invocation (#2923)", () => {
   const fnIdx = src.indexOf("export async function startAuto");
   assert.ok(fnIdx > -1, "startAuto must exist in auto.ts");
   // The guard must appear before any other logic in the function body
-  const fnBody = src.slice(fnIdx, fnIdx + 500);
+  const fnBody = extractSourceRegion(src, "export async function startAuto");
   const activeGuard = fnBody.indexOf("if (s.active)");
   assert.ok(activeGuard > -1, "startAuto must check s.active to prevent concurrent auto-loops");
   const returnIdx = fnBody.indexOf("return;", activeGuard);
