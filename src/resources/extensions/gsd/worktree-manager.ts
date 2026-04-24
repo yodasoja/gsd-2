@@ -132,6 +132,42 @@ export function isInsideWorktreesDir(basePath: string, targetPath: string): bool
   return resolved === wtDir || resolved.startsWith(wtDir + sep);
 }
 
+/**
+ * Return the canonical path from which a milestone's artifacts should be read.
+ *
+ * If a live git worktree exists for this milestone at `.gsd/worktrees/<MID>/`
+ * (directory present AND a `.git` file indicating a registered worktree),
+ * returns that worktree path. Otherwise returns `basePath` unchanged.
+ *
+ * Readers that cross the session/worktree boundary (validators, the bootstrap
+ * audit, cross-session state queries) should route through this helper so they
+ * don't silently read stale project-root state while live work sits in the
+ * worktree. Writers and tools whose contract is "operate on the path I was
+ * given" should NOT use this helper — they preserve the legacy behavior.
+ *
+ * A stale worktree directory (no `.git` file) is treated as absent. The
+ * createWorktree() path already cleans these up, but readers must not trust
+ * them in the window before cleanup runs.
+ *
+ * Fixes #4761. Used by the #4762 audit for the pre-completion orphan case.
+ */
+export function resolveCanonicalMilestoneRoot(
+  basePath: string,
+  milestoneId: string,
+): string {
+  if (!milestoneId || /[\/\\]|\.\./.test(milestoneId)) return basePath;
+
+  const wtPath = worktreePath(basePath, milestoneId);
+  if (!existsSync(wtPath)) return basePath;
+
+  // A valid live worktree has a .git file pointing at the real gitdir.
+  // A directory without .git is a stale leftover from a prior crash and
+  // must not be trusted as a read source.
+  if (!existsSync(join(wtPath, ".git"))) return basePath;
+
+  return wtPath;
+}
+
 // ─── Core Operations ───────────────────────────────────────────────────────
 
 /**
