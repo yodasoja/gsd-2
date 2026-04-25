@@ -279,14 +279,8 @@ test("scoreModel computes weighted average of capability × requirement", () => 
   assert.ok(Math.abs(score - 88.21) < 0.1, `score ${score} should be ~88.21`);
 });
 
-test("scoreModel returns 50 for empty requirements", () => {
-  const caps: ModelCapabilities = {
-    coding: 90, debugging: 80, research: 70,
-    reasoning: 85, speed: 50, longContext: 60, instruction: 75,
-  };
-  const score = scoreModel(caps, {});
-  assert.equal(score, 50);
-});
+// (Removed duplicate "scoreModel returns 50 for empty requirements" — the
+// `describe("scoreModel")` block below has the same scenario.)
 
 test("computeTaskRequirements returns base vector for known unit type", () => {
   const reqs = computeTaskRequirements("execute-task");
