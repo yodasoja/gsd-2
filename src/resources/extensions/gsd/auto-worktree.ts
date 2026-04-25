@@ -122,8 +122,8 @@ function popStashByRef(basePath: string, stashSha: string | null): void {
       }).trim().split("\n").filter(Boolean);
       const idx = list.indexOf(stashSha);
       if (idx >= 0) popArg = `stash@{${idx}}`;
-    } catch {
-      /* fall through to default pop */
+    } catch (err) {
+      logWarning("worktree", `stash list lookup failed, falling back to pop@0: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
   const args = popArg ? ["stash", "pop", popArg] : ["stash", "pop"];
