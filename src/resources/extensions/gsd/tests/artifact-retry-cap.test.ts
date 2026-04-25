@@ -146,6 +146,10 @@ test("#2007 bug 2: detectStuck is still inside the pendingVerificationRetry guar
   // during legitimate retries, but now the window is always populated.
   const stuckSection = extractStuckDetectionSection(phasesSrc);
   const pendingCheckIdx = stuckSection.indexOf("!s.pendingVerificationRetry");
+  assert.ok(
+    pendingCheckIdx !== -1,
+    "pendingVerificationRetry guard must exist in the stuck-detection section",
+  );
   const detectStuckIdx = stuckSection.indexOf("detectStuck(", pendingCheckIdx);
 
   assert.ok(
