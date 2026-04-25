@@ -52,7 +52,8 @@ export class UokGateRunner {
   async run(id: string, ctx: GateRunnerContext): Promise<GateResult> {
     const gate = this.registry.get(id);
     if (!gate) {
-      return {
+      const now = new Date().toISOString();
+      const unknownResult: GateResult = {
         gateId: id,
         gateType: "unknown",
         outcome: "manual-attention",
@@ -61,8 +62,49 @@ export class UokGateRunner {
         attempt: 1,
         maxAttempts: 1,
         retryable: false,
-        evaluatedAt: new Date().toISOString(),
+        evaluatedAt: now,
       };
+
+      insertGateRun({
+        traceId: ctx.traceId,
+        turnId: ctx.turnId,
+        gateId: unknownResult.gateId,
+        gateType: unknownResult.gateType,
+        unitType: ctx.unitType,
+        unitId: ctx.unitId,
+        milestoneId: ctx.milestoneId,
+        sliceId: ctx.sliceId,
+        taskId: ctx.taskId,
+        outcome: unknownResult.outcome,
+        failureClass: unknownResult.failureClass,
+        rationale: unknownResult.rationale,
+        findings: unknownResult.findings,
+        attempt: unknownResult.attempt,
+        maxAttempts: unknownResult.maxAttempts,
+        retryable: unknownResult.retryable,
+        evaluatedAt: unknownResult.evaluatedAt,
+      });
+
+      emitUokAuditEvent(
+        ctx.basePath,
+        buildAuditEnvelope({
+          traceId: ctx.traceId,
+          turnId: ctx.turnId,
+          category: "gate",
+          type: "gate-run",
+          payload: {
+            gateId: unknownResult.gateId,
+            gateType: unknownResult.gateType,
+            outcome: unknownResult.outcome,
+            failureClass: unknownResult.failureClass,
+            attempt: unknownResult.attempt,
+            maxAttempts: unknownResult.maxAttempts,
+            retryable: unknownResult.retryable,
+          },
+        }),
+      );
+
+      return unknownResult;
     }
 
     let attempt = 0;
