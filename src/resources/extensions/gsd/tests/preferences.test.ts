@@ -763,7 +763,7 @@ test("loadEffectiveGSDPreferences merges min_request_interval_ms with project ov
         "---",
         "version: 1",
         "min_request_interval_ms: 250",
-        "stale_commit_threshold_minutes: 45",
+        "budget_ceiling: 45",
         "---",
       ].join("\n"),
       "utf-8",
@@ -786,7 +786,7 @@ test("loadEffectiveGSDPreferences merges min_request_interval_ms with project ov
     const loaded = loadEffectiveGSDPreferences();
     assert.notEqual(loaded, null);
     assert.equal(loaded!.preferences.min_request_interval_ms, 100);
-    assert.equal(loaded!.preferences.stale_commit_threshold_minutes, 45);
+    assert.equal(loaded!.preferences.budget_ceiling, 45);
   } finally {
     process.chdir(originalCwd);
     if (originalGsdHome === undefined) delete process.env.GSD_HOME;
