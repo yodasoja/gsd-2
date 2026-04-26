@@ -1,6 +1,4 @@
 // GSD auto-mode runtime state
-// Copyright (c) 2026 Jeremy McSpadden <jeremy@fluxlabs.net>
-
 import { AutoSession } from "./auto/session.js";
 import type { CurrentUnit } from "./auto/session.js";
 import {

@@ -1,6 +1,4 @@
 // GSD worktree startup banner
-// Copyright (c) 2026 Jeremy McSpadden <jeremy@fluxlabs.net>
-
 import { execFileSync } from 'node:child_process'
 import { existsSync, realpathSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'

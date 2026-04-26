@@ -1,6 +1,4 @@
 // GSD worktree session state
-// Copyright (c) 2026 Jeremy McSpadden <jeremy@fluxlabs.net>
-
 let originalCwd: string | null = null;
 
 export function getWorktreeOriginalCwd(): string | null {
