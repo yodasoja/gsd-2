@@ -151,7 +151,13 @@ test("handlePrefsWizard — Advanced config writes min_request_interval_ms", asy
                 "(expected no additional select prompts)",
             );
           }
-          if (response === "Advanced") return options.find((option) => option.startsWith("Advanced"));
+          if (response === "Advanced") {
+            const advancedOption = options.find((option) => option.startsWith("Advanced"));
+            if (!advancedOption) {
+              throw new Error(`Expected an "Advanced" option in "${_label}" menu`);
+            }
+            return advancedOption;
+          }
           return response;
         },
         input: async () => {
@@ -174,7 +180,7 @@ test("handlePrefsWizard — Advanced config writes min_request_interval_ms", asy
     assert.equal(selectResponses.length, 0, "Expected all queued selectResponses to be consumed");
     assert.equal(inputResponses.length, 0, "Expected all queued inputResponses to be consumed");
     const content = readFileSync(path, "utf-8");
-    assert.match(content, /^min_request_interval_ms\s*:\s*250$/m);
+    assert.match(content, /^min_request_interval_ms:\s*250$/m);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
