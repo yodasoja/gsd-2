@@ -94,6 +94,7 @@ export {
   resolveInlineLevel,
   resolveContextSelection,
   resolveSearchProviderFromPreferences,
+  resolveDisabledModelProvidersFromPreferences,
 } from "./preferences-models.js";
 
 // ─── Path Constants & Getters ───────────────────────────────────────────────
@@ -388,6 +389,10 @@ function mergePreferences(base: GSDPreferences, override: GSDPreferences): GSDPr
     dynamic_routing: (base.dynamic_routing || override.dynamic_routing)
       ? { ...(base.dynamic_routing ?? {}), ...(override.dynamic_routing ?? {}) } as DynamicRoutingConfig
       : undefined,
+    disabled_model_providers: mergeStringLists(
+      base.disabled_model_providers,
+      override.disabled_model_providers,
+    ),
     uok: (base.uok || override.uok)
       ? {
           enabled: override.uok?.enabled ?? base.uok?.enabled,
@@ -441,6 +446,7 @@ function mergePreferences(base: GSDPreferences, override: GSDPreferences): GSDPr
     service_tier: override.service_tier ?? base.service_tier,
     forensics_dedup: override.forensics_dedup ?? base.forensics_dedup,
     show_token_cost: override.show_token_cost ?? base.show_token_cost,
+    min_request_interval_ms: override.min_request_interval_ms ?? base.min_request_interval_ms,
     codebase: (base.codebase || override.codebase)
       ? {
           ...(base.codebase ?? {}),
