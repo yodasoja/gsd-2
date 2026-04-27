@@ -22,6 +22,7 @@ import { logWarning as safetyLogWarning } from "../workflow-logger.js";
 import { installNotifyInterceptor } from "./notify-interceptor.js";
 import { initNotificationStore } from "../notification-store.js";
 import { initNotificationWidget } from "../notification-widget.js";
+import { extractSubagentAgentClasses } from "./subagent-input.js";
 
 // Skip the welcome screen on the very first session_start — cli.ts already
 // printed it before the TUI launched. Only re-print on /clear (subsequent sessions).
@@ -390,12 +391,16 @@ export function registerHooks(
       const manifest = resolveManifest(activeUnitType);
       if (manifest) {
         let planningInput = "";
+        let agentClasses: string[] | undefined;
         if (isToolCallEventType("write", event)) {
           planningInput = event.input.path;
         } else if (isToolCallEventType("edit", event)) {
           planningInput = event.input.path;
         } else if (isToolCallEventType("bash", event)) {
           planningInput = event.input.command;
+        } else if (event.toolName === "subagent" || event.toolName === "task") {
+          // Subagent inputs use { agent }, { tasks: [{ agent }] }, or { chain: [{ agent }] }.
+          agentClasses = extractSubagentAgentClasses((event as { input?: unknown }).input);
         }
         const planningGuard = shouldBlockPlanningUnit(
           event.toolName,
@@ -403,6 +408,7 @@ export function registerHooks(
           dash.basePath || discussionBasePath,
           activeUnitType,
           manifest.tools,
+          agentClasses,
         );
         if (planningGuard.block) return planningGuard;
       }
