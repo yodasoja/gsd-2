@@ -404,6 +404,30 @@ export class WorktreeResolver {
   mergeAndExit(milestoneId: string, ctx: NotifyCtx): void {
     this.validateMilestoneId(milestoneId);
 
+    // Anchor cwd at the project root before any merge work. Some merge code
+    // paths (mergeMilestoneToMain, slice-cadence) chdir explicitly; others
+    // (branch-mode, isolation-degraded skip, missing-original-base skip)
+    // do not. If the worktree dir is later torn down while cwd still points
+    // into it, every subsequent process.cwd() throws ENOENT — and after
+    // de73fb43d that surfaces as a session-failed cancel and (in headless
+    // mode) terminates the whole gsd process. Best-effort: silent on
+    // failure so existing test fixtures that use synthetic paths still pass.
+    if (this.s.originalBasePath) {
+      try {
+        // process.cwd() can throw ENOENT when cwd was removed, so attempt
+        // recovery directly.
+        process.chdir(this.s.originalBasePath);
+      } catch (err) {
+        debugLog("WorktreeResolver", {
+          action: "mergeAndExit",
+          phase: "pre-merge-chdir-failed",
+          milestoneId,
+          originalBasePath: this.s.originalBasePath,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
     // #4764 — telemetry: record start timestamp so we can emit merge duration.
     const mergeStartedAt = new Date().toISOString();
     const mergeStartMs = Date.now();

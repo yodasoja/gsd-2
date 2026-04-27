@@ -2372,5 +2372,20 @@ export function mergeMilestoneToMain(
   originalBase = null;
   nudgeGitBranchCache(previousCwd);
 
+  // 15. Anchor cwd at the project root on success-return. Step 12 removed
+  // the worktree dir; if cwd was inside it, every subsequent process.cwd()
+  // would throw ENOENT and trip auto/run-unit.ts:50's session-failed cancel
+  // path (the de73fb43d regression that closes headless gsd auto). Step 3
+  // already chdir'd here, but defending the success-return contract makes
+  // future maintainers safe against intervening chdir's between step 3 and
+  // here.
+  try {
+    // process.cwd() can throw ENOENT when cwd was removed, so attempt
+    // recovery directly.
+    process.chdir(originalBasePath_);
+  } catch (err) {
+    logWarning("worktree", `chdir to project root after merge failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   return { commitMessage, pushed, prCreated, codeFilesChanged };
 }
