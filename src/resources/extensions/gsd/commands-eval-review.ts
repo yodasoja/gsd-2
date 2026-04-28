@@ -7,7 +7,7 @@
  * `EVAL-REVIEW.md` whose machine-readable contract lives in YAML frontmatter
  * (see `eval-review-schema.ts`).
  *
- * Distilled from the closed PR #4247, which received an adversarial review on
+ * Distilled from a prior adversarial review on
  * the following points (each addressed in this implementation, with regression
  * tests in `tests/commands-eval-review.test.ts`):
  *
@@ -22,8 +22,6 @@
  *      `MAX_CONTEXT_BYTES`; truncation surfaced via `ctx.ui.notify`.
  *   6. Silent flag stripping — token-level argument parser; unknown
  *      `--*` tokens raise an explicit error.
- *
- * Refs: #4246 (parent), #5114 (this issue), #4247 (closed predecessor).
  */
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@gsd/pi-coding-agent";
@@ -142,7 +140,7 @@ export class EvalReviewArgError extends Error {
  *
  * Tokenization is whitespace-based; flag detection runs per-token. Unknown
  * `--*` tokens raise rather than getting silently stripped (the explicit
- * response to the closed PR #4247 finding where `--force-wipe` was mangled).
+ * response to a prior parser that silently mangled `--force-wipe`).
  *
  * `sliceId` is validated against {@link SLICE_ID_PATTERN} before any
  * filesystem access can possibly happen — defense in depth against
@@ -270,17 +268,24 @@ export async function buildEvalReviewContext(
 
   let spec: string | null = null;
   let specTruncated = false;
-  if (state.specPath && remaining > 0) {
-    try {
-      const specRead = await readCapped(state.specPath, remaining);
-      spec = specRead.content;
-      specTruncated = specRead.truncated;
-    } catch (err) {
-      // The spec is optional — surface the read failure as missing rather than
-      // crashing the audit. A malformed/unreadable AI-SPEC.md should not block
-      // /gsd eval-review.
-      const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(`Failed to read ${state.specPath}: ${msg}`);
+  if (state.specPath) {
+    if (remaining <= 0) {
+      // SUMMARY consumed the entire byte budget — signal the elision rather
+      // than silently dropping the spec for visibility.
+      spec = "[truncated: AI-SPEC.md omitted because SUMMARY.md consumed the context cap]";
+      specTruncated = true;
+    } else {
+      try {
+        const specRead = await readCapped(state.specPath, remaining);
+        spec = specRead.content;
+        specTruncated = specRead.truncated;
+      } catch (err) {
+        // The spec is optional — degrade to a marker rather than throwing.
+        // A malformed/unreadable AI-SPEC.md must not block /gsd eval-review.
+        const msg = err instanceof Error ? err.message : String(err);
+        spec = `[truncated: failed to read AI-SPEC.md (${msg})]`;
+        specTruncated = true;
+      }
     }
   }
 
@@ -493,7 +498,7 @@ ${ctx.summary}
 ## Final checklist before writing
 
 1. Does the frontmatter match the schema exactly (all field names, all
-   enum values)? An invalid frontmatter is a regression of PR #4247.
+   enum values)? An invalid frontmatter loses the schema contract.
 2. Is every \`gaps[*].evidence\` a cited file:line, not a token presence
    claim?
 3. Does \`overall_score\` actually equal \`round(coverage * 0.6 + infra * 0.4)\`?

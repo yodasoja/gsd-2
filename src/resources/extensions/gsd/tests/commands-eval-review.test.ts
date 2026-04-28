@@ -1,7 +1,7 @@
 /**
  * Unit tests for `/gsd eval-review` (commands-eval-review.ts).
  *
- * Each PR #4247 review finding is paired with a regression test that asserts
+ * Each prior review finding is paired with a regression test that asserts
  * the documented fix behavior. Tests are organized one `describe` per
  * exported function, with the regression-test cases marked in their `it`
  * descriptions.
@@ -68,7 +68,7 @@ describe("parseEvalReviewArgs", () => {
     assert.throws(() => parseEvalReviewArgs("--force"), EvalReviewArgError);
   });
 
-  it("throws on an unknown --* token (regression for #4247: --force-wipe must not be silently stripped)", () => {
+  it("throws on an unknown --* token (regression: --force-wipe must not be silently stripped)", () => {
     assert.throws(() => parseEvalReviewArgs("S07 --force-wipe"), EvalReviewArgError);
   });
 
@@ -76,7 +76,7 @@ describe("parseEvalReviewArgs", () => {
     assert.throws(() => parseEvalReviewArgs("S07 S08"), EvalReviewArgError);
   });
 
-  it("rejects path-traversal in the slice ID (regression for #4247 BLOCKER)", () => {
+  it("rejects path-traversal in the slice ID (regression: path-traversal blocker)", () => {
     assert.throws(() => parseEvalReviewArgs("../../etc/passwd"), EvalReviewArgError);
     assert.throws(() => parseEvalReviewArgs("S01/../../"), EvalReviewArgError);
     assert.throws(() => parseEvalReviewArgs("S01/.."), EvalReviewArgError);
@@ -145,7 +145,7 @@ describe("detectEvalReviewState", () => {
     }
   }
 
-  it("returns no-slice-dir when the slice directory is missing (regression for #4247 MINOR — no-summary conflation)", () => {
+  it("returns no-slice-dir when the slice directory is missing (regression: no-slice-dir vs no-summary must be distinct states)", () => {
     mkdirSync(join(basePath, ".gsd", "milestones", "M001", "slices"), { recursive: true });
     const result = detectEvalReviewState(
       { sliceId: "S07", force: false, show: false },
@@ -264,7 +264,7 @@ describe("buildEvalReviewContext", () => {
     assert.equal(ctx.generatedAt, "2026-04-28T14:00:00Z");
   });
 
-  it("truncates SUMMARY when it alone exceeds the cap (regression for #4247 MAJOR — no size cap)", async () => {
+  it("truncates SUMMARY when it alone exceeds the cap (regression: prompt-size cap)", async () => {
     const state = fakeReady({ summaryBytes: MAX_CONTEXT_BYTES + 4096 });
     const ctx = await buildEvalReviewContext(state, "M001");
     assert.equal(ctx.truncated, true);
@@ -293,6 +293,23 @@ describe("buildEvalReviewContext", () => {
     const state = fakeReady({ summaryBytes: 256 });
     const ctx = await buildEvalReviewContext(state, "M001");
     assert.equal(ctx.spec, null);
+  });
+
+  it("emits a spec-elision marker when SUMMARY consumed the entire byte budget", async () => {
+    const state = fakeReady({ summaryBytes: MAX_CONTEXT_BYTES, specBytes: 1024 });
+    const ctx = await buildEvalReviewContext(state, "M001");
+    assert.equal(ctx.truncated, true);
+    assert.ok(ctx.spec?.includes("[truncated:"));
+    assert.ok(ctx.spec?.toLowerCase().includes("ai-spec"));
+  });
+
+  it("degrades to a marker (not a throw) when AI-SPEC.md read fails — spec is optional", async () => {
+    const state = fakeReady({ summaryBytes: 512, specBytes: 256 });
+    rmSync(state.specPath!);
+    const ctx = await buildEvalReviewContext(state, "M001");
+    assert.equal(ctx.truncated, true);
+    assert.ok(ctx.spec?.includes("[truncated:"));
+    assert.ok(ctx.spec?.toLowerCase().includes("failed to read"));
   });
 
   it("populates outputPath using the canonical slice file naming", async () => {
@@ -344,7 +361,7 @@ describe("findEvalReviewFile", () => {
   });
 });
 
-// ─── Catalog registration (regression for bdc9c2131 lesson — forgetting to wire) ──
+// ─── Catalog registration (regression: catalog registration must not be forgotten) ──
 
 describe("catalog registration", () => {
   it("includes eval-review in TOP_LEVEL_SUBCOMMANDS", () => {
@@ -380,7 +397,7 @@ describe("buildEvalReviewPrompt", () => {
     };
   }
 
-  it("includes the explicit anti-Goodhart rule (regression for #4247 CONCEPTUAL — string presence is not evidence)", () => {
+  it("includes the explicit anti-Goodhart rule (string presence is not evidence — anti-Goodhart guard)", () => {
     const prompt = buildEvalReviewPrompt(ctxFixture());
     assert.ok(prompt.includes("Anti-Goodhart"), "prompt must reference the anti-Goodhart rule by name");
     assert.ok(
