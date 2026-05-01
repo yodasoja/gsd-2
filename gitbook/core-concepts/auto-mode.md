@@ -8,7 +8,7 @@ Auto mode is GSD's autonomous execution engine. Run `/gsd auto`, walk away, come
 /gsd auto
 ```
 
-GSD reads `.gsd/STATE.md`, determines the next unit of work, creates a fresh AI session with all relevant context, and lets the AI execute. When it finishes, GSD reads disk state again and dispatches the next unit. This continues until the milestone is complete.
+GSD derives the next unit of work from the authoritative SQLite database at the project root, creates a fresh AI session with all relevant context, and lets the AI execute. When it finishes, GSD persists the result to the database, refreshes markdown projections such as `STATE.md`, and dispatches the next unit. This continues until the milestone is complete.
 
 ## The Execution Loop
 
@@ -25,6 +25,12 @@ Plan → Execute (per task) → Complete → Reassess Roadmap → Next Slice
 - **Complete** — writes summary, UAT script, marks roadmap, commits
 - **Reassess** — checks if the roadmap still makes sense after what was learned
 - **Validate** — after all slices, verifies success criteria were actually met
+
+## State Authority
+
+The GSD database is the runtime source of truth for milestones, slices, tasks, requirements, decisions, summaries, and completion status. Markdown files in `.gsd/` are rendered projections for review, prompts, and git-friendly history; editing a projection does not override the database unless a GSD command imports or saves the change.
+
+In worktree mode, the project-root database and project-root `.gsd/` state remain authoritative. Worktree markdown projections are diagnostics, not state to sync back. Runtime state derivation does not silently rebuild from markdown when the database is unavailable. The legacy markdown fallback is only enabled with `GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK=1` for tests and explicit recovery work.
 
 ## Deep Planning Mode
 
@@ -62,7 +68,7 @@ Press **Escape**. The conversation is preserved. You can interact with the agent
 /gsd auto
 ```
 
-Auto mode reads disk state and picks up where it left off.
+Auto mode derives the latest database state and picks up where it left off.
 
 ### Stop
 

@@ -4,7 +4,7 @@ Auto mode is GSD's autonomous execution engine. Run `/gsd auto`, walk away, come
 
 ## How It Works
 
-Auto mode is a **state machine driven by files on disk**. It reads `.gsd/STATE.md`, determines the next unit of work, creates a fresh agent session, injects a focused prompt with all relevant context pre-inlined, and lets the LLM execute. When the LLM finishes, auto mode reads disk state again and dispatches the next unit.
+Auto mode is a **state machine driven by the GSD database at the project root**. It derives the next unit of work from the authoritative SQLite state, creates a fresh agent session, injects a focused prompt with all relevant context pre-inlined, and lets the LLM execute. When the LLM finishes, auto mode persists the result to the database, refreshes markdown projections such as `STATE.md`, and dispatches the next unit.
 
 ### The Loop
 
@@ -21,6 +21,12 @@ Plan (with integrated research) → Execute (per task) → Complete → Reassess
 - **Complete** — writes summary, UAT script, marks roadmap, commits
 - **Reassess** — checks if the roadmap still makes sense
 - **Validate Milestone** — reconciliation gate after all slices complete; compares roadmap success criteria against actual results, catches gaps before sealing the milestone
+
+### State Authority
+
+The SQLite database is the runtime source of truth for milestones, slices, tasks, requirements, decisions, summaries, and completion status. Markdown files in `.gsd/` are rendered projections for review, prompts, and git-friendly history; editing a projection does not override the database unless a command imports or saves that change through GSD.
+
+In worktree mode, the project-root database and project-root `.gsd/` state remain authoritative. Worktree markdown projections are useful diagnostics, but they are not synced back as runtime state. If the database is unavailable, runtime state derivation refuses to silently rebuild from markdown. The legacy markdown derivation path is only enabled when `GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK=1`, which exists for tests and explicit recovery scenarios.
 
 ### Deep Planning Mode
 
@@ -267,7 +273,7 @@ Press **Escape**. The conversation is preserved. You can interact with the agent
 /gsd auto
 ```
 
-Auto mode reads disk state and picks up where it left off.
+Auto mode derives the latest database state and picks up where it left off.
 
 ### Stop
 

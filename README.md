@@ -310,7 +310,9 @@ This is what makes GSD different. Run it, walk away, come back to built software
 /gsd auto
 ```
 
-Auto mode is a state machine driven by files on disk. It reads `.gsd/STATE.md`, determines the next unit of work, creates a fresh agent session, injects a focused prompt with all relevant context pre-inlined, and lets the LLM execute. When the LLM finishes, auto mode reads disk state again and dispatches the next unit.
+Auto mode is a state machine driven by the GSD database at the project root. It derives the next unit of work from authoritative SQLite state, creates a fresh agent session, injects a focused prompt with all relevant context pre-inlined, and lets the LLM execute. When the LLM finishes, auto mode persists the result to the database, refreshes markdown projections such as `STATE.md`, and dispatches the next unit.
+
+The database is authoritative for milestones, slices, tasks, requirements, decisions, summaries, and completion status. Markdown under `.gsd/` is a rendered projection for review, prompts, and git-friendly history; it is not a runtime fallback unless you explicitly run a recovery/import command. In worktree mode, project-root DB state remains authoritative and worktree markdown projections are not synced back as state.
 
 **What happens under the hood:**
 
@@ -499,6 +501,7 @@ Every dispatch is carefully constructed. The LLM never wastes tool calls on orie
 
 | Artifact           | Purpose                                                         |
 | ------------------ | --------------------------------------------------------------- |
+| `gsd.db`           | Authoritative runtime state for hierarchy and completion        |
 | `PROJECT.md`       | Living doc — what the project is right now                      |
 | `REQUIREMENTS.md`  | Project-level capability contract and out-of-scope list         |
 | `DECISIONS.md`     | Append-only register of architectural decisions                 |
@@ -506,7 +509,7 @@ Every dispatch is carefully constructed. The LLM never wastes tool calls on orie
 | `RUNTIME.md`       | Runtime context — API endpoints, env vars, services (v2.39)     |
 | `runtime/research-decision.json` | Deep-mode marker for project research vs skip       |
 | `research/*.md`    | Optional deep-mode project research: stack, features, architecture, pitfalls |
-| `STATE.md`         | Quick-glance dashboard — always read first                      |
+| `STATE.md`         | Quick-glance dashboard rendered from the database                |
 | `M001-ROADMAP.md`  | Milestone plan with slice checkboxes, risk levels, dependencies |
 | `M001-CONTEXT.md`  | User decisions from the discuss phase                           |
 | `M001-RESEARCH.md` | Codebase and ecosystem research                                 |
@@ -708,7 +711,7 @@ The best practice for working in teams is to ensure unique milestone names acros
 .gsd/completed-units*.json
 # State manifest — workflow state for recovery
 .gsd/state-manifest.json
-# Derived state cache — regenerated from plan/roadmap files on disk
+# Derived state projection — regenerated from the authoritative database
 .gsd/STATE.md
 # Per-developer token/cost accumulator
 .gsd/metrics.json
@@ -720,7 +723,7 @@ The best practice for working in teams is to ensure unique milestone names acros
 .gsd/worktrees/
 # Parallel orchestration IPC and worker status
 .gsd/parallel/
-# SQLite database and WAL sidecars — checkpoint state, forensics data
+# SQLite database and WAL sidecars — authoritative runtime state, local only
 .gsd/gsd.db*
 # Daily-rotated event journal — structured event log for forensics
 .gsd/journal/
@@ -785,7 +788,7 @@ gsd (CLI binary)
 - **`pkg/` shim directory** — `PI_PACKAGE_DIR` points here (not project root) to avoid Pi's theme resolution collision with our `src/` directory. Contains only `piConfig` and theme assets.
 - **Two-file loader pattern** — `loader.ts` sets all env vars with zero SDK imports, then dynamic-imports `cli.ts` which does static SDK imports. This ensures `PI_PACKAGE_DIR` is set before any SDK code evaluates.
 - **Always-overwrite sync** — `npm update -g` takes effect immediately. Bundled extensions and agents are synced to `~/.gsd/agent/` on every launch, not just first run.
-- **State lives on disk** — `.gsd/` is the source of truth. Auto mode reads it, writes it, and advances based on what it finds. No in-memory state survives across sessions.
+- **DB-authoritative state** — the project-root GSD database is the runtime source of truth. `.gsd/` markdown files are rendered projections for review, prompt context, and git history. No in-memory state survives across sessions.
 
 ---
 

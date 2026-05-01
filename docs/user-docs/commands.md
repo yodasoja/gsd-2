@@ -60,6 +60,7 @@
 | `/gsd hooks` | Show configured post-unit and pre-dispatch hooks |
 | `/gsd run-hook` | Manually trigger a specific hook |
 | `/gsd migrate` | Migrate a v1 `.planning` directory to `.gsd` format |
+| `/gsd recover` | Explicitly reconstruct database hierarchy state from rendered markdown after database loss or corruption |
 
 ## Milestone Management
 
