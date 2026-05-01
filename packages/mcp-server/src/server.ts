@@ -329,6 +329,32 @@ interface AskUserQuestionsElicitRequest {
   };
 }
 
+/**
+ * Structured payload mirrored to the MCP `structuredContent` field on
+ * `ask_user_questions` results. Mirrors the `LocalResultDetails` shape that
+ * src/resources/extensions/ask-user-questions.ts already produces, so the
+ * GSD discussion-gate hook in register-hooks.ts can treat the MCP path
+ * identically to the in-process extension path. Without this, the bridge
+ * surfaces `details = undefined` and the gate hook's
+ * `if (details?.cancelled || !details?.response)` branch HARD-BLOCKs every
+ * user answer, including successful confirmations. See #5267.
+ */
+interface AskUserQuestionsRoundResultAnswer {
+  selected: string | string[];
+  notes: string;
+}
+
+interface AskUserQuestionsRoundResult {
+  endInterview: false;
+  answers: Record<string, AskUserQuestionsRoundResultAnswer>;
+}
+
+interface AskUserQuestionsStructuredContent {
+  questions: AskUserQuestion[];
+  response: AskUserQuestionsRoundResult | null;
+  cancelled: boolean;
+}
+
 const OTHER_OPTION_LABEL = 'None of the above';
 
 function normalizeAskUserQuestionsNote(value: AskUserQuestionsContentValue | undefined): string {
@@ -434,6 +460,41 @@ export function formatAskUserQuestionsElicitResult(
   return JSON.stringify({ answers });
 }
 
+/**
+ * Normalize an MCP elicitation form result into the `RoundResult` shape the
+ * GSD discussion-gate hook reads from `tool_result` `details.response`. The
+ * elicitation `content` map carries `{ [id]: label, [id]__note?: string }`;
+ * the hook expects `{ answers: { [id]: { selected, notes } } }`. Mirrored into
+ * `structuredContent` by `askUserQuestionsHandler`. See #5267.
+ */
+export function buildAskUserQuestionsRoundResult(
+  questions: AskUserQuestion[],
+  result: AskUserQuestionsElicitResult,
+): AskUserQuestionsRoundResult {
+  const answers: Record<string, AskUserQuestionsRoundResultAnswer> = {};
+  const content = result.content ?? {};
+
+  for (const question of questions) {
+    if (question.allowMultiple) {
+      const list = normalizeAskUserQuestionsAnswers(content[question.id], true);
+      answers[question.id] = { selected: list, notes: '' };
+      continue;
+    }
+
+    const list = normalizeAskUserQuestionsAnswers(content[question.id], false);
+    const selected = list[0] ?? '';
+    const notes = selected === OTHER_OPTION_LABEL
+      ? normalizeAskUserQuestionsNote(content[`${question.id}__note`])
+      : '';
+    answers[question.id] = { selected, notes };
+  }
+
+  // `endInterview: false` mirrors the local extension's `RoundResult` shape and
+  // matches the remote path's `toRoundResultResponse` so register-hooks reads
+  // identical payloads regardless of channel. See peer review #5267-Q2.
+  return { endInterview: false, answers };
+}
+
 interface AskUserQuestionsHandlerDeps {
   elicitInput(params: AskUserQuestionsElicitRequest): Promise<AskUserQuestionsElicitResult>;
   isRemoteConfigured(): boolean;
@@ -458,6 +519,18 @@ function formatErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * Defensive guard for the `details.response` payload from `tryRemoteQuestions`.
+ * Accepts only an object with a plain `answers` map; anything else (null,
+ * stringified JSON, missing) falls back to `null` so the gate hook routes
+ * the cancel branch instead of crashing on `details.response.answers[id]`.
+ */
+function isRoundResultLike(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const answers = (value as Record<string, unknown>)['answers'];
+  return !!answers && typeof answers === 'object' && !Array.isArray(answers);
+}
+
 export async function askUserQuestionsHandler(
   questions: AskUserQuestion[],
   extra: McpToolExtra | undefined,
@@ -478,7 +551,15 @@ export async function askUserQuestionsHandler(
         'ask_user_questions',
       );
       if (elicitation.action === 'accept' && elicitation.content) {
-        return textContent(formatAskUserQuestionsElicitResult(questions, elicitation));
+        const structured: AskUserQuestionsStructuredContent = {
+          questions,
+          response: buildAskUserQuestionsRoundResult(questions, elicitation),
+          cancelled: false,
+        };
+        return {
+          content: [{ type: 'text' as const, text: formatAskUserQuestionsElicitResult(questions, elicitation) }],
+          structuredContent: structured as unknown as Record<string, unknown>,
+        };
       }
     } catch (err) {
       if (!isLocalElicitFallbackError(err)) throw err;
@@ -503,15 +584,57 @@ export async function askUserQuestionsHandler(
       if (remoteResult) {
         const details = remoteResult.details as Record<string, unknown> | undefined;
         if (details?.['timed_out'] || details?.['error']) {
-          return textContent(remoteResult.content[0]?.text ?? 'Remote questions timed out or failed');
+          // Mirror the timeout/error into structuredContent so the gate hook's
+          // `details?.cancelled || !details?.response` branch fires correctly
+          // (gate stays pending, model re-asks) instead of silently dropping
+          // because no `details` made it across the MCP wire. See #5267.
+          const failedStructured: AskUserQuestionsStructuredContent = {
+            questions,
+            response: null,
+            cancelled: true,
+          };
+          return {
+            content: [{ type: 'text' as const, text: remoteResult.content[0]?.text ?? 'Remote questions timed out or failed' }],
+            structuredContent: failedStructured as unknown as Record<string, unknown>,
+          };
         }
-        return textContent(remoteResult.content[0]?.text ?? '');
+        // Successful remote answer — surface the normalized RoundResult that
+        // remote-questions.ts attached to `details.response` so the gate hook
+        // sees `details.response.answers[id].selected` on this path too.
+        // A malformed `response` (failing isRoundResultLike) is reported as
+        // an explicit cancellation rather than a silent `cancelled: false`
+        // with `response: null` — the latter would lie to any consumer that
+        // reads `structuredContent.cancelled` independently of `.response`.
+        const hasValidResponse = isRoundResultLike(details?.['response']);
+        const acceptedStructured: AskUserQuestionsStructuredContent = hasValidResponse
+          ? {
+              questions,
+              response: details!['response'] as AskUserQuestionsRoundResult,
+              cancelled: false,
+            }
+          : {
+              questions,
+              response: null,
+              cancelled: true,
+            };
+        return {
+          content: [{ type: 'text' as const, text: remoteResult.content[0]?.text ?? '' }],
+          structuredContent: acceptedStructured as unknown as Record<string, unknown>,
+        };
       }
     }
 
     if (localElicitError) throw localElicitError;
 
-    return textContent('ask_user_questions was cancelled before receiving a response');
+    const cancelledStructured: AskUserQuestionsStructuredContent = {
+      questions,
+      response: null,
+      cancelled: true,
+    };
+    return {
+      content: [{ type: 'text' as const, text: 'ask_user_questions was cancelled before receiving a response' }],
+      structuredContent: cancelledStructured as unknown as Record<string, unknown>,
+    };
   } catch (err) {
     return errorContent(err instanceof Error ? err.message : String(err));
   }
@@ -527,8 +650,8 @@ export type ElicitInputFn = (params: {
 }) => Promise<{ action: 'accept' | 'cancel' | 'decline'; content?: Record<string, unknown> }>;
 
 type ToolContent =
-  | { content: Array<{ type: 'text'; text: string }> }
-  | { isError: true; content: Array<{ type: 'text'; text: string }> };
+  | { content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown> }
+  | { isError: true; content: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown> };
 
 export async function secureEnvCollectHandler(
   args: Record<string, unknown>,
