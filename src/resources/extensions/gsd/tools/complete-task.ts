@@ -29,7 +29,7 @@ import {
   getPendingGatesForTurn,
 } from "../gsd-db.js";
 import { getGatesForTurn } from "../gate-registry.js";
-import { resolveSliceFile, resolveTasksDir, clearPathCache } from "../paths.js";
+import { resolveTasksDir, clearPathCache } from "../paths.js";
 import { checkOwnership, taskUnitKey } from "../unit-ownership.js";
 import { saveFile, clearParseCache } from "../files.js";
 import { invalidateStateCache } from "../state.js";
@@ -324,15 +324,9 @@ export async function handleCompleteTask(
   try {
     await saveFile(summaryPath, summaryMd);
 
-    // Toggle plan checkbox via renderer module
-    const planPath = resolveSliceFile(basePath, params.milestoneId, params.sliceId, "PLAN");
-    if (planPath) {
-      await renderPlanCheckboxes(basePath, params.milestoneId, params.sliceId);
-    } else {
-      process.stderr.write(
-        `gsd-db: complete_task — could not find plan file for ${params.sliceId}/${params.milestoneId}, skipping checkbox toggle\n`,
-      );
-    }
+    // Toggle or regenerate the plan projection from DB. Missing projection
+    // files are rebuilt by the renderer instead of being skipped.
+    await renderPlanCheckboxes(basePath, params.milestoneId, params.sliceId);
   } catch (renderErr) {
     projectionStale = true;
     logWarning("projection", `complete_task projection write failed for ${params.milestoneId}/${params.sliceId}/${params.taskId}; DB completion remains committed`, {

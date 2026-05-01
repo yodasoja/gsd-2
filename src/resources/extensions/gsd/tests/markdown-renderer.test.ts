@@ -856,10 +856,10 @@ test('── markdown-renderer: renderAllFromDb produces all files ──', asyn
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Graceful Degradation (Disk Fallback)
+// DB-authoritative regeneration
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('── markdown-renderer: graceful fallback reads from disk when artifact not in DB ──', async () => {
+test('── markdown-renderer: missing artifact regenerates from DB without importing disk projection ──', async () => {
   const tmpDir = makeTmpDir();
   const dbPath = path.join(tmpDir, '.gsd', 'gsd.db');
   openDatabase(dbPath);
@@ -874,7 +874,7 @@ test('── markdown-renderer: graceful fallback reads from disk when artifact 
     // Write roadmap to disk but NOT in artifacts DB
     const roadmapContent = makeRoadmapContent([
       { id: 'S01', title: 'Core', done: false },
-    ]);
+    ]) + '\n\nDISK_ONLY_SENTINEL';
     const roadmapPath = path.join(tmpDir, '.gsd', 'milestones', 'M001', 'M001-ROADMAP.md');
     fs.writeFileSync(roadmapPath, roadmapContent);
     clearAllCaches();
@@ -883,14 +883,15 @@ test('── markdown-renderer: graceful fallback reads from disk when artifact 
     const before = getArtifact('milestones/M001/M001-ROADMAP.md');
     assert.deepStrictEqual(before, null, 'artifact not in DB before render');
 
-    // Render — should read from disk, store in DB
+    // Render — should regenerate from DB rows, not import/patch disk content.
     const ok = await renderRoadmapCheckboxes(tmpDir, 'M001');
-    assert.ok(ok, 'render succeeds with disk fallback');
+    assert.ok(ok, 'render succeeds by regenerating from DB');
 
-    // Verify artifact now in DB (stored after reading from disk)
+    // Verify artifact now exists in DB but does not contain disk-only content.
     const after = getArtifact('milestones/M001/M001-ROADMAP.md');
-    assert.ok(after !== null, 'artifact stored in DB after disk fallback render');
-    assert.ok(after!.full_content.includes('[x] **S01:'), 'DB artifact reflects rendered state');
+    assert.ok(after !== null, 'artifact regenerated in DB');
+    assert.ok(!after!.full_content.includes('DISK_ONLY_SENTINEL'), 'disk projection content was not imported');
+    assert.ok(after!.full_content.includes('S01'), 'DB artifact reflects DB slice state');
   } finally {
     closeDatabase();
     cleanupDir(tmpDir);

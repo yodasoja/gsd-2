@@ -741,20 +741,19 @@ export async function saveArtifactToDb(
       contentToPersist = generateRequirementsMd(activeRequirements);
     }
 
-    // Shrinkage guard: if the file already exists and the new content is
-    // significantly smaller (<50%), preserve the richer file on disk and
-    // store its content in the DB instead of the abbreviated version. Root
-    // canonical artifacts are exempt because their content is rendered from
-    // canonical DB state, and cleanup/consolidation is often intentionally much
-    // smaller than a malformed accumulated file.
-    let dbContent = contentToPersist;
+    // Shrinkage guard: if the projection file already exists and the new
+    // content is significantly smaller (<50%), preserve the richer file on
+    // disk, but keep the DB row authoritative with the caller-provided content.
+    // The disk file is a stale projection until the next explicit render.
+    // Root canonical artifacts are exempt because their content is rendered
+    // from canonical DB state, and cleanup/consolidation is often intentionally
+    // much smaller than a malformed accumulated file.
     let skipDiskWrite = false;
     if (!isRootCanonicalArtifact(opts) && existsSync(fullPath)) {
       const existingSize = statSync(fullPath).size;
       const newSize = Buffer.byteLength(contentToPersist, 'utf-8');
       if (existingSize > 0 && newSize < existingSize * 0.5) {
-        logWarning('manifest', `new content (${newSize}B) is <50% of existing file (${existingSize}B), preserving disk file`, { fn: 'saveArtifactToDb', path: opts.path });
-        dbContent = readFileSync(fullPath, 'utf-8');
+        logWarning('projection', `new content (${newSize}B) is <50% of existing projection (${existingSize}B), preserving disk file while DB remains authoritative`, { fn: 'saveArtifactToDb', path: opts.path });
         skipDiskWrite = true;
       }
     }
@@ -765,7 +764,7 @@ export async function saveArtifactToDb(
       milestone_id: opts.milestone_id ?? null,
       slice_id: opts.slice_id ?? null,
       task_id: opts.task_id ?? null,
-      full_content: dbContent,
+      full_content: contentToPersist,
     });
 
     // Write the file to disk (only if we're not preserving a richer existing file)

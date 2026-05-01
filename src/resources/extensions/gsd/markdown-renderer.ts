@@ -84,44 +84,19 @@ function taskSummaryForSlicePlan(description: string): string {
 }
 
 /**
- * Load artifact content from DB first, falling back to reading from disk as a
- * legacy projection compatibility path. Disk fallback content is deliberately
- * not stored back into DB; markdown is not authoritative during runtime.
+ * Load artifact content from the DB. Markdown projections are not authoritative
+ * during runtime; when the artifact row is missing, callers regenerate from DB
+ * rows instead of patching disk fallback content and storing it back.
  */
 function loadArtifactContent(
   artifactPath: string,
-  absPath: string | null,
-  opts: {
-    artifact_type: string;
-    milestone_id: string;
-    slice_id?: string;
-    task_id?: string;
-  },
 ): string | null {
-  // Try DB first
   const artifact = getArtifact(artifactPath);
   if (artifact && artifact.full_content) {
     return artifact.full_content;
   }
 
-  // Fall back to disk for legacy projection patching only. Do not import this
-  // content into DB; missing/stale DB artifacts should be regenerated from rows.
-  if (!absPath) {
-    process.stderr.write(
-      `markdown-renderer: artifact not found in DB or on disk: ${artifactPath}\n`,
-    );
-    return null;
-  }
-
-  let content: string;
-  try {
-    content = readFileSync(absPath, "utf-8");
-  } catch {
-    logWarning("renderer", `cannot read file from disk: ${absPath}`);
-    return null;
-  }
-
-  return content;
+  return null;
 }
 
 /**
@@ -492,13 +467,10 @@ export async function renderRoadmapCheckboxes(
   const absPath = resolveMilestoneFile(basePath, milestoneId, "ROADMAP");
   const artifactPath = absPath ? toArtifactPath(absPath, basePath) : null;
 
-  // Load content from DB (with disk fallback)
+  // Load content from DB; regenerate from DB rows when the artifact is absent.
   let content: string | null = null;
   if (artifactPath) {
-    content = loadArtifactContent(artifactPath, absPath, {
-      artifact_type: "ROADMAP",
-      milestone_id: milestoneId,
-    });
+    content = loadArtifactContent(artifactPath);
   }
 
   if (!content) {
@@ -565,11 +537,7 @@ export async function renderPlanCheckboxes(
 
   let content: string | null = null;
   if (artifactPath) {
-    content = loadArtifactContent(artifactPath, absPath, {
-      artifact_type: "PLAN",
-      milestone_id: milestoneId,
-      slice_id: sliceId,
-    });
+    content = loadArtifactContent(artifactPath);
   }
 
   if (!content) {

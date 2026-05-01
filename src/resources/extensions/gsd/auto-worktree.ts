@@ -90,9 +90,8 @@ const LEGACY_DEEP_SETUP_RUNTIME_UNIT_FILES = new Set([
 // ─── Shared Constants & Helpers ─────────────────────────────────────────────
 
 /**
- * Root-level .gsd/ state files synced between worktree and project root.
- * Single source of truth — used by syncGsdStateToWorktree, syncWorktreeStateBack,
- * and the dispatch-level sync functions.
+ * Root-level .gsd/ projections copied from project root into worktrees for
+ * compatibility. Project root remains the canonical state/projection root.
  */
 const ROOT_STATE_FILES = [
   "DECISIONS.md",
@@ -108,6 +107,11 @@ const ROOT_STATE_FILES = [
   // Forward-sync (main → worktree) is handled explicitly in syncGsdStateToWorktree().
   // Back-sync (worktree → main) must NEVER overwrite the project root's copy
   // because the project root is authoritative for preferences (#2684).
+] as const;
+
+const ROOT_DIAGNOSTIC_FILES = [
+  "completed-units.json",
+  "metrics.json",
 ] as const;
 
 /**
@@ -194,7 +198,7 @@ const VERDICT_RE = /verdict:\s*[\w-]+/i;
  * destination when the source copy contains a `verdict:` field.
  *
  * This is the targeted fix for the UAT stuck-loop (#2821): the main
- * safeCopyRecursive uses force:false to protect worktree-authoritative
+ * safeCopyRecursive uses force:false to protect worktree-local projection
  * files (#1886), but ASSESSMENT files written by run-uat must be
  * forward-synced when the project root has a verdict. Without this,
  * the worktree retains a stale FAIL or missing ASSESSMENT and
@@ -272,9 +276,9 @@ function clearProjectRootStateFiles(basePath: string, milestoneId: string): void
     }
   }
 
-  // Clean up entire synced milestone directory and runtime/units.
-  // syncStateToProjectRoot() copies these into the project root during
-  // execution.  If they remain as untracked files when we attempt
+  // Clean up legacy synced milestone directories and runtime/units.
+  // Older versions copied these into the project root during execution.
+  // If they remain as untracked files when we attempt
   // `git merge --squash`, git rejects the merge with "local changes would
   // be overwritten", causing silent data loss (#1738).
   const syncedDirs = [
@@ -360,7 +364,7 @@ export function syncProjectRootToWorktree(
 
   // Copy milestone directory from project root to worktree — additive only.
   // force:false prevents cpSync from overwriting existing worktree files.
-  // Without this, worktree-authoritative files (e.g. VALIDATION.md written
+  // Without this, worktree-local files (e.g. VALIDATION.md written
   // by validate-milestone) get clobbered by stale project root copies,
   // causing an infinite re-validation loop (#1886).
   safeCopyRecursive(
@@ -370,7 +374,7 @@ export function syncProjectRootToWorktree(
   );
 
   // Force-sync ASSESSMENT files that have a verdict from project root (#2821).
-  // The additive-only copy above preserves worktree-authoritative files, but
+  // The additive-only copy above preserves worktree-local files, but
   // ASSESSMENT files are special: after run-uat writes a verdict and post-unit
   // syncs it to the project root, the worktree may retain a stale copy (e.g.
   // verdict:fail while the project root has verdict:pass from a retry). On
@@ -427,9 +431,10 @@ export function syncProjectRootToWorktree(
 }
 
 /**
- * Sync dispatch-critical .gsd/ state files from worktree to project root.
+ * Sync worktree diagnostics from worktree to project root.
  * Only runs when inside an auto-worktree (worktreePath differs from projectRoot).
- * Copies: STATE.md + active milestone directory (roadmap, slice plans, task summaries).
+ * DB/project-root state remains authoritative; markdown projections are not
+ * copied from the worktree back to the project root.
  * Non-fatal — sync failure should never block dispatch.
  */
 export function syncStateToProjectRoot(
@@ -449,23 +454,12 @@ export function syncStateToProjectRoot(
   // Compare realpaths and skip when they resolve to the same physical path (#2184).
   if (isSamePath(wtGsd, prGsd)) return;
 
-  // 1. STATE.md — the quick-glance status used by initial deriveState()
-  safeCopy(join(wtGsd, "STATE.md"), join(prGsd, "STATE.md"), { force: true });
-
-  // 2. Milestone directory — ROADMAP, slice PLANs, task summaries
-  // Copy the entire milestone .gsd subtree so deriveState reads current checkboxes
-  safeCopyRecursive(
-    join(wtGsd, "milestones", milestoneId),
-    join(prGsd, "milestones", milestoneId),
-    { force: true },
-  );
-
-  // 3. metrics.json — session cost/token tracking (#2313).
+  // metrics.json — session cost/token tracking (#2313).
   // Without this, metrics accumulated in the worktree are invisible from the
   // project root and never appear in the dashboard or skill-health reports.
   safeCopy(join(wtGsd, "metrics.json"), join(prGsd, "metrics.json"), { force: true });
 
-  // 4. Runtime records — unit dispatch state used by selfHealRuntimeRecords().
+  // Runtime records — unit dispatch diagnostics used by selfHealRuntimeRecords().
   // Without this, a crash during a unit leaves the runtime record only in the
   // worktree. If the next session resolves basePath before worktree re-entry,
   // selfHeal can't find or clear the stale record (#769).
@@ -638,8 +632,9 @@ export function cleanStaleRuntimeUnits(
  * missing milestones, CONTEXT, ROADMAP, DECISIONS, REQUIREMENTS, and
  * PROJECT files from the main repo's .gsd/ into the worktree's .gsd/.
  *
- * Only adds missing content — never overwrites existing files in the worktree
- * (the worktree's execution state is authoritative for in-progress work).
+ * Only adds missing content — never overwrites existing files in the worktree.
+ * Worktree files are compatibility projections; DB/project root remains
+ * authoritative for runtime state.
  */
 export function syncGsdStateToWorktree(
   mainBasePath: string,
@@ -791,24 +786,17 @@ export function syncGsdStateToWorktree(
 }
 
 /**
- * Sync milestone artifacts from worktree back to the main external state directory.
- * Called before milestone merge to ensure completion artifacts (SUMMARY, VALIDATION,
- * updated ROADMAP) are visible from the project root (#1412).
+ * Sync compatibility artifacts from worktree back to the main external state
+ * directory. Canonical workflow state lives in the project DB; worktree .gsd
+ * content is legacy projection/diagnostic data only.
  *
  * Syncs:
- *   1. Root-level .gsd/ files (REQUIREMENTS, PROJECT, DECISIONS, KNOWLEDGE,
- *      OVERRIDES) — the worktree's versions overwrite main's because the
- *      worktree is the authoritative execution context.
- *   2. ALL milestone directories found in the worktree — not just the
- *      current milestoneId. The complete-milestone unit may create artifacts
- *      for the *next* milestone (CONTEXT, ROADMAP, new requirements) which
- *      must survive worktree teardown.
+ *   1. Legacy worktree DBs are reconciled into the canonical project DB.
+ *   2. Runtime diagnostic files may be copied for operator visibility.
  *
- * History: Originally only synced milestones/<milestoneId>/ and assumed
- * root-level files would be carried by the squash merge. In practice,
- * .gsd/ files are often untracked (gitignored or never committed), so the
- * squash merge carries nothing. This caused next-milestone artifacts and
- * updated REQUIREMENTS/PROJECT to be silently lost on teardown.
+ * Markdown milestone directories are projections and are not copied from
+ * worktrees into the project root. Current workflow state must arrive through
+ * the shared project DB or the pre-upgrade DB reconciliation path above.
  */
 export function syncWorktreeStateBack(
   mainBasePath: string,
@@ -842,13 +830,10 @@ export function syncWorktreeStateBack(
     }
   }
 
-  // ── 1. Sync root-level .gsd/ files back ──────────────────────────────
-  // The worktree is authoritative — complete-milestone updates REQUIREMENTS,
-  // PROJECT, etc. These must overwrite main's copies so they survive teardown.
-  // Also includes QUEUE.md, completed-units.json, and metrics.json which are
-  // written during milestone closeout and lost on teardown without explicit sync
-  // (#1787, #2313).
-  for (const f of ROOT_STATE_FILES) {
+  // ── 1. Sync root-level diagnostic files back ─────────────────────────
+  // Markdown/JSON state projections remain project-root/DB authoritative.
+  // These diagnostic files are copied for observability only.
+  for (const f of ROOT_DIAGNOSTIC_FILES) {
     const src = join(wtGsd, f);
     const dst = join(mainGsd, f);
     if (existsSync(src)) {
@@ -862,121 +847,7 @@ export function syncWorktreeStateBack(
     }
   }
 
-  // ── 2. Sync ALL milestone directories ────────────────────────────────
-  // The complete-milestone unit may create next-milestone artifacts (e.g.
-  // M007 setup while closing M006). We must sync every milestone directory
-  // in the worktree, not just the current one.
-  const wtMilestonesDir = join(wtGsd, "milestones");
-  if (!existsSync(wtMilestonesDir)) return { synced };
-
-  try {
-    const wtMilestones = readdirSync(wtMilestonesDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => d.name);
-
-    for (const mid of wtMilestones) {
-      // Skip the current milestone being merged — its files are already in the
-      // milestone branch and would conflict with the squash merge (#3641).
-      if (mid === milestoneId) continue;
-      syncMilestoneDir(wtGsd, mainGsd, mid, synced);
-    }
-  } catch (err) {
-    /* non-fatal */
-    logWarning("worktree", `milestone sync-back failed: ${err instanceof Error ? err.message : String(err)}`);
-  }
-
   return { synced };
-}
-
-function syncCurrentMilestoneStateAfterMerge(
-  mainBasePath: string,
-  worktreePath: string,
-  milestoneId: string,
-): { synced: string[] } {
-  const contract = resolveGsdPathContract(worktreePath, mainBasePath);
-  const mainGsd = contract.projectGsd;
-  const wtGsd = contract.worktreeGsd ?? join(worktreePath, ".gsd");
-  const synced: string[] = [];
-
-  if (isSamePath(mainGsd, wtGsd)) return { synced };
-  if (!existsSync(wtGsd) || !existsSync(mainGsd)) return { synced };
-
-  syncMilestoneDir(wtGsd, mainGsd, milestoneId, synced);
-  return { synced };
-}
-
-/**
- * Sync a single milestone directory from worktree to main.
- * Copies milestone-level .md files, slice-level files, and task summaries.
- */
-/** Copy matching files from srcDir to dstDir (non-fatal per file). */
-function syncDirFiles(
-  srcDir: string,
-  dstDir: string,
-  filter: (name: string) => boolean,
-  synced: string[],
-  prefix: string,
-): void {
-  try {
-    for (const entry of readdirSync(srcDir, { withFileTypes: true })) {
-      if (!entry.isFile() || !filter(entry.name)) continue;
-      try {
-        cpSync(join(srcDir, entry.name), join(dstDir, entry.name), { force: true });
-        synced.push(`${prefix}${entry.name}`);
-      } catch (err) {
-        /* non-fatal */
-        logWarning("worktree", `file copy failed (${prefix}${entry.name}): ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-  } catch (err) {
-    /* non-fatal — srcDir may not be readable */
-    logWarning("worktree", `directory read failed: ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
-function syncMilestoneDir(
-  wtGsd: string,
-  mainGsd: string,
-  mid: string,
-  synced: string[],
-): void {
-  const wtMilestoneDir = join(wtGsd, "milestones", mid);
-  const mainMilestoneDir = join(mainGsd, "milestones", mid);
-
-  if (!existsSync(wtMilestoneDir)) return;
-  mkdirSync(mainMilestoneDir, { recursive: true });
-
-  const isMd = (name: string): boolean => name.endsWith(".md");
-
-  // Sync milestone-level files (SUMMARY, VALIDATION, ROADMAP, CONTEXT)
-  syncDirFiles(wtMilestoneDir, mainMilestoneDir, isMd, synced, `milestones/${mid}/`);
-
-  // Sync slice-level files (summaries, UATs) and task summaries (#1678)
-  const wtSlicesDir = join(wtMilestoneDir, "slices");
-  const mainSlicesDir = join(mainMilestoneDir, "slices");
-  if (!existsSync(wtSlicesDir)) return;
-
-  try {
-    for (const sliceEntry of readdirSync(wtSlicesDir, { withFileTypes: true })) {
-      if (!sliceEntry.isDirectory()) continue;
-      const sid = sliceEntry.name;
-      const wtSliceDir = join(wtSlicesDir, sid);
-      const mainSliceDir = join(mainSlicesDir, sid);
-      mkdirSync(mainSliceDir, { recursive: true });
-
-      syncDirFiles(wtSliceDir, mainSliceDir, isMd, synced, `milestones/${mid}/slices/${sid}/`);
-
-      const wtTasksDir = join(wtSliceDir, "tasks");
-      const mainTasksDir = join(mainSliceDir, "tasks");
-      if (existsSync(wtTasksDir)) {
-        mkdirSync(mainTasksDir, { recursive: true });
-        syncDirFiles(wtTasksDir, mainTasksDir, isMd, synced, `milestones/${mid}/slices/${sid}/tasks/`);
-      }
-    }
-  } catch (err) {
-    /* non-fatal */
-    logWarning("worktree", `milestone slice sync failed (${mid}): ${err instanceof Error ? err.message : String(err)}`);
-  }
 }
 // ─── Worktree Post-Create Hook (#597) ────────────────────────────────────────
 
@@ -1163,10 +1034,9 @@ export function enterBranchModeForMilestone(
  * directory at the project root and apply any [x] checkbox states that are
  * ahead of the worktree version (forward-only: never downgrade [x] → [ ]).
  *
- * This is safe because syncStateToProjectRoot() is the authoritative source
- * of post-task state at the project root — it writes the same [x] the LLM
- * produced, then the auto-commit follows. If the commit never happened, the
- * filesystem copy is still valid and correct.
+ * This is forward-only compatibility for legacy projection copies. The DB
+ * remains authoritative; this never downgrades checked boxes in a local
+ * worktree projection.
  */
 function reconcilePlanCheckboxes(
   projectRoot: string,
@@ -2251,27 +2121,6 @@ export function mergeMilestoneToMain(
 
   // 9a-iii. Restore sheltered queued milestone directories (#2505).
   restoreShelter();
-
-  // 9a-iv. Preserve current milestone artifacts that may be untracked in git.
-  // syncWorktreeStateBack intentionally skips the current milestone before the
-  // squash merge to avoid conflicting with the merge content. Once the squash
-  // commit is complete, copy those files back so summaries, validation, and
-  // task outputs survive worktree teardown in external/.gitignored .gsd setups.
-  try {
-    const { synced } = syncCurrentMilestoneStateAfterMerge(
-      originalBasePath_,
-      worktreeCwd,
-      milestoneId,
-    );
-    if (synced.length > 0) {
-      debugLog("mergeMilestoneToMain", {
-        phase: "current-milestone-sync-after-merge",
-        synced: synced.length,
-      });
-    }
-  } catch (err) {
-    logWarning("worktree", `current milestone sync after merge failed: ${err instanceof Error ? err.message : String(err)}`);
-  }
 
   // 9b. Safety check (#1792): if nothing was committed, verify the milestone
   // work is already on the integration branch before allowing teardown.

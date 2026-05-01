@@ -133,9 +133,9 @@ describe('derive-state-db', async () => {
       writeFile(base, 'milestones/M001/slices/S01/tasks/T01-PLAN.md', '# T01 Plan');
       writeFile(base, 'REQUIREMENTS.md', REQUIREMENTS_CONTENT);
 
-      // Derive state from files only (no DB)
+      // Derive state from the explicit legacy file-only path (no DB)
       invalidateStateCache();
-      const fileState = await deriveState(base);
+      const fileState = await _deriveStateImpl(base);
 
       // Now open DB, insert matching artifacts + milestone hierarchy
       openDatabase(':memory:');
@@ -196,10 +196,12 @@ describe('derive-state-db', async () => {
     }
   });
 
-  // ─── Test 2: Fallback when DB unavailable ─────────────────────────────
-  test('derive-state-db: fallback when DB unavailable', async () => {
+  // ─── Test 2: DB-unavailable runtime does not derive from markdown ──────
+  test('derive-state-db: DB-unavailable runtime does not derive from markdown by default', async () => {
     const base = createFixtureBase();
+    const prev = process.env.GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK;
     try {
+      process.env.GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK = '0';
       writeFile(base, 'milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT);
       writeFile(base, 'milestones/M001/slices/S01/S01-PLAN.md', PLAN_CONTENT);
       writeFile(base, 'milestones/M001/slices/S01/tasks/.gitkeep', '');
@@ -210,11 +212,43 @@ describe('derive-state-db', async () => {
       invalidateStateCache();
       const state = await deriveState(base);
 
+      assert.deepStrictEqual(state.phase, 'pre-planning', 'runtime degrade: phase is pre-planning');
+      assert.deepStrictEqual(state.activeMilestone, null, 'runtime degrade: markdown milestone is not imported');
+      assert.deepStrictEqual(state.activeSlice, null, 'runtime degrade: markdown slice is not imported');
+      assert.deepStrictEqual(state.activeTask, null, 'runtime degrade: markdown task is not imported');
+      assert.ok(
+        state.blockers.some(b => b.includes('DB unavailable')),
+        'runtime degrade: blocker explains unavailable DB',
+      );
+    } finally {
+      if (prev === undefined) delete process.env.GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK;
+      else process.env.GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK = prev;
+      cleanup(base);
+    }
+  });
+
+  test('derive-state-db: explicit legacy markdown fallback remains opt-in', async () => {
+    const base = createFixtureBase();
+    const prev = process.env.GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK;
+    try {
+      writeFile(base, 'milestones/M001/M001-ROADMAP.md', ROADMAP_CONTENT);
+      writeFile(base, 'milestones/M001/slices/S01/S01-PLAN.md', PLAN_CONTENT);
+      writeFile(base, 'milestones/M001/slices/S01/tasks/.gitkeep', '');
+      writeFile(base, 'milestones/M001/slices/S01/tasks/T01-PLAN.md', '# T01 Plan');
+
+      process.env.GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK = '1';
+
+      assert.ok(!isDbAvailable(), 'fallback: DB is not available');
+      invalidateStateCache();
+      const state = await deriveState(base);
+
       assert.deepStrictEqual(state.phase, 'executing', 'fallback: phase is executing');
       assert.deepStrictEqual(state.activeMilestone?.id, 'M001', 'fallback: activeMilestone is M001');
       assert.deepStrictEqual(state.activeSlice?.id, 'S01', 'fallback: activeSlice is S01');
       assert.deepStrictEqual(state.activeTask?.id, 'T01', 'fallback: activeTask is T01');
     } finally {
+      if (prev === undefined) delete process.env.GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK;
+      else process.env.GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK = prev;
       cleanup(base);
     }
   });
@@ -395,8 +429,8 @@ describe('derive-state-db', async () => {
     assert.deepStrictEqual(state.registry, [], 'disk-import: registry remains DB-only');
   });
 
-  // ─── Test 5: Requirements counting from disk (DB no longer used for content) ─
-  test('derive-state-db: requirements from disk content', async () => {
+  // ─── Test 5: Legacy requirements counting from disk ────────────────────
+  test('derive-state-db: explicit legacy derivation counts requirements from disk content', async () => {
     const base = createFixtureBase();
     try {
       // Write minimal milestone dir (needed for milestone discovery)
@@ -405,9 +439,9 @@ describe('derive-state-db', async () => {
       writeFile(base, 'REQUIREMENTS.md', REQUIREMENTS_CONTENT);
 
       invalidateStateCache();
-      const state = await deriveState(base);
+      const state = await _deriveStateImpl(base);
 
-      // Requirements should come from disk
+      // Explicit legacy derivation still reads requirements from disk.
       assert.deepStrictEqual(state.requirements?.active, 2, 'req-from-disk: requirements.active = 2');
       assert.deepStrictEqual(state.requirements?.validated, 1, 'req-from-disk: requirements.validated = 1');
       assert.deepStrictEqual(state.requirements?.total, 3, 'req-from-disk: requirements.total = 3');

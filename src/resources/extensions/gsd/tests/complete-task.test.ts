@@ -446,10 +446,13 @@ console.log('\n=== complete-task: handler with missing plan file ===');
   const params = makeValidParams();
   const result = await handleCompleteTask(params, basePath);
 
-  // Should succeed even without plan file — just skip checkbox toggle
+  // Should succeed and regenerate the missing plan projection from DB.
   assertTrue(!('error' in result), 'handler should succeed without plan file');
   if (!('error' in result)) {
     assertTrue(fs.existsSync(result.summaryPath), 'summary should be written even without plan file');
+    const planPath = path.join(basePath, '.gsd', 'milestones', 'M001', 'slices', 'S01', 'S01-PLAN.md');
+    assertTrue(fs.existsSync(planPath), 'missing plan projection should be regenerated from DB');
+    assertTrue(fs.readFileSync(planPath, 'utf-8').includes('[x] **T01:'), 'regenerated plan should reflect DB task completion');
   }
 
   cleanupDir(basePath);

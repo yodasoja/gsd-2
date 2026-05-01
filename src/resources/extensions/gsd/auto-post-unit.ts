@@ -1,6 +1,6 @@
 /**
  * Post-unit processing for auto-loop — auto-commit, doctor run,
- * state rebuild, worktree sync, DB dual-write, hooks, triage, and
+ * state rebuild, projection checks, DB tool closeout, hooks, triage, and
  * quick-task dispatch.
  *
  * Split into two functions called sequentially by auto-loop with
@@ -42,7 +42,7 @@ import {
 } from "./auto-recovery.js";
 import { regenerateIfMissing } from "./workflow-projections.js";
 import { syncStateToProjectRoot } from "./auto-worktree.js";
-import { isDbAvailable, getTask, getSlice, getMilestone, updateTaskStatus, updateSliceStatus, _getAdapter } from "./gsd-db.js";
+import { isDbAvailable, getTask, getSlice, getMilestone, updateTaskStatus, _getAdapter } from "./gsd-db.js";
 import { renderPlanCheckboxes } from "./markdown-renderer.js";
 import { consumeSignal } from "./session-status-io.js";
 import {
@@ -160,9 +160,8 @@ export interface RogueFileWrite {
  * the completion tool. A "rogue" file is one that exists on disk but has
  * no corresponding DB row with status "complete".
  *
- * This is a safety-net diagnostic (D003). The existing migrateFromMarkdown()
- * in postUnitPostVerification() eventually ingests rogue files, but explicit
- * detection provides immediate diagnostics so operators know the prompt failed.
+ * This is a safety-net diagnostic (D003). Runtime detection never imports
+ * markdown into the DB; explicit migration/import/recovery commands own that.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function hasNonEmptyFields(row: Record<string, any> | null, fields: string[]): boolean {
@@ -201,14 +200,7 @@ export function detectRogueFileWrites(
 
     const dbRow = getSlice(mid, sid);
     if (!dbRow || dbRow.status !== "complete") {
-      // Auto-remediate: SUMMARY exists on disk but DB is stale — sync DB to
-      // match filesystem instead of reporting as rogue (#3633).
-      try {
-        updateSliceStatus(mid, sid, "complete", new Date().toISOString());
-      } catch {
-        // If DB update fails, fall back to rogue detection so the issue is visible
-        rogues.push({ path: summaryPath, unitType, unitId });
-      }
+      rogues.push({ path: summaryPath, unitType, unitId });
     }
   } else if (unitType === "plan-milestone") {
     if (!mid) return [];
@@ -738,7 +730,7 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
               "error",
             );
             // Stop auto AND signal the outer postUnit flow to exit early.
-            // Without the flag, subsequent hooks (triage, rogue detection,
+            // Without the flag, subsequent hooks (triage,
             // DB writes) would keep running against a conflicted main
             // checkout after the loop was already told to stop.
             const { stopAuto } = await import("./auto.js");
@@ -758,7 +750,7 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
         }
       });
       // Exit early after stopAuto so the rest of post-unit processing
-      // (triage, rogue detection, hook dispatch, DB writes) doesn't run
+      // (triage, hook dispatch, DB writes) doesn't run
       // against a conflicted main checkout. Return "dispatched" to match
       // the convention used by other stop/pauseAuto paths in this function
       // (see signal handling earlier: stop/pause also return "dispatched").
@@ -811,17 +803,6 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
       } catch (err) {
         logError("engine", "triage resolution failed", { error: (err as Error).message });
       }
-    }
-
-    // Rogue file detection — safety net for LLM bypassing completion tools (D003)
-    try {
-      const rogueFiles = detectRogueFileWrites(s.currentUnit.type, s.currentUnit.id, s.basePath);
-      for (const rogue of rogueFiles) {
-        logWarning("engine", "rogue file write detected", { path: rogue.path, unitId: rogue.unitId });
-        ctx.ui.notify(`Rogue file write detected: ${rogue.path}`, "warning");
-      }
-    } catch (e) {
-      debugLog("postUnit", { phase: "rogue-detection", error: String(e) });
     }
 
     // ── Safety harness: post-unit validation ──

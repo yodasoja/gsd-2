@@ -660,15 +660,16 @@ describe('db-writer', () => {
         'disk file preserved — shrinkage guard prevented overwrite',
       );
 
-      // DB should contain the full disk content, not the abbreviated content
+      // DB should keep the caller-provided content. The larger disk file is a
+      // stale projection, not runtime authority.
       const adapter = _getAdapter();
       const row = adapter!
         .prepare('SELECT full_content FROM artifacts WHERE path = ?')
         .get(relPath);
       assert.deepStrictEqual(
         row!['full_content'],
-        fullContent,
-        'DB stores the richer disk content instead of abbreviated content',
+        abbreviatedContent,
+        'DB stores caller-provided content instead of importing disk projection content',
       );
     } finally {
       closeDatabase();

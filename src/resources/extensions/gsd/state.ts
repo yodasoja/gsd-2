@@ -1,5 +1,5 @@
 // GSD Extension — State Derivation
-// DB-primary state derivation with filesystem fallback for unmigrated projects.
+// DB-authoritative runtime derivation with explicit legacy filesystem fallback.
 // Pure TypeScript, zero Pi dependencies.
 
 import type {
@@ -46,7 +46,6 @@ import { logWarning } from './workflow-logger.js';
 import { extractVerdict } from './verdict-parser.js';
 import { detectPendingEscalation } from './escalation.js';
 import { isTerminalMilestoneSummaryContent } from './milestone-summary-classifier.js';
-import { loadEffectiveGSDPreferences } from './preferences.js';
 
 import {
   isDbAvailable,
@@ -219,9 +218,16 @@ export function invalidateStateCache(): void {
  * Returns the ID of the first incomplete milestone, or null if all are complete.
  */
 export async function getActiveMilestoneId(basePath: string): Promise<string | null> {
-  // Parallel worker isolation
-  const milestoneLock = process.env.GSD_MILESTONE_LOCK;
+  // Parallel worker isolation. Normal DB state derivation remains DB-only;
+  // lock env vars are execution routing for explicit worker processes.
+  const milestoneLock = process.env.GSD_PARALLEL_WORKER ? process.env.GSD_MILESTONE_LOCK : undefined;
   if (milestoneLock) {
+    if (isDbAvailable()) {
+      const locked = getAllMilestones().find(m => m.id === milestoneLock);
+      if (!locked || isClosedStatus(locked.status) || locked.status === "parked") return null;
+      return locked.id;
+    }
+
     const milestoneIds = findMilestoneIds(basePath);
     if (!milestoneIds.includes(milestoneLock)) return null;
     const lockedParked = resolveMilestoneFile(basePath, milestoneLock, "PARKED");
@@ -265,12 +271,12 @@ export async function getActiveMilestoneId(basePath: string): Promise<string | n
 }
 
 /**
- * Reconstruct GSD state from DB (primary) or filesystem (fallback).
+ * Reconstruct GSD state from the authoritative DB.
  * STATE.md is a rendered cache of this output.
  *
  * When DB is available, queries milestone/slice/task tables directly.
- * Falls back to filesystem parsing for unmigrated projects or when DB
- * has zero milestones (e.g. first run before migration).
+ * Legacy filesystem parsing is available only through an explicit opt-in for
+ * tests/recovery flows; runtime must not silently infer state from markdown.
  */
 export async function deriveState(basePath: string): Promise<GSDState> {
   // Return cached result if within the TTL window for the same basePath
@@ -285,22 +291,36 @@ export async function deriveState(basePath: string): Promise<GSDState> {
   const stopTimer = debugTime("derive-state-impl");
   let result: GSDState;
 
-  // Dual-path: DB-backed derivation is authoritative whenever the DB is open.
-  // Markdown remains a fallback only when no DB connection is available.
+  // DB-backed derivation is authoritative whenever the DB is open.
+  // Markdown fallback is explicit-only; runtime degrade must not infer state
+  // from ROADMAP.md, PLAN.md, SUMMARY.md, REQUIREMENTS.md, or flag files.
   if (isDbAvailable()) {
     const stopDbTimer = debugTime("derive-state-db");
     result = await deriveStateFromDb(basePath);
     stopDbTimer({ phase: result.phase, milestone: result.activeMilestone?.id });
     _telemetry.dbDeriveCount++;
-  } else {
-    // Only warn when DB initialization was attempted and failed — not when
-    // the DB simply hasn't been opened yet (e.g. during before_agent_start
-    // context injection which runs before any tool invocation opens the DB).
+  } else if (process.env.GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK === "1") {
     if (wasDbOpenAttempted()) {
-      logWarning("state", "DB unavailable — using filesystem state derivation (degraded mode)");
+      logWarning("state", "DB unavailable — using explicit legacy filesystem state derivation");
     }
     result = await _deriveStateImpl(basePath);
     _telemetry.markdownDeriveCount++;
+  } else {
+    if (wasDbOpenAttempted()) {
+      logWarning("state", "DB unavailable — refusing implicit markdown state derivation");
+    }
+    result = {
+      activeMilestone: null,
+      activeSlice: null,
+      activeTask: null,
+      phase: "pre-planning",
+      recentDecisions: [],
+      blockers: ["DB unavailable — runtime markdown state derivation is disabled"],
+      nextAction: "Open or create the canonical GSD database before deriving workflow state.",
+      registry: [],
+      requirements: { active: 0, validated: 0, deferred: 0, outOfScope: 0, blocked: 0, total: 0 },
+      progress: { milestones: { done: 0, total: 0 } },
+    };
   }
 
   stopTimer({ phase: result.phase, milestone: result.activeMilestone?.id });
@@ -565,7 +585,7 @@ function resolveSliceDependencies(activeMilestoneSlices: SliceRow[]): { activeSl
     activeMilestoneSlices.filter(s => isStatusDone(s.status)).map(s => s.id)
   );
 
-  const sliceLock = process.env.GSD_SLICE_LOCK;
+  const sliceLock = process.env.GSD_PARALLEL_WORKER ? process.env.GSD_SLICE_LOCK : undefined;
   if (sliceLock) {
     const lockedSlice = activeMilestoneSlices.find(s => s.id === sliceLock);
     if (lockedSlice) {
@@ -607,7 +627,7 @@ export async function deriveStateFromDb(basePath: string): Promise<GSDState> {
 
   const allMilestones = getAllMilestones();
 
-  const milestoneLock = process.env.GSD_MILESTONE_LOCK;
+  const milestoneLock = process.env.GSD_PARALLEL_WORKER ? process.env.GSD_MILESTONE_LOCK : undefined;
   const milestones = milestoneLock
     ? allMilestones.filter(m => m.id === milestoneLock)
     : allMilestones;
@@ -662,10 +682,11 @@ export async function deriveStateFromDb(basePath: string): Promise<GSDState> {
   const activeSliceContext = resolveSliceDependencies(activeMilestoneSlices);
   if (!activeSliceContext.activeSlice) {
     // If locked slice wasn't found, it returns null but logs warning, we need to return 'blocked'
-    if (process.env.GSD_SLICE_LOCK) {
+    const sliceLock = process.env.GSD_PARALLEL_WORKER ? process.env.GSD_SLICE_LOCK : undefined;
+    if (sliceLock) {
       return {
         activeMilestone, activeSlice: null, activeTask: null,
-        phase: 'blocked', recentDecisions: [], blockers: [`GSD_SLICE_LOCK=${process.env.GSD_SLICE_LOCK} not found in active milestone slices`],
+        phase: 'blocked', recentDecisions: [], blockers: [`GSD_SLICE_LOCK=${sliceLock} not found in active milestone slices`],
         nextAction: 'Slice lock references a non-existent slice — check orchestrator dispatch.',
         registry, requirements,
         progress: { milestones: milestoneProgress, slices: sliceProgress },
@@ -682,9 +703,9 @@ export async function deriveStateFromDb(basePath: string): Promise<GSDState> {
   const { activeSlice, activeSliceRow } = activeSliceContext;
 
   // ADR-011: DB slice metadata is authoritative for sketch refinement.
-  // PLAN.md is a projection and is deliberately not used to infer this state.
-  const progressive = loadEffectiveGSDPreferences()?.preferences?.phases?.progressive_planning === true;
-  if (progressive && activeSliceRow?.is_sketch === 1) {
+  // PLAN.md and preference flags are projections/configuration and are
+  // deliberately not used to infer whether the slice itself is a sketch.
+  if (activeSliceRow?.is_sketch === 1) {
     return {
       activeMilestone, activeSlice, activeTask: null,
       phase: 'refining', recentDecisions: [], blockers: [],
@@ -823,12 +844,12 @@ export async function _deriveStateImpl(basePath: string): Promise<GSDState> {
   const milestoneIds = sortByQueueOrder(diskIds, customOrder);
 
   // ── Parallel worker isolation ──────────────────────────────────────────
-  // When GSD_MILESTONE_LOCK is set, this process is a parallel worker
+  // When GSD_PARALLEL_WORKER and GSD_MILESTONE_LOCK are set, this process is a parallel worker
   // scoped to a single milestone. Filter the milestone list so this worker
   // only sees its assigned milestone (all others are treated as if they
   // don't exist). This gives each worker complete isolation without
   // modifying any other state derivation logic.
-  const milestoneLock = process.env.GSD_MILESTONE_LOCK;
+  const milestoneLock = process.env.GSD_PARALLEL_WORKER ? process.env.GSD_MILESTONE_LOCK : undefined;
   if (milestoneLock && milestoneIds.includes(milestoneLock)) {
     milestoneIds.length = 0;
     milestoneIds.push(milestoneLock);
@@ -1291,8 +1312,8 @@ export async function _deriveStateImpl(basePath: string): Promise<GSDState> {
   let activeSlice: ActiveRef | null = null;
 
   // ── Slice-level parallel worker isolation ─────────────────────────────
-  // When GSD_SLICE_LOCK is set, override activeSlice to only the locked slice.
-  const sliceLockLegacy = process.env.GSD_SLICE_LOCK;
+  // When GSD_PARALLEL_WORKER and GSD_SLICE_LOCK are set, override activeSlice to only the locked slice.
+  const sliceLockLegacy = process.env.GSD_PARALLEL_WORKER ? process.env.GSD_SLICE_LOCK : undefined;
   if (sliceLockLegacy) {
     const lockedSlice = activeRoadmap.slices.find(s => s.id === sliceLockLegacy);
     if (lockedSlice) {

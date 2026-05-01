@@ -9,7 +9,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { loadFile } from "./files.js";
-import { resolveMilestoneFile } from "./paths.js";
+import { resolveGsdPathContract, resolveMilestoneFile } from "./paths.js";
 import { mergeMilestoneToMain } from "./auto-worktree.js";
 import { MergeConflictError } from "./git-service.js";
 import { removeSessionStatus } from "./session-status-io.js";
@@ -33,12 +33,13 @@ export type MergeOrder = "sequential" | "by-completion";
 // ─── Merge Queue ───────────────────────────────────────────────────────────
 
 /**
- * Check whether a milestone is complete by querying its worktree SQLite DB.
+ * Check whether a milestone is complete by querying the canonical project DB.
  * Uses a subprocess to avoid disrupting the global DB singleton.
- * Returns true when milestones.status = 'complete' in the worktree's gsd.db.
+ * Returns true when milestones.status = 'complete' in project gsd.db.
  */
 export function isMilestoneCompleteInWorktreeDb(basePath: string, mid: string): boolean {
-  const dbPath = join(basePath, ".gsd", "worktrees", mid, ".gsd", "gsd.db");
+  const workRoot = join(basePath, ".gsd", "worktrees", mid);
+  const dbPath = resolveGsdPathContract(workRoot, basePath).projectDb;
   if (!existsSync(dbPath)) return false;
 
   try {
@@ -55,8 +56,8 @@ export function isMilestoneCompleteInWorktreeDb(basePath: string, mid: string): 
 }
 
 /**
- * Discover milestone IDs with status='complete' in their worktree DB,
- * scanning .gsd/worktrees/<MID>/.gsd/gsd.db for each worktree directory.
+ * Discover milestone IDs with status='complete' in the canonical DB,
+ * using worktree directories only to enumerate active parallel workers.
  */
 function discoverDbCompletedMilestones(basePath: string): Set<string> {
   const completed = new Set<string>();
