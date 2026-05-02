@@ -80,6 +80,7 @@ describe("saveLedger: fallback behavior when lock is not acquired", () => {
 
   test(
     "saveLedger falls back to direct write and produces a valid metrics file when lock times out",
+    { timeout: 10000 }, // 10s to accommodate the 2s lock acquire timeout
     () => {
       const lp = lockPath(tmpDir);
 
@@ -136,6 +137,5 @@ describe("saveLedger: fallback behavior when lock is not acquired", () => {
       // Release our manually-held lock so afterEach cleanup works cleanly.
       rmSync(lp, { force: true });
     },
-    { timeout: 10000 }, // 10s to accommodate the 2s lock acquire timeout
   );
 });

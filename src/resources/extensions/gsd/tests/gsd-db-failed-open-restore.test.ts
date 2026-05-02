@@ -61,10 +61,11 @@ describe("openDatabaseByWorkspace: restores previous connection on failure", () 
       mode: "project" as const,
       contract: {
         projectRoot: "/does-not-exist-gsd-test-ws-restore",
+        workRoot: "/does-not-exist-gsd-test-ws-restore",
         projectGsd: "/does-not-exist-gsd-test-ws-restore/.gsd",
         projectDb: "/does-not-exist-gsd-test-ws-restore/.gsd/does-not-exist.db",
-        worktreeRoot: null,
         worktreeGsd: null,
+        isWorktree: false,
       },
       lockRoot: "/does-not-exist-gsd-test-ws-restore",
     };
@@ -92,10 +93,11 @@ describe("openDatabaseByWorkspace: restores previous connection on failure", () 
       mode: "project" as const,
       contract: {
         projectRoot: "/does-not-exist-gsd-cache-test",
+        workRoot: "/does-not-exist-gsd-cache-test",
         projectGsd: "/does-not-exist-gsd-cache-test/.gsd",
         projectDb: "/does-not-exist-gsd-cache-test/.gsd/no.db",
-        worktreeRoot: null,
         worktreeGsd: null,
+        isWorktree: false,
       },
       lockRoot: "/does-not-exist-gsd-cache-test",
     };
