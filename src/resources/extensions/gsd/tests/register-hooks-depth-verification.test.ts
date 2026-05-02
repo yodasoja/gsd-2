@@ -25,10 +25,10 @@ test("register-hooks unlocks milestone depth verification from question id witho
   const dir = makeTempDir("manual");
   const originalCwd = process.cwd();
   process.chdir(dir);
-  resetWriteGateState();
+  resetWriteGateState(dir);
 
   t.after(() => {
-    resetWriteGateState();
+    resetWriteGateState(dir);
     process.chdir(originalCwd);
     rmSync(dir, { recursive: true, force: true });
   });
@@ -101,10 +101,10 @@ test("register-hooks clears depth gate when remote (Telegram/Slack/Discord) answ
   const dir = makeTempDir("remote");
   const originalCwd = process.cwd();
   process.chdir(dir);
-  resetWriteGateState();
+  resetWriteGateState(dir);
 
   t.after(() => {
-    resetWriteGateState();
+    resetWriteGateState(dir);
     process.chdir(originalCwd);
     rmSync(dir, { recursive: true, force: true });
   });
@@ -167,10 +167,10 @@ test("register-hooks returns hard blocker when depth question is cancelled", asy
   const dir = makeTempDir("cancelled");
   const originalCwd = process.cwd();
   process.chdir(dir);
-  resetWriteGateState();
+  resetWriteGateState(dir);
 
   t.after(() => {
-    resetWriteGateState();
+    resetWriteGateState(dir);
     process.chdir(originalCwd);
     rmSync(dir, { recursive: true, force: true });
   });
@@ -228,10 +228,10 @@ test("register-hooks gates MCP ask_user_questions cancellation before requiremen
   const dir = makeTempDir("mcp-cancelled");
   const originalCwd = process.cwd();
   process.chdir(dir);
-  resetWriteGateState();
+  resetWriteGateState(dir);
 
   t.after(() => {
-    resetWriteGateState();
+    resetWriteGateState(dir);
     process.chdir(originalCwd);
     rmSync(dir, { recursive: true, force: true });
   });
