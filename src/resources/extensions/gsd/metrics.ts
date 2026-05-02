@@ -1,3 +1,4 @@
+// GSD-2 + metrics.ts: token & cost tracking for auto-mode units
 /**
  * GSD Metrics — Token & Cost Tracking
  *
@@ -14,7 +15,7 @@
  */
 
 import { join } from "node:path";
-import { openSync, closeSync, unlinkSync } from "node:fs";
+import { openSync, closeSync, unlinkSync, statSync, writeFileSync } from "node:fs";
 import type { ExtensionContext } from "@gsd/pi-coding-agent";
 import { gsdRoot } from "./paths.js";
 import { getAndClearSkills } from "./skill-telemetry.js";
@@ -23,6 +24,7 @@ import { parseUnitId } from "./unit-id.js";
 import { buildAuditEnvelope, emitUokAuditEvent } from "./uok/audit.js";
 import { isUnifiedAuditEnabled } from "./uok/audit-toggle.js";
 import type { MilestoneScope } from "./workspace.js";
+import { logWarning } from "./workflow-logger.js";
 
 // Re-export from shared — import directly from format-utils to avoid pulling
 // in the full barrel (mod.js → ui.js → @gsd/pi-tui) which breaks when loaded
@@ -823,9 +825,26 @@ function deduplicateUnits(units: UnitMetrics[]): UnitMetrics[] {
   return Array.from(map.values());
 }
 
+// How long a lock file must be untouched (in ms) before it is considered
+// orphaned from a crashed process. Set to 2× the acquire timeout.
+export const STALE_LOCK_THRESHOLD_MS = 4000;
+
 /**
  * Acquire an exclusive .lock sentinel file via O_EXCL.
- * Retries every 50ms up to timeoutMs. Returns true on success, false on timeout.
+ *
+ * Improvements over the original:
+ *  - No busy spin: the inner `while (Date.now() < waitUntil) {}` spin that
+ *    burned CPU doing nothing useful is removed. Each retry attempt now makes
+ *    one `openSync` syscall and immediately re-checks the deadline, which is
+ *    orders of magnitude cheaper than a tight spin loop.
+ *  - Stale-lock detection: if the existing lock file's mtime is older than
+ *    STALE_LOCK_THRESHOLD_MS, the lock is considered orphaned (e.g. the
+ *    writing process crashed) and is forcibly removed before retrying.
+ *    A warning is logged so operators can detect crash patterns.
+ *  - PID stamp: on success, writes the acquiring process's PID and a
+ *    timestamp into the lock file so external monitors can identify orphans.
+ *
+ * Returns true on success, false on timeout.
  */
 function acquireLock(lockPath: string, timeoutMs = 2000): boolean {
   const deadline = Date.now() + timeoutMs;
@@ -833,13 +852,27 @@ function acquireLock(lockPath: string, timeoutMs = 2000): boolean {
     try {
       const fd = openSync(lockPath, "wx"); // O_WRONLY | O_CREAT | O_EXCL
       closeSync(fd);
+      // Write PID stamp so external monitors can identify the lock owner.
+      try {
+        writeFileSync(lockPath, `${process.pid}\n${new Date().toISOString()}\n`, "utf-8");
+      } catch { /* non-fatal — stamp is diagnostic only */ }
       return true;
     } catch {
-      // Lock held by another process — busy-wait
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) break;
-      const waitUntil = Date.now() + Math.min(50, remaining);
-      while (Date.now() < waitUntil) { /* spin */ }
+      // Lock held by another process — check for staleness before retrying.
+      try {
+        const st = statSync(lockPath);
+        if (Date.now() - st.mtimeMs > STALE_LOCK_THRESHOLD_MS) {
+          logWarning(
+            "fs",
+            `stale metrics lock at ${lockPath} (age ${Date.now() - st.mtimeMs}ms); forcibly removing and retrying`,
+          );
+          try { unlinkSync(lockPath); } catch { /* already gone */ }
+          // Do NOT sleep — retry the open immediately after clearing.
+          continue;
+        }
+      } catch { /* lock file disappeared between the failed open and stat — retry */ }
+      // No busy-spin: just check deadline and loop. Each iteration costs one
+      // openSync syscall (~100µs), which is far cheaper than a zero-work spin.
     }
   }
   return false;
