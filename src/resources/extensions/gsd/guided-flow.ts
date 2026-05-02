@@ -510,18 +510,16 @@ export function checkAutoStartAfterDiscuss(): boolean {
         );
         ctx.ui.notify(
           `Milestone ${milestoneId} plan_milestone has been blocked ${entry.planBlockedRecoveryCount} times. ` +
-          `Run /gsd-debug to investigate.`,
+          `Re-run /gsd to reset the recovery counter, or run /gsd-debug to diagnose without resetting.`,
           "error",
         );
         return false;
       }
-      // Increment counter before emitting recovery hint.
-      entry.planBlockedRecoveryCount += 1;
       logWarning(
         "guided",
         `Gate 1b: milestone ${milestoneId} queued with CONTEXT.md present — ` +
         `plan_milestone was blocked; emitting recovery hint ` +
-        `(attempt ${entry.planBlockedRecoveryCount}/${MAX_PLAN_BLOCKED_RECOVERIES})`,
+        `(attempt ${entry.planBlockedRecoveryCount + 1}/${MAX_PLAN_BLOCKED_RECOVERIES})`,
       );
       ctx.ui.notify(
         `Milestone ${milestoneId}: context file exists but milestone is still queued. ` +
@@ -541,6 +539,9 @@ export function checkAutoStartAfterDiscuss(): boolean {
           },
           { triggerTurn: true },
         );
+        // Increment only after a successful dispatch so transient sendMessage
+        // failures do not consume recovery budget.
+        entry.planBlockedRecoveryCount += 1;
       } catch (e) {
         logWarning("guided", `Gate 1b recovery sendMessage failed: ${(e as Error).message}`);
       }
