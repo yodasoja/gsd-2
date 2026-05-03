@@ -7,7 +7,7 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { PassThrough } from "node:stream"
 import { StringDecoder } from "node:string_decoder"
-import type { RpcSessionState } from "../../../packages/contracts/src/index.ts"
+import type { RpcSessionState } from "@gsd-build/contracts"
 
 const repoRoot = process.cwd()
 const bridge = await import("../../web/bridge-service.ts")
