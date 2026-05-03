@@ -2,7 +2,7 @@
 //
 // stuck-state.json file IO has been deleted. The auto-loop now reconstructs
 // recentUnits from unit_dispatches (Phase B ledger) and persists
-// stuckRecoveryAttempts in runtime_kv (worker scope, soft state).
+// stuckRecoveryAttempts in runtime_kv (stable project scope, soft state).
 //
 // This test verifies the round-trip via the db modules directly: write
 // dispatch rows + a runtime_kv counter, then confirm the same data shape
@@ -85,16 +85,16 @@ test("getRecentUnitKeysForWorker honors the limit parameter", (t) => {
   assert.equal(win20[19].key, "U24");
 });
 
-test("stuckRecoveryAttempts round-trips via runtime_kv (worker scope)", (t) => {
+test("stuckRecoveryAttempts round-trips via runtime_kv (stable project scope)", (t) => {
   const base = makeBase();
   t.after(() => cleanup(base));
   openDatabase(join(base, ".gsd", "gsd.db"));
-  const worker = registerAutoWorker({ projectRootRealpath: base });
+  registerAutoWorker({ projectRootRealpath: base });
 
-  setRuntimeKv("worker", worker, "stuck_recovery_attempts", 3);
-  assert.equal(getRuntimeKv<number>("worker", worker, "stuck_recovery_attempts"), 3);
-  setRuntimeKv("worker", worker, "stuck_recovery_attempts", 7);
-  assert.equal(getRuntimeKv<number>("worker", worker, "stuck_recovery_attempts"), 7);
+  setRuntimeKv("global", base, "stuck_recovery_attempts", 3);
+  assert.equal(getRuntimeKv<number>("global", base, "stuck_recovery_attempts"), 3);
+  setRuntimeKv("global", base, "stuck_recovery_attempts", 7);
+  assert.equal(getRuntimeKv<number>("global", base, "stuck_recovery_attempts"), 7);
 });
 
 test("getRecentUnitKeysForWorker filters by worker_id (no cross-worker bleed)", (t) => {

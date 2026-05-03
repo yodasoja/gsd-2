@@ -83,6 +83,7 @@ export function claimNextCommand(workerId: string): CommandQueueRow | null {
               claimed_at, claimed_by, completed_at, result_json
        FROM command_queue
        WHERE claimed_at IS NULL
+         AND completed_at IS NULL
          AND (target_worker = :worker_id OR target_worker IS NULL)
        ORDER BY enqueued_at ASC, id ASC
        LIMIT 1`,
@@ -95,7 +96,7 @@ export function claimNextCommand(workerId: string): CommandQueueRow | null {
     const result = db.prepare(
       `UPDATE command_queue
        SET claimed_at = :now, claimed_by = :worker_id
-       WHERE id = :id AND claimed_at IS NULL`,
+       WHERE id = :id AND claimed_at IS NULL AND completed_at IS NULL`,
     ).run({ ":now": now, ":worker_id": workerId, ":id": row.id });
 
     const changes =
@@ -115,6 +116,7 @@ export function claimNextCommand(workerId: string): CommandQueueRow | null {
  */
 export function completeCommand(
   id: number,
+  workerId: string,
   result?: Record<string, unknown>,
 ): void {
   if (!isDbAvailable()) return;
@@ -123,9 +125,12 @@ export function completeCommand(
   db.prepare(
     `UPDATE command_queue
      SET completed_at = :now, result_json = :result_json
-     WHERE id = :id AND completed_at IS NULL`,
+     WHERE id = :id
+       AND claimed_by = :worker_id
+       AND completed_at IS NULL`,
   ).run({
     ":id": id,
+    ":worker_id": workerId,
     ":now": now,
     ":result_json": result ? JSON.stringify(result) : null,
   });

@@ -44,7 +44,7 @@ test("enqueue + claim + complete round-trip for targeted command", (t) => {
   assert.equal(claimed!.claimed_by, "worker-A");
   assert.ok(claimed!.claimed_at);
 
-  completeCommand(id, { acknowledged: true });
+  completeCommand(id, "worker-A", { acknowledged: true });
   const final = getCommand(id);
   assert.ok(final!.completed_at);
   assert.equal(final!.result_json, JSON.stringify({ acknowledged: true }));
@@ -105,8 +105,25 @@ test("completeCommand is idempotent — second call does not overwrite", (t) => 
 
   const id = enqueueCommand({ targetWorker: "w", command: "x" });
   claimNextCommand("w");
-  completeCommand(id, { result: 1 });
-  completeCommand(id, { result: 2 }); // second call should no-op
+  completeCommand(id, "w", { result: 1 });
+  completeCommand(id, "w", { result: 2 }); // second call should no-op
+  const row = getCommand(id)!;
+  assert.equal(row.result_json, JSON.stringify({ result: 1 }));
+});
+
+test("completed commands cannot be reclaimed or completed by a different worker", (t) => {
+  const base = makeBase();
+  t.after(() => cleanup(base));
+  openDatabase(join(base, ".gsd", "gsd.db"));
+
+  const id = enqueueCommand({ targetWorker: "worker-A", command: "x" });
+  const claimed = claimNextCommand("worker-A");
+  assert.ok(claimed);
+
+  completeCommand(id, "worker-A", { result: 1 });
+  completeCommand(id, "worker-B", { result: 2 });
+
+  assert.equal(claimNextCommand("worker-A"), null);
   const row = getCommand(id)!;
   assert.equal(row.result_json, JSON.stringify({ result: 1 }));
 });

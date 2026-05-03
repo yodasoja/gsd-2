@@ -13,8 +13,10 @@ machines.
   atomic — is local-disk only. Network filesystems (NFS, SMB, S3FS) and
   fuse mounts break the lock semantics that the WAL relies on.
 - Heartbeat TTL (`workers.last_heartbeat_at`) compares timestamps written
-  by `datetime('now')`. Across machines without monotonic clock sync the
-  TTL filtering produces phantom-active or premature-crashed verdicts.
+  with SQLite wall-clock time (`datetime('now')`). Across machines without
+  wall-clock synchronization (for example NTP/chrony), TTL filtering can
+  produce phantom-active or premature-crashed verdicts. Monotonic clocks
+  are not used for these comparisons.
 - Fencing tokens (`milestone_leases.fencing_token`) are monotonically
   ordered by SQL within a single transaction. Cross-host races could
   produce duplicate tokens if two SQLite processes opened the same DB

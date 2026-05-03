@@ -121,11 +121,17 @@ export function heartbeatAutoWorker(workerId: string): void {
 export function markWorkerCrashed(workerId: string): void {
   if (!isDbAvailable()) return;
   const db = _getAdapter()!;
+  let changes = 0;
   transaction(() => {
-    db.prepare(
+    const result = db.prepare(
       `UPDATE workers SET status = 'crashed' WHERE worker_id = :worker_id AND status = 'active'`,
     ).run({ ":worker_id": workerId });
+    changes =
+      typeof (result as { changes?: unknown }).changes === "number"
+        ? (result as { changes: number }).changes
+        : 0;
   });
+  if (changes < 1) return;
   insertAuditEvent({
     eventId: randomUUID(),
     traceId: workerId,

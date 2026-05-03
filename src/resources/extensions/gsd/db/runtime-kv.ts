@@ -43,6 +43,15 @@ export function setRuntimeKv(
   if (!isDbAvailable()) return;
   const now = new Date().toISOString();
   const db = _getAdapter()!;
+  let valueJson: string;
+  try {
+    valueJson = JSON.stringify(value);
+  } catch {
+    valueJson = JSON.stringify(String(value));
+  }
+  if (valueJson === undefined) {
+    valueJson = JSON.stringify(null);
+  }
   transaction(() => {
     db.prepare(
       `INSERT INTO runtime_kv (scope, scope_id, key, value_json, updated_at)
@@ -54,7 +63,7 @@ export function setRuntimeKv(
       ":scope": scope,
       ":scope_id": scopeId,
       ":key": key,
-      ":value_json": JSON.stringify(value),
+      ":value_json": valueJson,
       ":updated_at": now,
     });
   });

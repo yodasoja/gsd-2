@@ -3458,6 +3458,9 @@ export function deleteMilestone(milestoneId: string): void {
       `DELETE FROM artifacts WHERE milestone_id = :mid`,
     ).run({ ":mid": milestoneId });
     currentDb!.prepare(
+      `DELETE FROM milestone_leases WHERE milestone_id = :mid`,
+    ).run({ ":mid": milestoneId });
+    currentDb!.prepare(
       `DELETE FROM milestones WHERE id = :mid`,
     ).run({ ":mid": milestoneId });
   });

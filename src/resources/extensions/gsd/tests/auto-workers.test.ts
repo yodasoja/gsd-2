@@ -52,7 +52,11 @@ test("heartbeatAutoWorker updates last_heartbeat_at", async (t) => {
   await new Promise(r => setTimeout(r, 10));
   heartbeatAutoWorker(id);
   const after = getAutoWorker(id)!;
-  assert.notEqual(after.last_heartbeat_at, initial.last_heartbeat_at, "heartbeat advanced");
+  const initialTs = Date.parse(initial.last_heartbeat_at);
+  const afterTs = Date.parse(after.last_heartbeat_at);
+  assert.ok(Number.isFinite(initialTs), "initial heartbeat parses");
+  assert.ok(Number.isFinite(afterTs), "updated heartbeat parses");
+  assert.ok(afterTs > initialTs, "heartbeat advanced");
 });
 
 test("markWorkerStopping flips status to stopping", (t) => {

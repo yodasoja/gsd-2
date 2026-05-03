@@ -246,7 +246,6 @@ export class WorktreeResolver {
               expiresAt: claim.expiresAt,
             });
             ctx.notify(`${msg} Another auto-mode worker is active. Stop it before entering ${milestoneId}.`, "error");
-            this.s.isolationDegraded = true;
             return;
           }
         } catch (err) {

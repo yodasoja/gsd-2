@@ -80,6 +80,19 @@ export type RecordClaimResult =
   | { ok: true; dispatchId: number }
   | { ok: false; error: "already_active"; existingId: number; existingStatus: DispatchStatus; existingWorker: string };
 
+function isAlreadyActiveConstraintError(err: unknown): boolean {
+  const code =
+    err && typeof err === "object" && "code" in err
+      ? String((err as { code?: unknown }).code ?? "")
+      : "";
+  if (code === "SQLITE_CONSTRAINT" || code === "SQLITE_CONSTRAINT_UNIQUE") {
+    return true;
+  }
+
+  const msg = err instanceof Error ? err.message : String(err);
+  return /\bUNIQUE\b|\bconstraint failed\b/i.test(msg);
+}
+
 /**
  * Insert a new dispatch row in `claimed` state. Atomic guard against
  * double-claim (B2): the partial unique index
@@ -142,8 +155,7 @@ export function recordDispatchClaim(input: RecordClaimInput): RecordClaimResult 
 
       return { ok: true, dispatchId: id };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (!/UNIQUE|constraint/i.test(msg)) throw err;
+      if (!isAlreadyActiveConstraintError(err)) throw err;
 
       // Partial unique index rejected the INSERT — surface the existing
       // active dispatch so callers can decide what to do.
@@ -184,20 +196,27 @@ export function markCompleted(dispatchId: number, opts?: CompleteOpts): void {
   if (!isDbAvailable()) return;
   const now = new Date().toISOString();
   const db = _getAdapter()!;
+  let changes = 0;
   transaction(() => {
-    db.prepare(
+    const result = db.prepare(
       `UPDATE unit_dispatches
        SET status = 'completed', ended_at = :ended_at,
            exit_reason = :exit_reason,
            verification_evidence_id = :evidence_id
-       WHERE id = :id`,
+       WHERE id = :id
+         AND status IN ('claimed','running')`,
     ).run({
       ":id": dispatchId,
       ":ended_at": now,
       ":exit_reason": opts?.exitReason ?? null,
       ":evidence_id": opts?.verificationEvidenceId ?? null,
     });
+    changes =
+      typeof (result as { changes?: unknown }).changes === "number"
+        ? (result as { changes: number }).changes
+        : 0;
   });
+  if (changes < 1) return;
   insertAuditEvent({
     eventId: randomUUID(),
     traceId: dispatchId.toString(),
@@ -224,8 +243,9 @@ export function markFailed(dispatchId: number, opts: FailureOpts): void {
     ? new Date(now.getTime() + opts.retryAfterMs).toISOString()
     : null;
   const db = _getAdapter()!;
+  let changes = 0;
   transaction(() => {
-    db.prepare(
+    const result = db.prepare(
       `UPDATE unit_dispatches
        SET status = 'failed', ended_at = :ended_at,
            error_summary = :error_summary,
@@ -233,7 +253,8 @@ export function markFailed(dispatchId: number, opts: FailureOpts): void {
            last_error_at = :last_error_at,
            retry_after_ms = :retry_after_ms,
            next_run_at = :next_run_at
-       WHERE id = :id`,
+       WHERE id = :id
+         AND status IN ('claimed','running')`,
     ).run({
       ":id": dispatchId,
       ":ended_at": nowIso,
@@ -243,7 +264,12 @@ export function markFailed(dispatchId: number, opts: FailureOpts): void {
       ":retry_after_ms": opts.retryAfterMs ?? null,
       ":next_run_at": nextRunIso,
     });
+    changes =
+      typeof (result as { changes?: unknown }).changes === "number"
+        ? (result as { changes: number }).changes
+        : 0;
   });
+  if (changes < 1) return;
   insertAuditEvent({
     eventId: randomUUID(),
     traceId: dispatchId.toString(),
@@ -263,7 +289,7 @@ export function markStuck(dispatchId: number, reason: string): void {
     db.prepare(
       `UPDATE unit_dispatches
        SET status = 'stuck', ended_at = :ended_at, exit_reason = :reason
-       WHERE id = :id`,
+       WHERE id = :id AND status IN ('claimed','running')`,
     ).run({ ":id": dispatchId, ":ended_at": now, ":reason": reason });
   });
 }

@@ -38,6 +38,19 @@ export type ClaimResult =
   | { ok: true; token: number; expiresAt: string }
   | { ok: false; error: "held_by"; byWorker: string; expiresAt: string };
 
+function isDuplicateLeaseInsertError(err: unknown): boolean {
+  const code =
+    err && typeof err === "object" && "code" in err
+      ? String((err as { code?: unknown }).code ?? "")
+      : "";
+  if (code === "SQLITE_CONSTRAINT" || code === "SQLITE_CONSTRAINT_PRIMARYKEY" || code === "SQLITE_CONSTRAINT_UNIQUE") {
+    return true;
+  }
+
+  const msg = err instanceof Error ? err.message : String(err);
+  return /\bUNIQUE\b|\bPRIMARY KEY\b|\bconstraint failed\b/i.test(msg);
+}
+
 function ttlExpiry(now: Date): string {
   return new Date(now.getTime() + LEASE_TTL_SECONDS * 1000).toISOString();
 }
@@ -50,9 +63,9 @@ function ttlExpiry(now: Date): string {
  * Fencing token is computed by SQL (`fencing_token + 1`), never supplied
  * by the client. Initial value is 1.
  *
- * datetime('now') uses the local monotonic clock — single-host SQLite WAL
- * only. Cross-host coordination would need a real coordinator; out of scope
- * for Phase B.
+ * datetime('now') uses local wall-clock time, so this remains single-host
+ * SQLite WAL coordination only. Cross-host coordination would need a real
+ * coordinator; out of scope for Phase B.
  */
 export function claimMilestoneLease(
   workerId: string,
@@ -90,8 +103,7 @@ export function claimMilestoneLease(
     } catch (err) {
       // SQLite raises a constraint error on duplicate PK — catch and fall
       // through to UPDATE. Any other error is a bug; rethrow.
-      const msg = err instanceof Error ? err.message : String(err);
-      if (!/UNIQUE|PRIMARY KEY|constraint/i.test(msg)) throw err;
+      if (!isDuplicateLeaseInsertError(err)) throw err;
     }
 
     if (inserted) {

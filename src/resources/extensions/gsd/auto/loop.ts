@@ -57,7 +57,7 @@ import { join } from "node:path";
 // Phase C migration: stuck-state.json deleted in favor of DB-backed
 // equivalents. recentUnits is rebuilt from unit_dispatches (Phase B
 // ledger) on session start; stuckRecoveryAttempts persists in runtime_kv
-// (worker scope, soft state per the runtime_kv invariant). Single-host
+// under a stable project scope (soft state per the runtime_kv invariant). Single-host
 // SQLite WAL only — multi-host would need a real coordinator.
 //
 // When no worker is registered (DB unavailable, fresh project), both
@@ -66,12 +66,17 @@ import { join } from "node:path";
 const STUCK_RECOVERY_ATTEMPTS_KEY = "stuck_recovery_attempts";
 const RECENT_UNIT_KEYS_LIMIT = 20;
 
+type OpenDispatchClaimResult =
+  | { kind: "claimed"; dispatchId: number }
+  | { kind: "already-active"; existingId: number; existingWorker: string }
+  | { kind: "degraded" };
+
 function loadStuckState(s: AutoSession): { recentUnits: Array<{ key: string }>; stuckRecoveryAttempts: number } {
   if (!s.workerId) return { recentUnits: [], stuckRecoveryAttempts: 0 };
   try {
     const recentUnits = getRecentUnitKeysForWorker(s.workerId, RECENT_UNIT_KEYS_LIMIT);
     const stuckRecoveryAttempts =
-      getRuntimeKv<number>("worker", s.workerId, STUCK_RECOVERY_ATTEMPTS_KEY) ?? 0;
+      getRuntimeKv<number>("global", s.canonicalProjectRoot, STUCK_RECOVERY_ATTEMPTS_KEY) ?? 0;
     return { recentUnits, stuckRecoveryAttempts };
   } catch (err) {
     debugLog("autoLoop", { phase: "load-stuck-state-failed", error: err instanceof Error ? err.message : String(err) });
@@ -85,7 +90,7 @@ function saveStuckState(s: AutoSession, state: LoopState): void {
   // dispatch ledger writes in openDispatchClaim — no separate persistence
   // needed. Only the soft retry counter needs a runtime_kv row.
   try {
-    setRuntimeKv("worker", s.workerId, STUCK_RECOVERY_ATTEMPTS_KEY, state.stuckRecoveryAttempts);
+    setRuntimeKv("global", s.canonicalProjectRoot, STUCK_RECOVERY_ATTEMPTS_KEY, state.stuckRecoveryAttempts);
   } catch (err) {
     debugLog("autoLoop", { phase: "save-stuck-state-failed", error: err instanceof Error ? err.message : String(err) });
   }
@@ -149,11 +154,9 @@ function saveCustomVerifyRetryCounts(s: AutoSession): void {
 
 /**
  * Phase B helper: open a unit_dispatches row in 'claimed' state and
- * immediately transition it to 'running'. Returns the dispatch_id on
- * success, or null when the ledger cannot be written (DB unavailable, no
- * worker registered, no active milestone lease, double-claim race) — null
- * means "fall through to existing single-worker semantics, no ledger
- * entry for this iteration".
+ * immediately transition it to 'running'. Returns a tri-state result so
+ * callers can distinguish between a degraded ledger write and an explicit
+ * already-active rejection from the partial unique index.
  *
  * Single-worker compatibility: this function is best-effort and never
  * throws. The auto-loop must continue to behave identically when the
@@ -164,10 +167,10 @@ function openDispatchClaim(
   flowId: string,
   turnId: string,
   iterData: IterationData,
-): number | null {
-  if (!s.workerId || s.milestoneLeaseToken === null) return null;
+): OpenDispatchClaimResult {
+  if (!s.workerId || s.milestoneLeaseToken === null) return { kind: "degraded" };
   const mid = iterData.mid;
-  if (!mid) return null;
+  if (!mid) return { kind: "degraded" };
 
   try {
     const recent = getRecentDispatchesForUnit(iterData.unitId, 1);
@@ -191,16 +194,20 @@ function openDispatchClaim(
         existingId: claim.existingId,
         existingWorker: claim.existingWorker,
       });
-      return null;
+      return {
+        kind: "already-active",
+        existingId: claim.existingId,
+        existingWorker: claim.existingWorker,
+      };
     }
     markDispatchRunning(claim.dispatchId);
-    return claim.dispatchId;
+    return { kind: "claimed", dispatchId: claim.dispatchId };
   } catch (err) {
     debugLog("autoLoop", {
       phase: "dispatch-claim-failed",
       error: err instanceof Error ? err.message : String(err),
     });
-    return null;
+    return { kind: "degraded" };
   }
 }
 
@@ -444,6 +451,9 @@ export async function autoLoop(
       finishTurn("stopped", "manual-attention", "missing-command-context");
       break;
     }
+
+    let dispatchId: number | null = null;
+    let dispatchSettled = false;
 
     try {
       // ── Blanket try/catch: one bad iteration must not kill the session
@@ -755,11 +765,21 @@ export async function autoLoop(
 
       // Phase B: claim a unit_dispatches row before invoking the unit. The
       // partial unique index idx_unit_dispatches_active_per_unit prevents
-      // a second worker from claiming the same unit concurrently. Returns
-      // null when DB unavailable, no worker registered, or no active lease
-      // — those degraded paths fall through to the existing single-worker
-      // semantics with no ledger entry, preserving back-compat.
-      const dispatchId = openDispatchClaim(s, flowId, turnId, iterData);
+      // a second worker from claiming the same unit concurrently.
+      const dispatchClaim = openDispatchClaim(s, flowId, turnId, iterData);
+      if (dispatchClaim.kind === "already-active") {
+        debugLog("autoLoop", {
+          phase: "dispatch-already-active-skip",
+          unitId: iterData.unitId,
+          existingId: dispatchClaim.existingId,
+          existingWorker: dispatchClaim.existingWorker,
+        });
+        finishTurn("skipped");
+        continue;
+      }
+      if (dispatchClaim.kind === "claimed") {
+        dispatchId = dispatchClaim.dispatchId;
+      }
 
       const unitPhaseResult = await runUnitPhaseViaContract(
         dispatchContract,
@@ -778,7 +798,12 @@ export async function autoLoop(
       });
       if (unitPhaseResult.action === "break") {
         if (dispatchId !== null) {
-          try { markDispatchFailed(dispatchId, { errorSummary: "unit-break" }); } catch (err) { debugLog("autoLoop", { phase: "dispatch-ledger-write-failed", error: err instanceof Error ? err.message : String(err) }); }
+          try {
+            markDispatchFailed(dispatchId, { errorSummary: "unit-break" });
+            dispatchSettled = true;
+          } catch (err) {
+            debugLog("autoLoop", { phase: "dispatch-ledger-write-failed", error: err instanceof Error ? err.message : String(err) });
+          }
         }
         finishTurn("stopped", "execution", "unit-break");
         break;
@@ -796,21 +821,36 @@ export async function autoLoop(
           ? "git"
           : "closeout";
         if (dispatchId !== null) {
-          try { markDispatchFailed(dispatchId, { errorSummary: `finalize-break:${finalizeResult.reason ?? "unknown"}` }); } catch (err) { debugLog("autoLoop", { phase: "dispatch-ledger-write-failed", error: err instanceof Error ? err.message : String(err) }); }
+          try {
+            markDispatchFailed(dispatchId, { errorSummary: `finalize-break:${finalizeResult.reason ?? "unknown"}` });
+            dispatchSettled = true;
+          } catch (err) {
+            debugLog("autoLoop", { phase: "dispatch-ledger-write-failed", error: err instanceof Error ? err.message : String(err) });
+          }
         }
         finishTurn("stopped", finalizeFailureClass, "finalize-break");
         break;
       }
       if (finalizeResult.action === "continue") {
         if (dispatchId !== null) {
-          try { markDispatchFailed(dispatchId, { errorSummary: "finalize-retry" }); } catch (err) { debugLog("autoLoop", { phase: "dispatch-ledger-write-failed", error: err instanceof Error ? err.message : String(err) }); }
+          try {
+            markDispatchFailed(dispatchId, { errorSummary: "finalize-retry" });
+            dispatchSettled = true;
+          } catch (err) {
+            debugLog("autoLoop", { phase: "dispatch-ledger-write-failed", error: err instanceof Error ? err.message : String(err) });
+          }
         }
         finishTurn("retry");
         continue;
       }
 
       if (dispatchId !== null) {
-        try { markDispatchCompleted(dispatchId); } catch (err) { debugLog("autoLoop", { phase: "dispatch-ledger-write-failed", error: err instanceof Error ? err.message : String(err) }); }
+        try {
+          markDispatchCompleted(dispatchId);
+          dispatchSettled = true;
+        } catch (err) {
+          debugLog("autoLoop", { phase: "dispatch-ledger-write-failed", error: err instanceof Error ? err.message : String(err) });
+        }
       }
       consecutiveErrors = 0; // Iteration completed successfully
       consecutiveCooldowns = 0;
@@ -822,6 +862,17 @@ export async function autoLoop(
     } catch (loopErr) {
       // ── Blanket catch: absorb unexpected exceptions, apply graduated recovery ──
       const msg = loopErr instanceof Error ? loopErr.message : String(loopErr);
+      if (dispatchId !== null && !dispatchSettled) {
+        try {
+          markDispatchFailed(dispatchId, { errorSummary: `unhandled-error:${msg.slice(0, 200)}` });
+          dispatchSettled = true;
+        } catch (err) {
+          debugLog("autoLoop", {
+            phase: "dispatch-ledger-write-failed",
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
 
       // Always emit iteration-end on error so the journal records iteration
       // completion even on failure (#2344). Without this, errors in
