@@ -24,6 +24,7 @@ import {
   transaction,
   insertAuditEvent,
 } from "../gsd-db.js";
+import { normalizeRealPath } from "../paths.js";
 
 const HEARTBEAT_TTL_SECONDS = 60;
 // Version label is for diagnostics only — embedded in audit_events and
@@ -237,5 +238,18 @@ export function findStaleWorkerForProject(
      ORDER BY started_at DESC
      LIMIT 1`,
   ).get({ ":project_root": projectRootRealpath, ":cutoff": cutoffIso }) as AutoWorkerRow | undefined;
-  return row ?? null;
+  if (row) return row;
+
+  // Older rows and external fixtures may have captured a non-realpath spelling
+  // of the same project root, e.g. /var/... vs /private/var/... on macOS.
+  const canonicalProjectRoot = normalizeRealPath(projectRootRealpath);
+  const staleRows = db.prepare(
+    `SELECT worker_id, host, pid, started_at, version,
+            last_heartbeat_at, status, project_root_realpath
+     FROM workers
+     WHERE status = 'active'
+       AND last_heartbeat_at < :cutoff
+     ORDER BY started_at DESC`,
+  ).all({ ":cutoff": cutoffIso }) as unknown as AutoWorkerRow[];
+  return staleRows.find((candidate) => normalizeRealPath(candidate.project_root_realpath) === canonicalProjectRoot) ?? null;
 }
