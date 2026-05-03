@@ -3,10 +3,10 @@
 Project/App: GSD-2
 File Purpose: Complete phase-by-phase implementation roadmap for reducing complexity, token usage, build/test time, and app/process drift without a big-bang rewrite.
 
-**Status:** Proposed
+**Status:** Replanned - SRC-first execution
 **Date:** 2026-05-03
 **Delivery model:** Sequential phase gates with limited parallel work inside a phase
-**Primary priorities:** tokens/contracts first, behavior preservation, telemetry-gated legacy removal
+**Primary priorities:** `src/` token/context reduction, `src/` workflow simplification, `src/` DB split, behavior preservation, telemetry-gated legacy removal
 
 ## Objective
 
@@ -15,12 +15,43 @@ Create a decision-complete implementation roadmap for the long-running GSD-2 ref
 The refactor should:
 
 1. Reduce prompt and context size while improving output quality.
-2. Establish shared contracts across runtime, RPC, MCP, web, VS Code, and future app surfaces.
+2. Establish only the shared contracts needed by `src/` runtime behavior before touching app surfaces.
 3. Speed up local build/test loops without weakening `npm run verify:pr`.
 4. Simplify auto-mode into a smaller workflow kernel with explicit adapters.
 5. Preserve the single-writer DB invariant while splitting the DB monolith.
-6. Consolidate duplicated app/process/shipping paths.
+6. Consolidate duplicated process/shipping paths after the `src/` runtime is simpler.
 7. Retire legacy paths only after telemetry and tests prove they are safe to remove.
+
+## Active Replan: SRC-First Focus
+
+The previous execution spent too much time migrating web, VS Code, daemon, and other app-adapter surfaces. Those migrations are valid cleanup, but they are not the current bottleneck. The active program now prioritizes `src/` because that is where the largest token, workflow, DB, prompt, and output-quality wins live.
+
+**Do now:**
+
+1. Finish only the contract work required to stabilize `src/` runtime fixtures and prevent drift in source-owned RPC/headless/auto behavior.
+2. Move immediately into Phase 2 token/context reduction under `src/resources/extensions/gsd/**`, `src/headless*.ts`, and source-owned prompt/context builders.
+3. Pull Phase 4 workflow-kernel work ahead of broad app-surface consolidation once prompt lanes and fixtures are stable.
+4. Pull Phase 5 DB split directly after the kernel boundary, because `src/resources/extensions/gsd/gsd-db.ts` and state derivation are core complexity hotspots.
+5. Keep Phase 3 build/test speed scoped to `src` test compile and source verification loops.
+
+**Stop doing for now:**
+
+1. No more web store, web bridge, VS Code, Studio, or daemon DTO migrations unless a `src` change requires the adapter to keep tests passing.
+2. No app-surface polish or parity work.
+3. No broad package-level contract chasing for its own sake.
+4. No Phase 6 work until Phases 2, 4, and 5 have landed behind tests.
+
+**Current active order:**
+
+1. Phase 0: complete and keep as the safety gate.
+2. Phase 1A: close `src`-owned contract fixture gaps only.
+3. Phase 2: token and context reduction in `src`.
+4. Phase 4: workflow kernel extraction in `src/resources/extensions/gsd`.
+5. Phase 5: DB split in `src/resources/extensions/gsd`.
+6. Phase 3: source-scoped build/test speed work, interleaved only when it accelerates the current `src` phase.
+7. Phase 7: process consolidation after runtime simplification.
+8. Phase 8: telemetry-gated cleanup.
+9. Phase 6: app surfaces, explicitly deferred.
 
 ## Program Rules
 
@@ -38,13 +69,13 @@ The refactor should:
 | Phase | Depends on | Unlocks |
 | --- | --- | --- |
 | 0. Baseline and Safety | None | All later phase measurement and gates |
-| 1. Contracts Foundation | Phase 0 | App/API consolidation, golden fixtures, safer adapters |
-| 2. Token and Context Reduction | Phase 0, partial Phase 1 | Prompt reductions, quality evals, context compiler migration |
-| 3. Build/Test Speed | Phase 0 | Faster iteration for later phases |
+| 1A. SRC Contracts Closure | Phase 0 | Source-owned golden fixtures, safer prompt/kernel/DB work |
+| 2. Token and Context Reduction | Phase 0, Phase 1A | Prompt reductions, quality evals, context compiler migration |
+| 3. SRC Build/Test Speed | Phase 0 | Faster source iteration for later phases |
 | 4. Workflow Kernel | Phases 0-2 | Auto-mode simplification, adapter boundaries |
 | 5. DB Split | Phases 0-1 | Repository boundaries, state/query speed work |
-| 6. App Surface | Phases 1, 3 | Web/MCP/VS Code/Studio contract convergence |
-| 7. Process Consolidation | Phases 1, 6 | Unified ship/PR evidence and docs alignment |
+| 6. App Surface Deferred | Phases 2, 4, 5 | Web/MCP/VS Code/Studio contract convergence after source simplification |
+| 7. Process Consolidation | Phases 2, 4, 5 | Unified ship/PR evidence and docs alignment |
 | 8. Legacy Cleanup | Phases 0-7 telemetry | Safe deletion of compatibility paths |
 
 ## Phase 0: Baseline And Safety Plan
@@ -124,18 +155,17 @@ Baseline usage is documented in `docs/dev/refactor-baseline-runbook.md`.
 
 **Implemented gate command:** `npm run baseline:refactor:phase0`
 
-## Phase 1: Contracts Foundation Plan
+## Phase 1A: SRC Contracts Closure Plan
 
-**Goal:** Create one canonical contract boundary for runtime, RPC client, MCP, web, VS Code, and future app surfaces.
+**Goal:** Close only the shared contract gaps needed by `src` runtime behavior and source-owned tests before moving to token/context reduction.
 
 **Owned areas:**
 
 - New `packages/contracts` workspace package named `@gsd-build/contracts`.
 - Runtime RPC protocol types.
-- `@gsd-build/rpc-client` exports.
-- MCP blocker and workflow tool contract metadata.
-- Web bridge/browser DTOs.
-- VS Code client DTOs.
+- `@gsd-build/rpc-client` compatibility exports when required by source tests.
+- `src/headless*.ts`, `src/headless-events.ts`, `src/web/bridge-service.ts` only where source-owned runtime fixtures depend on them.
+- `src/resources/extensions/gsd/**` contract fixtures.
 
 **Implementation plan:**
 
@@ -149,8 +179,8 @@ Baseline usage is documented in `docs/dev/refactor-baseline-runbook.md`.
    - workflow tool registry metadata: canonical name, aliases, schema id, executor id, write policy, audit metadata
 2. Move only stable public DTOs first. Do not move implementation services into the contracts package.
 3. Make runtime RPC and `@gsd-build/rpc-client` import or re-export canonical contracts.
-4. Move MCP, web bridge, and VS Code to the same contracts in small stacked PRs.
-5. Add golden JSONL fixtures shared across packages.
+4. Add golden JSONL fixtures for source-owned runtime/headless/auto behavior.
+5. Stop Phase 1A when `src` fixtures are stable. Defer MCP/web/VS Code/Studio/daemon DTO migration unless required by source tests.
 
 **Implemented so far:**
 
@@ -162,8 +192,8 @@ Baseline usage is documented in `docs/dev/refactor-baseline-runbook.md`.
 
 **Acceptance criteria:**
 
-- Runtime, rpc-client, MCP, web, and VS Code share the same contract types for golden fixtures.
-- No app surface keeps a hand-rolled incompatible RPC/bash/UI shape.
+- Runtime, rpc-client compatibility exports, and source-owned fixtures share the same contract types for golden fixtures.
+- `src` no longer depends on hand-rolled incompatible RPC/bash/UI shapes in the active runtime paths being refactored.
 - Existing public package exports remain compatible or explicitly re-exported.
 
 **Test matrix:**
@@ -173,9 +203,8 @@ Baseline usage is documented in `docs/dev/refactor-baseline-runbook.md`.
 | Contracts package | type-level compile coverage and runtime fixture validation helpers |
 | RPC runtime | golden `get_state`, `get_session_stats`, bash, slash command, UI request events |
 | RPC client | parses the same golden fixtures as runtime |
-| MCP | blocker confirm/select/multi-select/input/secure-input response shapes |
-| Web | bridge DTOs match canonical contracts |
-| VS Code | client parser handles canonical fixtures |
+| Headless/source runtime | source-owned headless and UI event fixtures use canonical contracts |
+| Deferred adapters | no new coverage required until Phase 6 |
 
 **Metrics dashboard fields:**
 
@@ -190,7 +219,7 @@ Baseline usage is documented in `docs/dev/refactor-baseline-runbook.md`.
 - Do not remove old local types until all consumers use the new package.
 - Each surface migration should be independently revertible.
 
-**Exit gate:** Runtime, rpc-client, MCP, web, and VS Code share golden fixtures and no high-risk contract drift remains.
+**Exit gate:** Runtime, rpc-client compatibility exports, and source-owned golden fixtures share contracts and no high-risk `src` contract drift remains.
 
 ## Phase 2: Token And Context Reduction Plan
 
@@ -198,10 +227,12 @@ Baseline usage is documented in `docs/dev/refactor-baseline-runbook.md`.
 
 **Owned areas:**
 
-- System prompt assembly.
-- Skill filtering and skill catalog rendering.
-- GSD prompt builders and `UnitContextManifest`.
-- Context budget enforcement.
+- `src/resources/extensions/gsd/prompts/**`.
+- `src/resources/extensions/gsd/auto-prompts.ts`.
+- `src/resources/extensions/gsd/auto-context.ts` and adjacent source context builders if present.
+- Skill filtering and skill catalog rendering under `src`.
+- GSD prompt builders and `UnitContextManifest` under `src`.
+- Context budget enforcement under `src`.
 - Prompt telemetry and golden prompt fixtures.
 
 **Implementation plan:**
@@ -263,23 +294,21 @@ Baseline usage is documented in `docs/dev/refactor-baseline-runbook.md`.
 
 ## Phase 3: Build/Test Speed Plan
 
-**Goal:** Speed up local iteration while preserving the full `npm run verify:pr` preflight.
+**Goal:** Speed up `src` iteration while preserving the full `npm run verify:pr` preflight.
 
 **Owned areas:**
 
 - Test compile script and `dist-test` lifecycle.
-- Scoped local verification scripts.
-- Web build staleness detection.
+- Source-scoped local verification scripts.
 - Build/test timing metrics.
 
 **Implementation plan:**
 
 1. Make `test:compile` stale-aware and reusable within one command sequence.
 2. Avoid recompiling before both unit and package tests when sources have not changed.
-3. Add a scoped changed-test command for local iteration.
+3. Add a scoped changed-test command for `src` local iteration.
 4. Preserve `npm run verify:pr` as the full gate.
-5. Replace broad web staleness tree walking with tracked-file fingerprints limited to actual web inputs.
-6. Emit file count, byte count, cache hit, and wall-time metrics for build/test steps.
+5. Emit file count, byte count, cache hit, and wall-time metrics for source build/test steps.
 
 **Acceptance criteria:**
 
@@ -293,7 +322,6 @@ Baseline usage is documented in `docs/dev/refactor-baseline-runbook.md`.
 | --- | --- |
 | Compile cache | cold run compiles, warm run reuses, source change invalidates |
 | Scoped tests | changed-source inputs select expected test set |
-| Web fingerprint | actual web input changes invalidate, unrelated files do not |
 | Full preflight | `verify:pr` command remains full and unchanged in intent |
 
 **Metrics dashboard fields:**
@@ -442,9 +470,9 @@ Baseline usage is documented in `docs/dev/refactor-baseline-runbook.md`.
 
 **Exit gate:** Migration, state derivation, dependency lookup, and single-writer tests pass with compatibility exports intact.
 
-## Phase 6: App Surface Plan
+## Phase 6: App Surface Plan - Deferred
 
-**Goal:** Make app surfaces thin adapters over shared contracts and reduce web store/bridge complexity.
+**Goal:** Deferred. Make app surfaces thin adapters over shared contracts only after the `src` runtime is smaller and more stable.
 
 **Owned areas:**
 
@@ -456,14 +484,15 @@ Baseline usage is documented in `docs/dev/refactor-baseline-runbook.md`.
 
 **Implementation plan:**
 
-1. Split web workspace store into store slices while preserving the public hook behavior.
-2. Make web routes and bridge services delegate to shared contracts and services instead of importing deep runtime internals.
-3. Move MCP workflow tool registration toward the shared workflow registry metadata.
-4. Move VS Code DTO parsing to `@gsd-build/contracts`.
-5. Decide Studio role:
+1. Do not start this phase until Phases 2, 4, and 5 have passed their exit gates.
+2. Split web workspace store into store slices while preserving the public hook behavior.
+3. Make web routes and bridge services delegate to shared contracts and services instead of importing deep runtime internals.
+4. Move MCP workflow tool registration toward the shared workflow registry metadata.
+5. Move VS Code DTO parsing to `@gsd-build/contracts`.
+6. Decide Studio role:
    - either wire it to the same contracts
    - or mark it explicitly as prototype/non-runtime until wired
-6. Add app contract tests for authenticated web flows and adapter payloads.
+7. Add app contract tests for authenticated web flows and adapter payloads.
 
 **Acceptance criteria:**
 
@@ -626,12 +655,12 @@ Baseline usage is documented in `docs/dev/refactor-baseline-runbook.md`.
 | Phase | Primary owners | Must not overlap with |
 | --- | --- | --- |
 | 0 | metrics scripts, test fixtures, docs for baseline command | implementation refactors in auto/DB/web |
-| 1 | `packages/contracts`, RPC/MCP/web/VS Code contract adapters | prompt builder rewrites that change payload shape |
-| 2 | system prompt, skill filtering, GSD prompt/context compiler | workflow kernel side-effect moves |
-| 3 | build/test scripts and web fingerprinting | test fixture schema moves from Phase 1 without coordination |
+| 1A | `packages/contracts`, source-owned RPC/headless/auto fixtures | prompt builder rewrites that change payload shape |
+| 2 | `src/resources/extensions/gsd/prompts/**`, `src/resources/extensions/gsd/*context*`, skill filtering, GSD prompt/context compiler | workflow kernel side-effect moves |
+| 3 | source build/test scripts and `dist-test` lifecycle | test fixture schema moves from Phase 1A without coordination |
 | 4 | auto-mode kernel/facade/adapters | DB module moves and prompt compiler churn in same files |
 | 5 | DB internals and repositories | workflow kernel changes that depend on DB private functions |
-| 6 | web store, bridge, MCP, VS Code, Studio adapters | contracts package breaking changes |
+| 6 | deferred web store, bridge, MCP, VS Code, Studio adapters | active `src` phases |
 | 7 | ship/PR generator, GitHub sync, docs | app adapter DTO migration |
 | 8 | one legacy category per deletion PR | any active behavior-changing phase |
 
@@ -653,21 +682,21 @@ The implementation program should maintain a dashboard with these groups:
 ## Implementation Order
 
 1. Phase 0: Baseline and Safety
-2. Phase 1: Contracts Foundation
+2. Phase 1A: SRC Contracts Closure
 3. Phase 2: Token and Context Reduction
-4. Phase 3: Build/Test Speed
-5. Phase 4: Workflow Kernel
-6. Phase 5: DB Split
-7. Phase 6: App Surface
-8. Phase 7: Process Consolidation
-9. Phase 8: Legacy Cleanup
+4. Phase 4: Workflow Kernel
+5. Phase 5: DB Split
+6. Phase 3: SRC Build/Test Speed where it accelerates active source work
+7. Phase 7: Process Consolidation
+8. Phase 8: Legacy Cleanup
+9. Phase 6: App Surface, deferred until source runtime simplification lands
 
 Parallel work is allowed only inside a phase when file ownership is disjoint and the phase lead owns integration.
 
 ## Done Definition For The Whole Program
 
 - Prompt/context size is materially lower and tracked by repeatable metrics.
-- Shared contracts are used across runtime, RPC client, MCP, web, VS Code, and Studio status.
+- Shared contracts are used where they protect `src` runtime behavior; app-surface convergence is deferred and tracked separately.
 - Warm local verification is materially faster while full `verify:pr` remains intact.
 - Auto-mode has a pure testable workflow kernel and explicit side-effect adapters.
 - DB internals are split without weakening the single-writer invariant.
