@@ -308,7 +308,7 @@ function scanGsdTaggedCommits(
       if (!commitMessageHasGsdTrailer(message)) continue;
 
       const commitFiles = getChangedFilesForCommit(basePath, hash);
-      if (!commitMatchesMilestone(message, milestoneId, commitFiles)) continue;
+      if (!commitMatchesMilestone(basePath, message, milestoneId, commitFiles)) continue;
 
       matched = true;
       for (const file of commitFiles) {
@@ -336,20 +336,34 @@ function commitMessageHasGsdTrailer(message: string): boolean {
   return /^GSD-(?:Task|Unit):\s*\S+/m.test(message);
 }
 
-function commitMatchesMilestone(message: string, milestoneId: string, files: readonly string[]): boolean {
+function commitMatchesMilestone(basePath: string, message: string, milestoneId: string, files: readonly string[]): boolean {
   if (commitTrailerStartsWithMilestone(message, milestoneId)) return true;
 
   // Meaningful execute-task commits currently store task scope as Sxx/Tyy
   // rather than Mxx/Sxx/Tyy. Bind those commits back to the milestone when
   // either the commit touched this milestone's artifacts, or — for projects
   // where .gsd/ is gitignored/external (#5033) — the message explicitly
-  // names the milestone.
+  // names the milestone or local GSD state proves the task belongs here.
   if (/^GSD-Task:\s*S[^/\s]+\/T\S+/m.test(message)) {
     if (files.some((file) => isMilestoneArtifactPath(file, milestoneId))) return true;
     if (commitMessageMentionsMilestone(message, milestoneId)) return true;
+    if (commitTaskTrailerBelongsToMilestone(basePath, message, milestoneId)) return true;
   }
 
   return false;
+}
+
+function commitTaskTrailerBelongsToMilestone(basePath: string, message: string, milestoneId: string): boolean {
+  const match = message.match(/^GSD-Task:\s*(S[^/\s]+)\/(T[^\s]+)/m);
+  if (!match) return false;
+  const [, sliceId, taskId] = match;
+
+  if (getTask(milestoneId, sliceId, taskId)) return true;
+
+  const tasksDir = resolveTasksDir(basePath, milestoneId, sliceId);
+  if (!tasksDir) return false;
+  return existsSync(join(tasksDir, `${taskId}-PLAN.md`))
+    || existsSync(join(tasksDir, `${taskId}-SUMMARY.md`));
 }
 
 function commitMessageMentionsMilestone(message: string, milestoneId: string): boolean {
