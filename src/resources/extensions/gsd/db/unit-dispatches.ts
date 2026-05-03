@@ -319,6 +319,31 @@ export function getLatestForUnit(unitId: string): UnitDispatchRow | null {
 }
 
 /**
+ * Phase C — return the most recent unit_id values for a worker, oldest-first.
+ *
+ * Drop-in replacement for the persistence side of stuck-state.json's
+ * `recentUnits` field. The auto-loop uses this to seed loopState.recentUnits
+ * on session start so the stuck-detector window survives a session restart
+ * (#3704). Returned in oldest-first order to match the in-memory window
+ * shape that detect-stuck.ts expects.
+ */
+export function getRecentUnitKeysForWorker(
+  workerId: string,
+  limit = 20,
+): Array<{ key: string }> {
+  if (!isDbAvailable()) return [];
+  const db = _getAdapter()!;
+  const rows = db.prepare(
+    `SELECT unit_id FROM unit_dispatches
+     WHERE worker_id = :worker_id
+     ORDER BY started_at DESC, id DESC
+     LIMIT :limit`,
+  ).all({ ":worker_id": workerId, ":limit": limit }) as Array<{ unit_id: string }>;
+  // Reverse so callers consume oldest-first (sliding-window semantics).
+  return rows.reverse().map((r) => ({ key: r.unit_id }));
+}
+
+/**
  * Fetch dispatches for a milestone filtered by status. Useful for janitors
  * + dashboards.
  */

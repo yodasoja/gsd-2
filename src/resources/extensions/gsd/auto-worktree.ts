@@ -1128,137 +1128,13 @@ export function enterBranchModeForMilestone(
  * Forward-merge plan checkbox state from the project root into a freshly
  * re-attached worktree (#778).
  *
- * When auto-mode stops via crash (not graceful stop), the milestone branch
- * HEAD may be behind the filesystem state at the project root because
- * syncStateToProjectRoot() runs after every task completion but the final
- * git commit may not have happened before the crash. On restart the worktree
- * is re-attached to the branch HEAD, which has [ ] for the crashed task,
- * causing verifyExpectedArtifact() to fail and triggering an infinite
- * dispatch/skip loop.
- *
- * Fix: after re-attaching, read every *.md plan file in the milestone
- * directory at the project root and apply any [x] checkbox states that are
- * ahead of the worktree version (forward-only: never downgrade [x] → [ ]).
- *
- * This is forward-only compatibility for legacy projection copies. The DB
- * remains authoritative; this never downgrades checked boxes in a local
- * worktree projection.
+ * Phase C: deleted. Writers in workflow-projections.ts, triage-resolution.ts,
+ * rule-registry.ts, and auto-post-unit.ts now route through
+ * s.canonicalProjectRoot, so non-symlinked worktrees no longer need a local
+ * .gsd/ projection — the project-root .gsd/ is the only authoritative source
+ * for both reads and writes. copyPlanningArtifacts and reconcilePlanCheckboxes
+ * (both formerly here) became dead.
  */
-/**
- * Scope-typed variant of reconcilePlanCheckboxes.
- *
- * Takes an explicit (rootScope, worktreeScope) pair. milestoneId is taken
- * from rootScope. Asserts both scopes belong to the same workspace identity
- * to prevent silent mismatch bugs.
- */
-export function reconcilePlanCheckboxesByScope(
-  rootScope: MilestoneScope,
-  worktreeScope: MilestoneScope,
-): void {
-  if (rootScope.workspace.identityKey !== worktreeScope.workspace.identityKey) {
-    throw new Error(
-      `reconcilePlanCheckboxesByScope: scope identity mismatch — ` +
-      `rootScope.identityKey="${rootScope.workspace.identityKey}" ` +
-      `worktreeScope.identityKey="${worktreeScope.workspace.identityKey}"`,
-    );
-  }
-  if (rootScope.milestoneId !== worktreeScope.milestoneId) {
-    throw new Error(
-      `reconcilePlanCheckboxesByScope: milestoneId mismatch — ` +
-      `rootScope.milestoneId="${rootScope.milestoneId}" worktreeScope.milestoneId="${worktreeScope.milestoneId}"`,
-    );
-  }
-  const projectRoot = rootScope.workspace.projectRoot;
-  const wtPath = worktreeScope.workspace.worktreeRoot ?? worktreeScope.workspace.projectRoot;
-  const milestoneId = rootScope.milestoneId;
-  reconcilePlanCheckboxes(projectRoot, wtPath, milestoneId);
-}
-
-/**
- * @deprecated Use reconcilePlanCheckboxesByScope instead.
- * TODO(C-future): remove once all callers migrated.
- */
-function reconcilePlanCheckboxes(
-  projectRoot: string,
-  wtPath: string,
-  milestoneId: string,
-): void {
-  const srcMilestone = join(projectRoot, ".gsd", "milestones", milestoneId);
-  const dstMilestone = join(wtPath, ".gsd", "milestones", milestoneId);
-  if (!existsSync(srcMilestone) || !existsSync(dstMilestone)) return;
-
-  // Walk all markdown files in the milestone directory (plans, summaries, etc.)
-  function walkMd(dir: string): string[] {
-    const results: string[] = [];
-    try {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        const full = join(dir, entry.name);
-        if (entry.isDirectory()) {
-          results.push(...walkMd(full));
-        } else if (entry.isFile() && entry.name.endsWith(".md")) {
-          results.push(full);
-        }
-      }
-    } catch (err) {
-      /* non-fatal */
-      logWarning("worktree", `walkMd directory read failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-    return results;
-  }
-
-  for (const srcFile of walkMd(srcMilestone)) {
-    const rel = srcFile.slice(srcMilestone.length);
-    const dstFile = dstMilestone + rel;
-    if (!existsSync(dstFile)) continue; // only reconcile existing files
-
-    let srcContent: string;
-    let dstContent: string;
-    try {
-      srcContent = readFileSync(srcFile, "utf-8");
-      dstContent = readFileSync(dstFile, "utf-8");
-    } catch (e) {
-      logWarning("worktree", `reconcilePlanCheckboxes read failed: ${(e as Error).message}`);
-      continue;
-    }
-
-    if (srcContent === dstContent) continue;
-
-    // Extract all checked task IDs from the source (project root)
-    // Pattern: - [x] **T<id>: or - [x] **S<id>: (case-insensitive x)
-    const checkedRe = /^- \[[xX]\] \*\*([TS]\d+):/gm;
-    const srcChecked = new Set<string>();
-    for (const m of srcContent.matchAll(checkedRe)) srcChecked.add(m[1]);
-
-    if (srcChecked.size === 0) continue;
-
-    // Forward-apply: replace [ ] → [x] for any IDs that are checked in src
-    let updated = dstContent;
-    let changed = false;
-    for (const id of srcChecked) {
-      const escapedId = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const uncheckedRe = new RegExp(
-        `^(- )\\[ \\]( \\*\\*${escapedId}:)`,
-        "gm",
-      );
-      if (uncheckedRe.test(updated)) {
-        updated = updated.replace(
-          new RegExp(`^(- )\\[ \\]( \\*\\*${escapedId}:)`, "gm"),
-          "$1[x]$2",
-        );
-        changed = true;
-      }
-    }
-
-    if (changed) {
-      try {
-        atomicWriteSync(dstFile, updated, "utf-8");
-      } catch (err) {
-        /* non-fatal */
-        logWarning("worktree", `plan checkbox reconcile write failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-  }
-}
 
 export function createAutoWorktree(
   basePath: string,
@@ -1316,32 +1192,15 @@ export function createAutoWorktree(
     });
   }
 
-  // Copy .gsd/ planning artifacts from the source repo into the new worktree.
-  // Worktrees are fresh git checkouts — untracked files don't carry over.
-  // Planning artifacts may be untracked if the project's .gitignore had a
-  // blanket .gsd/ rule (pre-v2.14.0). Without this copy, auto-mode loops
-  // on plan-slice because the plan file doesn't exist in the worktree.
-  //
-  // IMPORTANT: Skip when re-attaching to an existing branch (#759).
-  // The branch checkout already has committed artifacts with correct state
-  // (e.g. [x] for completed slices). Copying from the project root would
-  // overwrite them with stale data ([ ] checkboxes) because the root is
-  // not always fully synced.
-  if (!branchExists) {
-    copyPlanningArtifacts(basePath, info.path);
-  } else {
-    // Re-attaching to an existing branch: forward-merge any plan checkpoint
-    // state from the project root into the worktree (#778).
-    //
-    // If auto-mode stopped via crash, the milestone branch HEAD may lag behind
-    // the project root filesystem because syncStateToProjectRoot() ran after
-    // task completion but the auto-commit never fired. On restart the worktree
-    // is re-created from the branch HEAD (which has [ ] for the crashed task),
-    // causing verifyExpectedArtifact() to return false → stale-key eviction →
-    // infinite dispatch/skip loop. Reconciling here ensures the worktree sees
-    // the same [x] state that syncStateToProjectRoot() wrote to the root.
-    reconcilePlanCheckboxes(basePath, info.path, milestoneId);
-  }
+  // Phase C: copyPlanningArtifacts and reconcilePlanCheckboxes were
+  // deleted. Both addressed the same problem (worktree-local .gsd/
+  // projection lagging behind project-root state) by maintaining a stale
+  // copy. Now that auto-mode writers in workflow-projections.ts,
+  // triage-resolution.ts, rule-registry.ts, and auto-post-unit.ts route
+  // through s.canonicalProjectRoot, the worktree never needs a local
+  // .gsd/ — both reads and writes converge on the project-root .gsd/.
+  // The original concerns (#759, #778) no longer apply because there is
+  // no second copy to drift.
 
   // Run user-configured post-create hook (#597) — e.g. copy .env, symlink assets
   const hookError = runWorktreePostCreateHook(basePath, info.path);
@@ -1368,60 +1227,13 @@ export function createAutoWorktree(
   return info.path;
 }
 
-/**
- * Copy .gsd/ planning artifacts from source repo to a new worktree.
- * Copies milestones/, DECISIONS.md, REQUIREMENTS.md, PROJECT.md, QUEUE.md,
- * STATE.md, KNOWLEDGE.md, and OVERRIDES.md.
- * Skips runtime files (auto.lock, metrics.json, etc.) and the worktrees/ dir.
- * Best-effort — failures are non-fatal since auto-mode can recreate artifacts.
- */
-function copyPlanningArtifacts(srcBase: string, wtPath: string): void {
-  const srcGsd = join(srcBase, ".gsd");
-  const dstGsd = join(wtPath, ".gsd");
-  if (!existsSync(srcGsd)) return;
-  if (isSamePath(srcGsd, dstGsd)) return;
-
-  // Copy milestones/ directory (planning files, roadmaps, plans, research)
-  safeCopyRecursive(join(srcGsd, "milestones"), join(dstGsd, "milestones"), {
-    force: true,
-    filter: (src) => !src.endsWith("-META.json"),
-  });
-
-  // Copy top-level planning files
-  for (const file of [
-    "DECISIONS.md",
-    "REQUIREMENTS.md",
-    "PROJECT.md",
-    "QUEUE.md",
-    "STATE.md",
-    "KNOWLEDGE.md",
-    "OVERRIDES.md",
-    "mcp.json",
-  ]) {
-    safeCopy(join(srcGsd, file), join(dstGsd, file), { force: true });
-  }
-
-  // Seed canonical PREFERENCES.md when available; fall back to legacy lowercase.
-  if (existsSync(join(srcGsd, PROJECT_PREFERENCES_FILE))) {
-    safeCopy(
-      join(srcGsd, PROJECT_PREFERENCES_FILE),
-      join(dstGsd, PROJECT_PREFERENCES_FILE),
-      { force: true },
-    );
-  } else if (existsSync(join(srcGsd, LEGACY_PROJECT_PREFERENCES_FILE))) {
-    safeCopy(
-      join(srcGsd, LEGACY_PROJECT_PREFERENCES_FILE),
-      join(dstGsd, LEGACY_PROJECT_PREFERENCES_FILE),
-      { force: true },
-    );
-  }
-
-  // Shared WAL (R012): worktrees use the project root's DB directly.
-  // No longer copy gsd.db into the worktree — the DB path resolver in
-  // ensureDbOpen() detects the worktree location and opens the root DB.
-  // Compat note: reconcileWorktreeDb() in mergeMilestoneToMain handles
-  // worktrees that already have a local gsd.db from before this change.
-}
+// Phase C: copyPlanningArtifacts removed. Planning artifacts now live
+// only at the project root .gsd/; auto-mode writers (workflow-projections,
+// triage-resolution, rule-registry, regenerateIfMissing,
+// resolveHookArtifactPath) all route through s.canonicalProjectRoot.
+// Worktrees are pure git checkouts — they no longer maintain a parallel
+// .gsd/ projection. The gsd.db has always lived at the project root via
+// the shared-WAL R012 contract; that is unchanged.
 
 /**
  * Teardown an auto-worktree: chdir back to original base, then remove

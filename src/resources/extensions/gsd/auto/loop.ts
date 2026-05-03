@@ -41,8 +41,10 @@ import {
   markFailed as markDispatchFailed,
   markStuck as markDispatchStuck,
   getRecentForUnit as getRecentDispatchesForUnit,
+  getRecentUnitKeysForWorker,
 } from "../db/unit-dispatches.js";
 import { refreshMilestoneLease } from "../db/milestone-leases.js";
+import { getRuntimeKv, setRuntimeKv } from "../db/runtime-kv.js";
 import { atomicWriteSync } from "../atomic-write.js";
 import { resolveUokFlags } from "../uok/flags.js";
 import { scheduleSidecarQueue } from "../uok/execution-graph.js";
@@ -52,43 +54,38 @@ import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 
 // ── Stuck detection persistence (#3704) ──────────────────────────────────
-// Persist stuck detection state to disk so it survives session restarts.
-// Without this, restarting auto-mode resets all counters, allowing the
-// same blocked unit to burn a full retry budget each session.
-function stuckStatePath(basePath: string): string {
-  return join(gsdRoot(basePath), "runtime", "stuck-state.json");
-}
+// Phase C migration: stuck-state.json deleted in favor of DB-backed
+// equivalents. recentUnits is rebuilt from unit_dispatches (Phase B
+// ledger) on session start; stuckRecoveryAttempts persists in runtime_kv
+// (worker scope, soft state per the runtime_kv invariant). Single-host
+// SQLite WAL only — multi-host would need a real coordinator.
+//
+// When no worker is registered (DB unavailable, fresh project), both
+// helpers degrade to the empty-state fallback that #3704 already
+// tolerates — same behavior as a fresh session.
+const STUCK_RECOVERY_ATTEMPTS_KEY = "stuck_recovery_attempts";
+const RECENT_UNIT_KEYS_LIMIT = 20;
 
-function loadStuckState(basePath: string): { recentUnits: Array<{ key: string }>; stuckRecoveryAttempts: number } {
+function loadStuckState(s: AutoSession): { recentUnits: Array<{ key: string }>; stuckRecoveryAttempts: number } {
+  if (!s.workerId) return { recentUnits: [], stuckRecoveryAttempts: 0 };
   try {
-    const data = JSON.parse(readFileSync(stuckStatePath(basePath), "utf-8"));
-    // Only load state written by a DIFFERENT process (real session restart).
-    // If the PID matches the current process, this state was written by an earlier
-    // autoLoop call in the same process (e.g., a test that completed before this
-    // one), not by a crashed session — skip it to prevent test state pollution.
-    if (data.pid === process.pid) {
-      return { recentUnits: [], stuckRecoveryAttempts: 0 };
-    }
-    return {
-      recentUnits: Array.isArray(data.recentUnits) ? data.recentUnits : [],
-      stuckRecoveryAttempts: typeof data.stuckRecoveryAttempts === "number" ? data.stuckRecoveryAttempts : 0,
-    };
+    const recentUnits = getRecentUnitKeysForWorker(s.workerId, RECENT_UNIT_KEYS_LIMIT);
+    const stuckRecoveryAttempts =
+      getRuntimeKv<number>("worker", s.workerId, STUCK_RECOVERY_ATTEMPTS_KEY) ?? 0;
+    return { recentUnits, stuckRecoveryAttempts };
   } catch (err) {
     debugLog("autoLoop", { phase: "load-stuck-state-failed", error: err instanceof Error ? err.message : String(err) });
     return { recentUnits: [], stuckRecoveryAttempts: 0 };
   }
 }
 
-function saveStuckState(basePath: string, state: LoopState): void {
+function saveStuckState(s: AutoSession, state: LoopState): void {
+  if (!s.workerId) return;
+  // recentUnits is automatically derived from unit_dispatches by the
+  // dispatch ledger writes in openDispatchClaim — no separate persistence
+  // needed. Only the soft retry counter needs a runtime_kv row.
   try {
-    const filePath = stuckStatePath(basePath);
-    mkdirSync(join(gsdRoot(basePath), "runtime"), { recursive: true });
-    writeFileSync(filePath, JSON.stringify({
-      pid: process.pid,
-      recentUnits: state.recentUnits.slice(-20), // keep last 20 entries
-      stuckRecoveryAttempts: state.stuckRecoveryAttempts,
-      updatedAt: new Date().toISOString(),
-    }) + "\n");
+    setRuntimeKv("worker", s.workerId, STUCK_RECOVERY_ATTEMPTS_KEY, state.stuckRecoveryAttempts);
   } catch (err) {
     debugLog("autoLoop", { phase: "save-stuck-state-failed", error: err instanceof Error ? err.message : String(err) });
   }
@@ -335,7 +332,7 @@ export async function autoLoop(
   let iteration = 0;
   const dispatchContract = options?.dispatchContract ?? "legacy-direct";
   // Load persisted stuck state so counters survive session restarts (#3704)
-  const persisted = loadStuckState(s.basePath);
+  const persisted = loadStuckState(s);
   const loopState: LoopState = {
     recentUnits: persisted.recentUnits,
     stuckRecoveryAttempts: persisted.stuckRecoveryAttempts,
@@ -655,7 +652,7 @@ export async function autoLoop(
         consecutiveCooldowns = 0;
         recentErrorMessages.length = 0;
         deps.emitJournalEvent({ ts: new Date().toISOString(), flowId, seq: nextSeq(), eventType: "iteration-end", data: { iteration } });
-        saveStuckState(s.basePath, loopState); // persist across session restarts (#3704)
+        saveStuckState(s, loopState); // persist across session restarts (#3704)
         debugLog("autoLoop", { phase: "iteration-complete", iteration });
 
         if (reconcileResult.outcome === "milestone-complete") {
@@ -819,7 +816,7 @@ export async function autoLoop(
       consecutiveCooldowns = 0;
       recentErrorMessages.length = 0;
       deps.emitJournalEvent({ ts: new Date().toISOString(), flowId, seq: nextSeq(), eventType: "iteration-end", data: { iteration } });
-      saveStuckState(s.basePath, loopState); // persist across session restarts (#4382)
+      saveStuckState(s, loopState); // persist across session restarts (#4382)
       debugLog("autoLoop", { phase: "iteration-complete", iteration });
       finishTurn("completed");
     } catch (loopErr) {

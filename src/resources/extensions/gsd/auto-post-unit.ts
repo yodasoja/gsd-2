@@ -775,7 +775,9 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
         // executeTriageResolutions handles defer milestone creation even
         // without an active milestone/slice (the "all milestones complete"
         // scenario from #1562). inject/replan/quick-task still require mid+sid.
-        const triageResult = executeTriageResolutions(s.basePath, mid, sid);
+        // Phase C: write to canonical project root. copyPlanningArtifacts
+        // has been deleted, so triage writes land where readers consult.
+        const triageResult = executeTriageResolutions(s.canonicalProjectRoot, mid, sid);
 
         if (triageResult.injected > 0) {
           ctx.ui.notify(
@@ -940,10 +942,14 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
         try {
           const { milestone: mid, slice: sid } = parseUnitId(s.currentUnit.id);
           if (mid && sid) {
-            const regenerated = await regenerateIfMissing(s.basePath, mid, sid, "PLAN");
+            // Phase C: write to the canonical project root (#5236 scope)
+            // so non-symlinked worktrees no longer maintain a separate
+            // local .gsd/ projection. copyPlanningArtifacts has been
+            // deleted; reads + writes converge at projectRoot.
+            const regenerated = await regenerateIfMissing(s.canonicalProjectRoot, mid, sid, "PLAN");
             if (regenerated) {
               // Re-check after regeneration
-              triggerArtifactVerified = verifyExpectedArtifact(s.currentUnit.type, s.currentUnit.id, s.basePath);
+              triggerArtifactVerified = verifyExpectedArtifact(s.currentUnit.type, s.currentUnit.id, s.canonicalProjectRoot);
               if (triggerArtifactVerified) {
                 invalidateAllCaches();
               }
@@ -1188,7 +1194,8 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
 
           // 2. Delete SUMMARY.md for the task
           if (mid && sid && tid) {
-            const tasksDir = resolveTasksDir(s.basePath, mid, sid);
+            // Phase C: read+delete via canonical project root.
+            const tasksDir = resolveTasksDir(s.canonicalProjectRoot, mid, sid);
             if (tasksDir) {
               const summaryFile = join(tasksDir, buildTaskFileName(tid, "SUMMARY"));
               if (existsSync(summaryFile)) {
@@ -1199,7 +1206,7 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
 
           // 3. Delete the retry_on artifact (e.g. NEEDS-REWORK.md)
           if (trigger.retryArtifact) {
-            const retryArtifactPath = resolveHookArtifactPath(s.basePath, trigger.unitId, trigger.retryArtifact);
+            const retryArtifactPath = resolveHookArtifactPath(s.canonicalProjectRoot, trigger.unitId, trigger.retryArtifact);
             if (existsSync(retryArtifactPath)) {
               unlinkSync(retryArtifactPath);
             }

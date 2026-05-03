@@ -182,7 +182,7 @@ function openRawDb(path: string): unknown {
   return new Database(path);
 }
 
-export const SCHEMA_VERSION = 24;
+export const SCHEMA_VERSION = 25;
 
 function indexExists(db: DbAdapter, name: string): boolean {
   return !!db.prepare(
@@ -293,6 +293,32 @@ function createCoordinationTablesV24(db: DbAdapter): void {
   // index serves both targeted (target_worker = ?) and broadcast
   // (target_worker IS NULL) queries. Codex review LOW B4 documented.
   db.exec("CREATE INDEX IF NOT EXISTS idx_command_queue_pending ON command_queue(target_worker, claimed_at)");
+}
+
+/**
+ * Create the v25 runtime_kv table. Idempotent — uses IF NOT EXISTS.
+ *
+ * STRICT INVARIANT: runtime_kv is NON-CORRECTNESS-CRITICAL. UI cursors,
+ * dashboard caches, last-seen-version markers, resume cursors, and other
+ * "soft" state are OK. Anything that drives auto-mode control flow gets
+ * typed columns in unit_dispatches / workers / milestone_leases — never
+ * a bag of JSON in runtime_kv.
+ *
+ * Scope partitioning: ('global', '', key) for project-wide values;
+ * ('worker', worker_id, key) for per-worker state (resume cursors);
+ * ('milestone', milestone_id, key) for per-milestone soft state.
+ */
+function createRuntimeKvTableV25(db: DbAdapter): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS runtime_kv (
+      scope TEXT NOT NULL,
+      scope_id TEXT NOT NULL DEFAULT '',
+      key TEXT NOT NULL,
+      value_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (scope, scope_id, key)
+    )
+  `);
 }
 
 function dedupeVerificationEvidenceRows(db: DbAdapter): void {
@@ -666,6 +692,7 @@ function initSchema(db: DbAdapter, fileBacked: boolean): void {
     `);
 
     createCoordinationTablesV24(db);
+    createRuntimeKvTableV25(db);
 
     db.exec("CREATE INDEX IF NOT EXISTS idx_memories_active ON memories(superseded_by)");
 
@@ -1361,6 +1388,16 @@ function migrateSchema(db: DbAdapter): void {
       createCoordinationTablesV24(db);
       db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
         ":version": 24,
+        ":applied_at": new Date().toISOString(),
+      });
+    }
+
+    if (currentVersion < 25) {
+      // v25: runtime_kv non-correctness-critical key-value storage. See
+      // createRuntimeKvTableV25 for the full schema + invariants.
+      createRuntimeKvTableV25(db);
+      db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (:version, :applied_at)").run({
+        ":version": 25,
         ":applied_at": new Date().toISOString(),
       });
     }

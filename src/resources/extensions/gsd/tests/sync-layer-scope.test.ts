@@ -21,8 +21,10 @@ import {
   syncStateToProjectRootByScope,
   syncGsdStateToWorktree,
   syncGsdStateToWorktreeByScope,
-  reconcilePlanCheckboxesByScope,
 } from "../auto-worktree.ts";
+// Phase C: reconcilePlanCheckboxesByScope was deleted along with the
+// underlying reconcilePlanCheckboxes (auto-worktree.ts). Worktrees no
+// longer maintain a parallel .gsd/ projection that needs reconciliation.
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -124,19 +126,8 @@ describe("ByScope variants: mismatched-workspace identity assertion", () => {
     );
   });
 
-  test("reconcilePlanCheckboxesByScope throws when identityKeys differ", () => {
-    mkdirSync(join(tmpA, ".gsd"), { recursive: true });
-    mkdirSync(join(tmpB, ".gsd"), { recursive: true });
-    const wsA = createWorkspace(tmpA);
-    const wsB = createWorkspace(tmpB);
-    const scopeA = scopeMilestone(wsA, MID);
-    const scopeB = scopeMilestone(wsB, MID);
-
-    assert.throws(
-      () => reconcilePlanCheckboxesByScope(scopeA, scopeB),
-      /scope identity mismatch/,
-    );
-  });
+  // Phase C: reconcilePlanCheckboxesByScope identity-mismatch test
+  // removed along with the deleted function.
 });
 
 // ─── Suite: same-milestone, same-workspace path identity ────────────────────
@@ -425,18 +416,8 @@ describe("ByScope variants: milestoneId mismatch throws for milestone-aware wrap
     );
   });
 
-  test("reconcilePlanCheckboxesByScope throws when milestoneIds differ", () => {
-    const { projectDir, worktreeDir } = makeProjectAndWorktree(tmp);
-    const rootWs = createWorkspace(projectDir);
-    const worktreeWs = createWorkspace(worktreeDir);
-    const rootScope = scopeMilestone(rootWs, "M001-abc123");
-    const worktreeScope = scopeMilestone(worktreeWs, "M002-def456");
-
-    assert.throws(
-      () => reconcilePlanCheckboxesByScope(rootScope, worktreeScope),
-      /milestoneId mismatch/,
-    );
-  });
+  // Phase C: reconcilePlanCheckboxesByScope milestoneId-mismatch test
+  // removed along with the deleted function.
 
   test("syncGsdStateToWorktreeByScope does NOT throw when milestoneIds differ (workspace-only wrapper)", () => {
     const { projectDir, worktreeDir } = makeProjectAndWorktree(tmp);
