@@ -832,11 +832,11 @@ export async function autoLoop(
             markDispatchFailed(dispatchId, {
               errorSummary: `exception:${err instanceof Error ? err.message : String(err)}`,
             });
+            dispatchSettled = true;
           } catch (ledgerErr) {
             debugLog("autoLoop", { phase: "dispatch-ledger-write-failed", error: ledgerErr instanceof Error ? ledgerErr.message : String(ledgerErr) });
           }
         }
-        finishTurn("stopped", "execution", "exception");
         throw err;
       }
       if (unitPhaseResult.action === "next") {
@@ -871,11 +871,11 @@ export async function autoLoop(
             markDispatchFailed(dispatchId, {
               errorSummary: `exception:${err instanceof Error ? err.message : String(err)}`,
             });
+            dispatchSettled = true;
           } catch (ledgerErr) {
             debugLog("autoLoop", { phase: "dispatch-ledger-write-failed", error: ledgerErr instanceof Error ? ledgerErr.message : String(ledgerErr) });
           }
         }
-        finishTurn("stopped", "execution", "exception");
         throw err;
       }
       deps.uokObserver?.onPhaseResult("finalize", finalizeResult.action, {

@@ -25,6 +25,8 @@ import {
   emitJournalEvent,
   queryJournal,
 } from "./journal.js";
+import { readFileSync, unlinkSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import {
   findStaleWorkerForProject,
   getAllAutoWorkers,
@@ -33,7 +35,9 @@ import {
 import { getLatestForUnit, type DispatchStatus } from "./db/unit-dispatches.js";
 import { getRuntimeKv, setRuntimeKv, deleteRuntimeKv } from "./db/runtime-kv.js";
 import { _getAdapter, isDbAvailable } from "./gsd-db.js";
-import { normalizeRealPath } from "./paths.js";
+import { gsdRoot, normalizeRealPath } from "./paths.js";
+import { atomicWriteSync } from "./atomic-write.js";
+import { effectiveLockFile } from "./session-lock.js";
 
 export interface LockData {
   pid: number;
@@ -46,6 +50,20 @@ export interface LockData {
 }
 
 const SESSION_FILE_KV_KEY = "session_file";
+
+function lockPath(basePath: string): string {
+  return join(gsdRoot(basePath), effectiveLockFile());
+}
+
+function readLegacyLock(basePath: string): LockData | null {
+  try {
+    const p = lockPath(basePath);
+    if (!existsSync(p)) return null;
+    return JSON.parse(readFileSync(p, "utf-8")) as LockData;
+  } catch {
+    return null;
+  }
+}
 
 function findActiveWorkerForCurrentProcess(
   projectRootRealpath: string,
@@ -122,12 +140,21 @@ export function writeLock(
   unitId: string,
   sessionFile?: string,
 ): void {
-  void basePath;
-  void unitType;
-  void unitId;
-  if (!isDbAvailable()) return;
-  if (!sessionFile) return;
-  // Find our own worker row to scope the runtime_kv key.
+  try {
+    const data: LockData = {
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      unitType,
+      unitId,
+      unitStartedAt: new Date().toISOString(),
+      sessionFile,
+    };
+    atomicWriteSync(lockPath(basePath), JSON.stringify(data, null, 2));
+  } catch {
+    // Best-effort — never throw from the lock writer.
+  }
+
+  if (!isDbAvailable() || !sessionFile) return;
   try {
     const projectRoot = normalizeRealPath(basePath);
     const worker = findActiveWorkerForCurrentProcess(projectRoot);
@@ -146,6 +173,13 @@ export function writeLock(
  * stale session-file pointer.
  */
 export function clearLock(basePath: string): void {
+  try {
+    const p = lockPath(basePath);
+    if (existsSync(p)) unlinkSync(p);
+  } catch {
+    // Best-effort.
+  }
+
   if (!isDbAvailable()) return;
   try {
     const projectRoot = normalizeRealPath(basePath);
@@ -166,15 +200,16 @@ export function clearLock(basePath: string): void {
  * or the DB is unavailable.
  */
 export function readCrashLock(basePath: string): LockData | null {
-  if (!isDbAvailable()) return null;
-  try {
-    const projectRoot = normalizeRealPath(basePath);
-    const stale = findStaleWorkerForProject(projectRoot);
-    if (!stale) return null;
-    return workerToLockData(stale);
-  } catch {
-    return null;
+  if (isDbAvailable()) {
+    try {
+      const projectRoot = normalizeRealPath(basePath);
+      const stale = findStaleWorkerForProject(projectRoot);
+      if (stale) return workerToLockData(stale);
+    } catch {
+      // Fall through to the legacy lock-file compatibility path.
+    }
   }
+  return readLegacyLock(basePath);
 }
 
 /**
