@@ -19,6 +19,8 @@ import {
   decideModelPolicyBlocked,
   decideMinRequestInterval,
   decideWorkflowLoop,
+  formatDispatchExceptionSummary,
+  formatUnhandledDispatchErrorSummary,
 } from "../auto/workflow-kernel.ts";
 
 test("decideWorkflowLoop continues when dispatch preconditions are valid", () => {
@@ -514,4 +516,27 @@ test("decideDispatchNodeKind maps workflow unit types to scheduler node kinds", 
   assert.equal(decideDispatchNodeKind("replan-slice"), "reprocess");
   assert.equal(decideDispatchNodeKind("reassess-roadmap"), "reprocess");
   assert.equal(decideDispatchNodeKind("execute-task"), "unit");
+});
+
+test("formatDispatchExceptionSummary preserves error and non-error messages", () => {
+  assert.equal(
+    formatDispatchExceptionSummary({ error: new Error("unit failed") }),
+    "exception:unit failed",
+  );
+  assert.equal(
+    formatDispatchExceptionSummary({ error: "string failure" }),
+    "exception:string failure",
+  );
+});
+
+test("formatUnhandledDispatchErrorSummary truncates long messages", () => {
+  assert.equal(
+    formatUnhandledDispatchErrorSummary({ error: new Error("unexpected") }),
+    "unhandled-error:unexpected",
+  );
+  const longMessage = "x".repeat(250);
+  assert.equal(
+    formatUnhandledDispatchErrorSummary({ error: longMessage }),
+    `unhandled-error:${"x".repeat(200)}`,
+  );
 });

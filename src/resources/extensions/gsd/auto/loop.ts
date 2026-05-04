@@ -68,6 +68,8 @@ import {
   decideModelPolicyBlocked,
   decideMinRequestInterval,
   decideWorkflowLoop,
+  formatDispatchExceptionSummary,
+  formatUnhandledDispatchErrorSummary,
 } from "./workflow-kernel.js";
 import { createWorkflowJournalReporter } from "./workflow-journal-reporter.js";
 import { createWorkflowPhaseReporter } from "./workflow-phase-reporter.js";
@@ -863,7 +865,7 @@ export async function autoLoop(
         if (dispatchId !== null) {
           try {
             markDispatchFailed(dispatchId, {
-              errorSummary: `exception:${err instanceof Error ? err.message : String(err)}`,
+              errorSummary: formatDispatchExceptionSummary({ error: err }),
             });
             dispatchSettled = true;
           } catch (ledgerErr) {
@@ -902,7 +904,7 @@ export async function autoLoop(
         if (dispatchId !== null) {
           try {
             markDispatchFailed(dispatchId, {
-              errorSummary: `exception:${err instanceof Error ? err.message : String(err)}`,
+              errorSummary: formatDispatchExceptionSummary({ error: err }),
             });
             dispatchSettled = true;
           } catch (ledgerErr) {
@@ -967,7 +969,9 @@ export async function autoLoop(
       const msg = loopErr instanceof Error ? loopErr.message : String(loopErr);
       if (dispatchId !== null && !dispatchSettled && !(loopErr instanceof ModelPolicyDispatchBlockedError)) {
         try {
-          markDispatchFailed(dispatchId, { errorSummary: `unhandled-error:${msg.slice(0, 200)}` });
+          markDispatchFailed(dispatchId, {
+            errorSummary: formatUnhandledDispatchErrorSummary({ error: loopErr }),
+          });
           dispatchSettled = true;
         } catch (err) {
           debugLog("autoLoop", {

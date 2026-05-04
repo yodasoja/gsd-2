@@ -177,6 +177,10 @@ export type DispatchNodeKind =
 
 export type DispatchSidecarKind = "hook" | "triage" | "quick-task" | string;
 
+export interface DispatchLedgerErrorInput {
+  error: unknown;
+}
+
 export interface WorkflowLoopInput {
   active: boolean;
   iteration: number;
@@ -480,4 +484,14 @@ export function decideDispatchNodeKind(
     return "reprocess";
   }
   return "unit";
+}
+
+export function formatDispatchExceptionSummary(input: DispatchLedgerErrorInput): string {
+  const message = input.error instanceof Error ? input.error.message : String(input.error);
+  return `exception:${message}`;
+}
+
+export function formatUnhandledDispatchErrorSummary(input: DispatchLedgerErrorInput): string {
+  const message = input.error instanceof Error ? input.error.message : String(input.error);
+  return `unhandled-error:${message.slice(0, 200)}`;
 }
