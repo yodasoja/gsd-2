@@ -19,7 +19,7 @@ import { ChildProcess } from 'node:child_process'
 
 import { RpcClient, SessionManager } from '@gsd/pi-coding-agent'
 import type { SessionInfo } from '@gsd/pi-coding-agent'
-import { getProjectSessionsDir } from '../project-sessions.js'
+import { getProjectSessionsDir } from '../app/project-sessions.js'
 import { loadAndValidateAnswerFile, AnswerInjector } from './headless-answers.js'
 
 import {
