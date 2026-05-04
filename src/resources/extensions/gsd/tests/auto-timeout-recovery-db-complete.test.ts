@@ -27,17 +27,25 @@ test("#4649: timeout recovery treats DB-complete execute-task as recovered", asy
       sequence: 1,
     });
 
-    const ctx = { ui: { notify: () => {} } } as any;
+    const notifications: string[] = [];
+    const ctx = { ui: { notify: (msg: string) => notifications.push(msg) } } as any;
     const pi = { sendMessage: () => {} } as any;
+    const unitRecoveryCount = new Map<string, number>();
     const rctx: RecoveryContext = {
       basePath: base,
       verbose: false,
       currentUnitStartedAt: Date.now(),
-      unitRecoveryCount: new Map(),
+      unitRecoveryCount,
     };
 
     const outcome = await recoverTimedOutUnit(ctx, pi, "execute-task", "M001/S01/T01", "idle", rctx);
     assert.equal(outcome, "recovered");
+    assert.equal(unitRecoveryCount.has("execute-task/M001/S01/T01"), false, "DB-complete fast path should clear retry counter");
+    assert.equal(
+      notifications.some(m => m.includes("already completed on disk") && !m.includes("steering")),
+      true,
+      "should finalize via completion path, not steering retry",
+    );
   } finally {
     try { closeDatabase(); } catch {}
     rmSync(base, { recursive: true, force: true });
