@@ -585,6 +585,7 @@ describe("state-machine-live-validation", () => {
       const result = await handleCompleteMilestone(makeMilestoneParams("M001") as any, base);
       assert.ok(!("error" in result), `already-complete milestone should be accepted: ${JSON.stringify(result)}`);
       assert.equal(result.alreadyComplete, true);
+      assert.match(result.summaryPath, /M001-SUMMARY\.md$/);
       assert.ok(isClosedStatus(getMilestone("M001")!.status), "milestone remains closed");
     });
   });
