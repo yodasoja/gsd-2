@@ -212,15 +212,31 @@ test("responsive contract: web host honours viewport-driven chrome", async (t) =
     page.locator('[data-testid="mobile-milestone-toggle"]').waitFor({ state: "visible", timeout: 5_000 }),
     "mobile-milestone-toggle must be visible at mobile viewport",
   )
+  await page.locator('[data-testid="mobile-milestone-toggle"]').click()
+  await page.waitForFunction(
+    () => {
+      const el = document.querySelector('[data-testid="mobile-milestone-drawer"]') as HTMLElement | null
+      return Boolean(el) && /translate-x-0/.test(el!.className)
+    },
+    null,
+    { timeout: 5_000 },
+  )
+  await page.locator('[data-testid="mobile-milestone-overlay"]').click()
+  await page.waitForFunction(
+    () => {
+      const el = document.querySelector('[data-testid="mobile-milestone-drawer"]') as HTMLElement | null
+      return Boolean(el) && /-translate-x-full/.test(el!.className)
+    },
+    null,
+    { timeout: 5_000 },
+  )
 
-  // Touch-target minimum: hamburger button must be ≥ 40px square so
-  // the WCAG-recommended 44×44 hit area can be reached without scaling
-  // (Tailwind's h-10 w-10 = 40px; we accept that as the floor).
+  // Touch-target minimum: hamburger button must be ≥ 44px square.
   const toggleBox = await page.locator('[data-testid="mobile-nav-toggle"]').boundingBox()
   assert.ok(toggleBox, "mobile-nav-toggle must have a bounding box")
   assert.ok(
-    toggleBox!.height >= 40 && toggleBox!.width >= 40,
-    `mobile-nav-toggle must meet the 40px touch-target floor, got ${JSON.stringify(toggleBox)}`,
+    toggleBox!.height >= 44 && toggleBox!.width >= 44,
+    `mobile-nav-toggle must meet the 44px touch-target floor, got ${JSON.stringify(toggleBox)}`,
   )
 
   // The branch / project-cwd label uses `hidden sm:inline` — at 375px
@@ -281,7 +297,7 @@ test("responsive contract: web host honours viewport-driven chrome", async (t) =
 
   // ───────────────────────────────────────────────────────────────────
   // 6. Viewport meta — the layout.tsx Viewport export must reach the
-  //    rendered <head> with width=device-width and a maximum-scale.
+  //    rendered <head> with width=device-width.
   // ───────────────────────────────────────────────────────────────────
   const viewportMeta = await page
     .locator('meta[name="viewport"]')
@@ -291,10 +307,5 @@ test("responsive contract: web host honours viewport-driven chrome", async (t) =
     viewportMeta!,
     /width=device-width/,
     `viewport meta must declare device-width, got: ${viewportMeta}`,
-  )
-  assert.match(
-    viewportMeta!,
-    /maximum-scale=1/,
-    `viewport meta must pin maximum-scale=1, got: ${viewportMeta}`,
   )
 })

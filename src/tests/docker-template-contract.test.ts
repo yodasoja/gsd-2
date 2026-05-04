@@ -85,6 +85,7 @@ function parseDockerfile(source: string): DockerfileInstruction[] {
 function dockerAvailable(): boolean {
   try {
     execFileSync("docker", ["--version"], { stdio: ["ignore", "ignore", "ignore"] });
+    execFileSync("docker", ["compose", "version"], { stdio: ["ignore", "ignore", "ignore"] });
     return true;
   } catch {
     return false;
@@ -130,6 +131,23 @@ test("docker-compose.yaml parses as YAML and exposes the gsd service contract", 
   // Security contract: no hardcoded user override on the service. The
   // entrypoint remaps PUID/PGID — a top-level `user:` would defeat that.
   assert.equal(gsd.user, undefined, "gsd service must not pin a user: directive");
+
+  // Minimal compose must not include runtime healthcheck wiring.
+  assert.equal(gsd.healthcheck, undefined, "minimal compose must not define healthcheck");
+
+  // Minimal compose must not surface UID/GID remap env vars.
+  const env = gsd.environment;
+  const hasEnvKey = (key: string): boolean => {
+    if (Array.isArray(env)) {
+      return env.some((e) => typeof e === "string" && (e === key || e.startsWith(`${key}=`)));
+    }
+    if (env && typeof env === "object") {
+      return Object.prototype.hasOwnProperty.call(env, key);
+    }
+    return false;
+  };
+  assert.equal(hasEnvKey("PUID"), false, "minimal compose must not define PUID");
+  assert.equal(hasEnvKey("PGID"), false, "minimal compose must not define PGID");
 });
 
 // ─── 2. docker-compose.full.yaml — reference template ─────────────────────
@@ -221,7 +239,14 @@ test("Dockerfile.sandbox directive structure satisfies the runtime contract", ()
   // The current sandbox uses gosu via entrypoint to drop privileges; in
   // that case the contract is the entrypoint script itself. Accept either
   // form: a USER directive OR an ENTRYPOINT that hands off to gosu.
-  const hasUserDirective = instructions.some((i) => i.directive === "USER");
+  const hasUserDirective = instructions.some((i) => {
+    if (i.directive !== "USER") return false;
+    const firstToken = i.args.split(/\s+/)[0]?.split(":")[0]?.trim().toLowerCase() ?? "";
+    if (!firstToken) return false;
+    if (firstToken === "root") return false;
+    if (/^\d+$/.test(firstToken) && Number(firstToken) === 0) return false;
+    return true;
+  });
   const hasGosuEntrypoint = instructions.some(
     (i) => i.directive === "ENTRYPOINT" && /entrypoint\.sh/.test(i.args),
   );

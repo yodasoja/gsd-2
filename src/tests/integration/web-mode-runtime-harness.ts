@@ -157,15 +157,37 @@ function withBuildLock(lockName: string, fn: () => void): void {
   const lockRoot = join(projectRoot, ".test-build-locks")
   mkdirSync(lockRoot, { recursive: true })
   const lockDir = join(lockRoot, lockName)
+  const ownerFile = join(lockDir, "owner.json")
   const start = Date.now()
   const timeoutMs = 10 * 60 * 1000 // builds can be slow on CI
+  const staleMs = 2 * 60 * 1000
+
+  const releaseLock = () => {
+    try {
+      rmSync(lockDir, { recursive: true, force: true })
+    } catch {
+      // best-effort release
+    }
+  }
+
   while (true) {
     try {
       mkdirSync(lockDir)
+      writeFileSync(ownerFile, JSON.stringify({ pid: process.pid, createdAt: Date.now() }), "utf-8")
       break
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code
       if (code !== "EEXIST") throw err
+      try {
+        const raw = readFileSync(ownerFile, "utf-8")
+        const owner = JSON.parse(raw) as { createdAt?: number }
+        if (typeof owner.createdAt === "number" && Date.now() - owner.createdAt > staleMs) {
+          rmSync(lockDir, { recursive: true, force: true })
+          continue
+        }
+      } catch {
+        // no owner metadata or unreadable file; keep waiting
+      }
       if (Date.now() - start > timeoutMs) {
         throw new Error(`Timed out waiting for ${lockName} build lock at ${lockDir}`)
       }
@@ -182,14 +204,16 @@ function withBuildLock(lockName: string, fn: () => void): void {
       }
     }
   }
+  const onSigint = () => releaseLock()
+  const onSigterm = () => releaseLock()
+  process.once("SIGINT", onSigint)
+  process.once("SIGTERM", onSigterm)
   try {
     fn()
   } finally {
-    try {
-      rmSync(lockDir, { recursive: true, force: true })
-    } catch {
-      // best-effort release
-    }
+    process.removeListener("SIGINT", onSigint)
+    process.removeListener("SIGTERM", onSigterm)
+    releaseLock()
   }
 }
 
