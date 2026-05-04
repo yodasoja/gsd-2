@@ -16,7 +16,7 @@
 
 import test from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { setTimeout as delay } from "node:timers/promises"
@@ -122,6 +122,8 @@ async function setViewport(page: Page, vp: { width: number; height: number }): P
 test("responsive contract: web host honours viewport-driven chrome", async (t) => {
   const tempRoot = mkdtempSync(join(tmpdir(), "gsd-web-responsive-contract-"))
   const tempHome = join(tempRoot, "home")
+  const projectCwd = join(tempRoot, "project")
+  mkdirSync(projectCwd, { recursive: true })
   let port: number | null = null
   let browser: Browser | null = null
   let context: BrowserContext | null = null
@@ -147,6 +149,7 @@ test("responsive contract: web host honours viewport-driven chrome", async (t) =
     env: {
       GSD_WEB_TEST_FAKE_API_KEY_VALIDATION: "1",
       GSD_WEB_TEST_DISABLE_EXTERNAL_CLI: "1",
+      GSD_WEB_PROJECT_CWD: projectCwd,
     },
   })
   port = launch.port
