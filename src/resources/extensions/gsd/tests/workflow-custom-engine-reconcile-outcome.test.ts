@@ -15,8 +15,12 @@ function makeDeps(): {
 } {
   const calls: unknown[] = [];
   const deps: HandleCustomEngineReconcileOutcomeDeps = {
-    stopAuto: async reason => calls.push(["stopAuto", reason]),
-    pauseAuto: async () => calls.push(["pauseAuto"]),
+    stopAuto: async reason => {
+      calls.push(["stopAuto", reason]);
+    },
+    pauseAuto: async () => {
+      calls.push(["pauseAuto"]);
+    },
     report: (action, details) => calls.push(["report", action, details]),
     finishTurn: (status, failureClass, error) => calls.push(["finishTurn", status, failureClass, error]),
   };

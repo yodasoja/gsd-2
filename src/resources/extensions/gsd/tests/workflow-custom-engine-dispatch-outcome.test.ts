@@ -12,7 +12,9 @@ test("handleCustomEngineDispatchOutcome stops auto on stop decision", async () =
   const flow = await handleCustomEngineDispatchOutcome({
     decision: { action: "stop", reason: "done" },
     deps: {
-      stopAuto: async reason => calls.push(["stopAuto", reason]),
+      stopAuto: async reason => {
+        calls.push(["stopAuto", reason]);
+      },
     },
   });
 
@@ -26,7 +28,9 @@ test("handleCustomEngineDispatchOutcome continues on skip decision", async () =>
   const flow = await handleCustomEngineDispatchOutcome({
     decision: { action: "skip" },
     deps: {
-      stopAuto: async reason => calls.push(["stopAuto", reason]),
+      stopAuto: async reason => {
+        calls.push(["stopAuto", reason]);
+      },
     },
   });
 
@@ -40,7 +44,9 @@ test("handleCustomEngineDispatchOutcome dispatches without side effects", async 
   const flow = await handleCustomEngineDispatchOutcome({
     decision: { action: "dispatch" },
     deps: {
-      stopAuto: async reason => calls.push(["stopAuto", reason]),
+      stopAuto: async reason => {
+        calls.push(["stopAuto", reason]);
+      },
     },
   });
 
