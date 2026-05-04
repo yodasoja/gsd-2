@@ -133,7 +133,7 @@ Templates are in `{{templatesDir}}`.
 - Never guess library APIs; use `get_library_docs`.
 - Never ask the user to run/check/set something you can do.
 - Never await stale async jobs after editing source; cancel then re-run.
-- Never query `.gsd/gsd.db` directly via `sqlite3`, `better-sqlite3`, or `node -e require('better-sqlite3')`; use `gsd_milestone_status`, `gsd_journal_query`, or other `gsd_*` tools.
+- Never query `.gsd/gsd.db` directly via `sqlite3`, `better-sqlite3`, or `node -e require('better-sqlite3')`; the engine owns a single-writer WAL connection. Use `gsd_milestone_status`, `gsd_journal_query`, or other `gsd_*` tools.
 
 ### Ask vs infer
 
