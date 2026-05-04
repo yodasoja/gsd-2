@@ -15,6 +15,7 @@ import {
 } from "../legacy-telemetry.ts";
 import { closeDatabase } from "../gsd-db.ts";
 import { deriveState, invalidateStateCache } from "../state.ts";
+import { _resetLogs, peekLogs, setStderrLoggingEnabled } from "../workflow-logger.ts";
 
 test("legacy telemetry exposes every Phase 8 cleanup counter", () => {
   resetLegacyTelemetry();
@@ -39,6 +40,27 @@ test("legacy telemetry increments positive finite amounts only", () => {
   incrementLegacyTelemetry("legacy.workflowEngineUsed", Number.NaN);
 
   assert.equal(getLegacyTelemetry()["legacy.workflowEngineUsed"], 3);
+});
+
+test("legacy telemetry emits one actionable diagnostic per counter", () => {
+  const previousStderr = setStderrLoggingEnabled(false);
+  try {
+    resetLegacyTelemetry();
+    _resetLogs();
+
+    incrementLegacyTelemetry("legacy.mcpAliasUsed");
+    incrementLegacyTelemetry("legacy.mcpAliasUsed");
+
+    const logs = peekLogs();
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0]?.component, "migration");
+    assert.equal(logs[0]?.context?.counter, "legacy.mcpAliasUsed");
+    assert.match(logs[0]?.message ?? "", /canonical gsd_\* tool name/);
+  } finally {
+    _resetLogs();
+    resetLegacyTelemetry();
+    setStderrLoggingEnabled(previousStderr);
+  }
 });
 
 test("deriveState increments markdown fallback telemetry on explicit legacy fallback", async () => {
