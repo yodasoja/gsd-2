@@ -11,6 +11,17 @@ export type WorkflowStopReason =
   | "missing-command-context"
   | "session-lock-lost";
 
+export type DispatchClaimSkipReason = "already-active" | "stale-lease";
+
+export type DispatchClaimInput =
+  | { kind: "opened"; dispatchId: number }
+  | { kind: "skip"; reason: DispatchClaimSkipReason }
+  | { kind: "degraded" };
+
+export type DispatchClaimDecision =
+  | { action: "run"; dispatchId: number | null }
+  | { action: "skip"; reason: DispatchClaimSkipReason };
+
 export interface WorkflowLoopInput {
   active: boolean;
   iteration: number;
@@ -56,4 +67,25 @@ export function decideWorkflowLoop(input: WorkflowLoopInput): WorkflowLoopAction
   }
 
   return { action: "continue" };
+}
+
+export function decideDispatchClaim(input: DispatchClaimInput): DispatchClaimDecision {
+  if (input.kind === "skip") {
+    return {
+      action: "skip",
+      reason: input.reason,
+    };
+  }
+
+  if (input.kind === "opened") {
+    return {
+      action: "run",
+      dispatchId: input.dispatchId,
+    };
+  }
+
+  return {
+    action: "run",
+    dispatchId: null,
+  };
 }

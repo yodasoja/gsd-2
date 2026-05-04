@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { decideWorkflowLoop } from "../auto/workflow-kernel.ts";
+import { decideDispatchClaim, decideWorkflowLoop } from "../auto/workflow-kernel.ts";
 
 test("decideWorkflowLoop continues when dispatch preconditions are valid", () => {
   assert.deepEqual(
@@ -85,5 +85,26 @@ test("decideWorkflowLoop preserves session lock loss detail", () => {
       reason: "session-lock-lost",
       message: "Session lock lost: pid mismatch.",
     },
+  );
+});
+
+test("decideDispatchClaim runs with an opened dispatch id", () => {
+  assert.deepEqual(
+    decideDispatchClaim({ kind: "opened", dispatchId: 42 }),
+    { action: "run", dispatchId: 42 },
+  );
+});
+
+test("decideDispatchClaim runs degraded dispatches without a ledger id", () => {
+  assert.deepEqual(
+    decideDispatchClaim({ kind: "degraded" }),
+    { action: "run", dispatchId: null },
+  );
+});
+
+test("decideDispatchClaim skips claimed units with a stable reason", () => {
+  assert.deepEqual(
+    decideDispatchClaim({ kind: "skip", reason: "already-active" }),
+    { action: "skip", reason: "already-active" },
   );
 });

@@ -53,7 +53,7 @@ import type { UokGraphNode } from "../uok/contracts.js";
 import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { normalizeRealPath } from "../paths.js";
-import { decideWorkflowLoop } from "./workflow-kernel.js";
+import { decideDispatchClaim, decideWorkflowLoop } from "./workflow-kernel.js";
 
 // ── Stuck detection persistence (#3704) ──────────────────────────────────
 // Phase C migration: stuck-state.json deleted in favor of DB-backed
@@ -834,11 +834,18 @@ export async function autoLoop(
       // — those degraded paths fall through to the existing single-worker
       // semantics with no ledger entry, preserving back-compat.
       const dispatchClaim = openDispatchClaim(s, flowId, turnId, iterData);
-      if (dispatchClaim.kind === "skip") {
-        finishTurn("skipped", "execution", dispatchClaim.reason);
+      const dispatchDecision = decideDispatchClaim(
+        dispatchClaim.kind === "opened"
+          ? { kind: "opened", dispatchId: dispatchClaim.dispatchId }
+          : dispatchClaim.kind === "skip"
+            ? { kind: "skip", reason: dispatchClaim.reason }
+            : { kind: "degraded" },
+      );
+      if (dispatchDecision.action === "skip") {
+        finishTurn("skipped", "execution", dispatchDecision.reason);
         continue;
       }
-      dispatchId = dispatchClaim.kind === "opened" ? dispatchClaim.dispatchId : null;
+      dispatchId = dispatchDecision.dispatchId;
 
       let unitPhaseResult: Awaited<ReturnType<typeof runUnitPhaseViaContract>>;
       try {
