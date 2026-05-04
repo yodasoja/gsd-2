@@ -81,6 +81,7 @@ import { completeWorkflowIteration } from "./workflow-iteration-completion.js";
 import { createWorkflowJournalReporter } from "./workflow-journal-reporter.js";
 import { createWorkflowPhaseReporter } from "./workflow-phase-reporter.js";
 import { createWorkflowTurnReporter } from "./workflow-turn-reporter.js";
+import { validateWorkflowSessionLock } from "./workflow-session-lock.js";
 import { dequeueSidecarItem } from "./workflow-sidecar-queue.js";
 
 // ── Stuck detection persistence (#3704) ──────────────────────────────────
@@ -428,32 +429,26 @@ export async function autoLoop(
         emitDequeue: payload => journalReporter.emit("sidecar-dequeue", payload),
       });
 
-      const sessionLockBase = deps.lockBase();
-      if (sessionLockBase) {
-        const lockStatus = deps.validateSessionLock(sessionLockBase);
-        const lockDecision = decideWorkflowLoop({
-          active: s.active,
-          iteration,
-          maxIterations: MAX_LOOP_ITERATIONS,
-          hasCommandContext: true,
-          sessionLockValid: lockStatus.valid,
-          sessionLockReason: lockStatus.failureReason ?? "unknown",
-        });
-        if (lockDecision.action === "stop" && lockDecision.reason === "session-lock-lost") {
-          debugLog("autoLoop", {
+      const sessionLockOutcome = validateWorkflowSessionLock({
+        active: s.active,
+        iteration,
+        maxIterations: MAX_LOOP_ITERATIONS,
+        deps: {
+          lockBase: deps.lockBase,
+          validateSessionLock: deps.validateSessionLock,
+          handleLostSessionLock: lockStatus => deps.handleLostSessionLock(ctx, lockStatus),
+          logInvalidSessionLock: details => debugLog("autoLoop", {
             phase: "session-lock-invalid",
-            reason: lockStatus.failureReason ?? "unknown",
-            existingPid: lockStatus.existingPid,
-            expectedPid: lockStatus.expectedPid,
-          });
-          deps.handleLostSessionLock(ctx, lockStatus);
-          debugLog("autoLoop", {
+            ...details,
+          }),
+          logSessionLockExit: details => debugLog("autoLoop", {
             phase: "exit",
-            reason: lockDecision.reason,
-            detail: lockStatus.failureReason ?? "unknown",
-          });
-          break;
-        }
+            ...details,
+          }),
+        },
+      });
+      if (sessionLockOutcome.action === "stop" && sessionLockOutcome.reason === "session-lock-lost") {
+        break;
       }
 
       const ic: IterationContext = { ctx, pi, s, deps, prefs, iteration, flowId, nextSeq };
