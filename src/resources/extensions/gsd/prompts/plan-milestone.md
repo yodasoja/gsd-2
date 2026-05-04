@@ -18,16 +18,15 @@ If only the file or only DB rows exist, the prior write was incomplete; plan nor
 
 ## Your Role in the Pipeline
 
-You are the first deep look at this milestone. Understand codebase, docs, and technology choices, then decompose into demoable slices. Later units plan and execute each slice; your roadmap sets their frame.
+You are the first deep look at this milestone. Understand codebase, docs, and technology choices, then decompose into demoable slices. Later units plan and execute each slice from your roadmap.
 
 ### Explore First, Then Decompose
 
 Before decomposing:
-
 1. Explore with `rg`, `find`, targeted reads, or `scout` for large unfamiliar areas.
 2. Use `resolve_library` / `get_library_docs` for unfamiliar libraries only.
 3. **Skill Discovery ({{skillDiscoveryMode}}):**{{skillDiscoveryInstructions}}
-4. If `.gsd/REQUIREMENTS.md` exists, treat Active requirements as the capability contract. Identify table stakes, omissions, overbuilt risks, and domain-standard behaviors. If missing, continue in legacy mode and note the gap.
+4. If `.gsd/REQUIREMENTS.md` exists, treat Active requirements as the capability contract; otherwise note the gap.
 
 ### Strategic Questions to Answer
 
@@ -36,7 +35,7 @@ Before decomposing:
 - What boundary contracts matter?
 - What constraints does the existing codebase impose?
 - Are there known failure modes that should shape slice ordering?
-- If requirements exist: which table stakes, expected behaviors, continuity, launchability, or failure visibility items are missing, optional, or out of scope?
+- If requirements exist: what table stakes, continuity, launchability, or failure-visibility items are missing, optional, or out of scope?
 
 ### Source Files
 
@@ -51,7 +50,7 @@ Then:
 2. {{skillActivation}}
 3. Create only as many demoable vertical slices as the work genuinely needs.
 4. Order by risk, high-risk first.
-5. Call `gsd_plan_milestone` to persist milestone fields, slice rows, and **Horizontal Checklist** through the DB-backed path. Fill the checklist with cross-cutting concerns considered during planning: requirements re-read, decisions re-evaluated, graceful shutdown, revenue paths, auth boundary, shared resources, reconnection. Omit for trivial milestones. Do **not** write `{{outputPath}}`, `ROADMAP.md`, or other planning artifacts manually; the tool owns rendering and persistence.
+5. Call `gsd_plan_milestone` to persist milestone fields, slice rows, and **Horizontal Checklist** through the DB-backed path. Fill checklist concerns considered during planning: requirements, decisions, shutdown, revenue, auth, shared resources, reconnection. Omit for trivial milestones. Do **not** write `{{outputPath}}`, `ROADMAP.md`, or other planning artifacts manually; the tool owns rendering and persistence.
 6. If planning produced structural decisions (slice ordering, technology choices, scope exclusions), call `gsd_decision_save` for each; the tool assigns IDs and regenerates `.gsd/DECISIONS.md`.
 
 ## Requirement Mapping Rules
@@ -66,27 +65,25 @@ Then:
 ## Planning Doctrine
 
 Apply these when decomposing and ordering slices:
-
-- **Risk-first means proof-first.** Earliest slices ship real behavior through uncertain paths. Do not plan spikes, proof-of-concept slices, or validation-only slices.
-- **Every slice is vertical, demoable, and shippable.** The intended user can exercise it through UI, CLI, API client, curl, protocol consumer, or extension API.
-- **Brownfield bias.** Ground slices in existing modules, conventions, and seams.
-- **Each slice establishes a downstream surface.** Name the API, data shape, integration path, or user capability later slices can use.
-- **Avoid foundation-only slices.** If infrastructure is not itself the product surface, pair it with usable behavior.
-- **Verification-first.** Define concrete evidence before details. Demo lines say what is proven and how.
-- **Integrated reality.** If multiple runtime boundaries are involved, include a slice that proves the assembled system through the real entrypoint or runtime path.
-- **Truthful demo lines only.** If proof is fixture/test-only, say so; do not imply live end-to-end behavior.
-- **Completion must imply capability.** If all slices pass, the milestone promise works at the proof level claimed.
-- **Don't invent risks.** Straightforward work can ship in smart order without ceremony.
-- **Ship features, not proofs.** Prefer real data and real interfaces. Use clearly marked realistic stubs only when necessary.
-- **Dependency format is comma-separated, never range syntax.** Write `depends:[S01,S02,S03]`, not `depends:[S01-S03]`. Range syntax blocks the slice.
-- **Ambition matches the milestone.** The roadmap must deliver what the context promises.
-- **Right-size the decomposition.** One small coherent feature can be one slice; do not cram independent capabilities together.
+- Risk-first means proof-first; earliest slices ship real behavior through uncertain paths, not spikes or validation-only slices.
+- Every slice is vertical, demoable, and shippable through UI, CLI, API client, curl, protocol consumer, or extension API.
+- Ground slices in existing modules, conventions, and seams.
+- Each slice establishes a downstream surface: API, data shape, integration path, or user capability.
+- Avoid foundation-only slices unless infrastructure is itself the product surface.
+- Define evidence before details; demo lines say what is proven and how.
+- If multiple runtime boundaries are involved, include a real-entrypoint integration slice.
+- Truthful demo lines only: if proof is fixture/test-only, say so.
+- Completion must imply the milestone capability at the claimed proof level.
+- Do not invent risks; straightforward work can ship in smart order.
+- Ship features, not proofs; use clearly marked realistic stubs only when necessary.
+- **Dependency format is comma-separated, never range syntax.** Write `depends:[S01,S02,S03]`, not `depends:[S01-S03]`.
+- Roadmap ambition must match the milestone; right-size decomposition.
 
 ## Progressive Planning (ADR-011)
 
 If `phases.progressive_planning` is enabled and the roadmap has **2+ slices**, plan S01 fully and S02+ as sketches unless a later slice is trivially determined.
 
-A **sketch slice** keeps title, risk, depends, demo line, and 2-3 sentence `sketchScope`. Do not decompose it into tasks. Provide a one-sentence `goal`; leave `successCriteria`, `proofLevel`, `integrationClosure`, and `observabilityImpact` blank unless genuinely known. Later `refine-slice` expands it using real state and prior slice SUMMARY.
+A **sketch slice** keeps title, risk, depends, demo line, and 2-3 sentence `sketchScope`. Do not decompose it into tasks. Provide one-sentence `goal`; leave other fields blank unless genuinely known. Later `refine-slice` expands it from real state and prior slice SUMMARY.
 
 **To mark a slice as a sketch in the `gsd_plan_milestone` tool call:** set `isSketch: true` and `sketchScope: "<2-3 sentence scope>"` on that slice entry.
 
@@ -98,26 +95,17 @@ If the preference is off, ignore this section and plan every slice fully.
 
 If the roadmap has one slice, also plan S01 and its tasks inline:
 
-1. After `gsd_plan_milestone` returns, immediately call `gsd_plan_slice` for S01 with the full task breakdown
-2. Use the inlined **Slice Plan** and **Task Plan** templates to structure tool parameters
+1. After `gsd_plan_milestone` returns, call `gsd_plan_slice` for S01 with full task breakdown.
+2. Use inlined **Slice Plan** and **Task Plan** templates for tool parameters.
 3. Keep simple slices lean. Omit Proof Level, Integration Closure, and Observability if all would be "none"; executable verification commands are enough.
 
 Do **not** write plan files manually; use DB-backed tools so state stays consistent.
 
 ## Secret Forecasting
 
-After writing the roadmap, analyze slices and boundary maps for external service dependencies: APIs, SaaS, cloud providers, credentialed databases, OAuth providers, etc.
+After writing the roadmap, analyze slices and boundary maps for external service dependencies: APIs, SaaS, cloud providers, credentialed databases, OAuth providers.
 
-If this milestone requires any external API keys or secrets:
-
-1. Use the inlined **Secrets Manifest** template for the expected format
-2. Write `{{secretsOutputPath}}` with one H3 per predicted secret:
-   - **Service** — the external service name
-   - **Dashboard** — direct URL to the console/dashboard page where the key is created, not a generic homepage
-   - **Format hint** — what the key looks like (e.g. `sk-...`, `ghp_...`, 40-char hex, UUID)
-   - **Status** — always `pending` during planning
-   - **Destination** — `dotenv`, `vercel`, or `convex` depending on where the key will be consumed
-   - Numbered steps for obtaining the key: navigate to dashboard → create project → generate key → copy
+If external API keys or secrets are required, use the inlined **Secrets Manifest** template and write `{{secretsOutputPath}}` with one H3 per secret: service, dashboard URL, format hint, status `pending`, destination, and numbered obtain-key steps.
 
 If no external API keys or secrets are required, skip this step; do not create an empty manifest.
 
