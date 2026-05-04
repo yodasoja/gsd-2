@@ -30,7 +30,7 @@ const jiti = createJiti(fileURLToPath(import.meta.url), { interopDefault: true, 
 
 const agentExtensionsDir = resolveGsdAgentExtensionsDir()
 const { useAgentDir } = shouldUseAgentExtensionsDir({ env: process.env })
-const bundledResourceImportUrl = new URL('../cli.js', import.meta.url).href
+const bundledResourceImportUrl = new URL('../loader.js', import.meta.url).href
 const gsdExtensionPath = (...segments: string[]) =>
   useAgentDir
     ? resolveAgentExtensionModule(agentExtensionsDir, segments)

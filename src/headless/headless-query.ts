@@ -58,7 +58,7 @@ export function shouldUseAgentExtensionsDir(opts: {
 
 const agentExtensionsDir = resolveGsdAgentExtensionsDir()
 const { useAgentDir } = shouldUseAgentExtensionsDir({ env: process.env })
-const bundledResourceImportUrl = new URL('../cli.js', import.meta.url).href
+const bundledResourceImportUrl = new URL('../loader.js', import.meta.url).href
 const gsdExtensionPath = (...segments: string[]) =>
   useAgentDir
     ? resolveAgentExtensionModule(agentExtensionsDir, segments)
