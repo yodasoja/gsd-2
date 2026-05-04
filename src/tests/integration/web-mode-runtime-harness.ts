@@ -204,8 +204,14 @@ function withBuildLock(lockName: string, fn: () => void): void {
       }
     }
   }
-  const onSigint = () => releaseLock()
-  const onSigterm = () => releaseLock()
+  const releaseAndReraise = (signal: "SIGINT" | "SIGTERM") => {
+    releaseLock()
+    process.removeListener("SIGINT", onSigint)
+    process.removeListener("SIGTERM", onSigterm)
+    process.kill(process.pid, signal)
+  }
+  const onSigint = () => releaseAndReraise("SIGINT")
+  const onSigterm = () => releaseAndReraise("SIGTERM")
   process.once("SIGINT", onSigint)
   process.once("SIGTERM", onSigterm)
   try {

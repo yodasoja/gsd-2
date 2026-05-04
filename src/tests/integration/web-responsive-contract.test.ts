@@ -16,7 +16,7 @@
 
 import test from "node:test"
 import assert from "node:assert/strict"
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { setTimeout as delay } from "node:timers/promises"
@@ -131,6 +131,13 @@ test("responsive contract: web host honours viewport-driven chrome", async (t) =
   const tempHome = join(tempRoot, "home")
   const projectCwd = join(tempRoot, "project")
   mkdirSync(projectCwd, { recursive: true })
+  const prefsDir = join(tempHome, ".gsd")
+  mkdirSync(prefsDir, { recursive: true })
+  writeFileSync(
+    join(prefsDir, "web-preferences.json"),
+    JSON.stringify({ devRoot: tempRoot, lastActiveProject: projectCwd }, null, 2),
+    "utf-8",
+  )
   let port: number | null = null
   let browser: Browser | null = null
   let context: BrowserContext | null = null
