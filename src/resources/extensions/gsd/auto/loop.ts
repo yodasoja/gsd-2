@@ -60,6 +60,7 @@ import {
   decideFinalizeResult,
   decideWorkflowLoop,
 } from "./workflow-kernel.js";
+import { createWorkflowTurnReporter } from "./workflow-turn-reporter.js";
 
 // ── Stuck detection persistence (#3704) ──────────────────────────────────
 // Phase C migration: stuck-state.json deleted in favor of DB-backed
@@ -402,37 +403,32 @@ export async function autoLoop(
     const turnStartedAt = new Date().toISOString();
     let observedUnitType: string | undefined;
     let observedUnitId: string | undefined;
-    let turnFinished = false;
-    const finishTurn = (
-      status: "completed" | "failed" | "paused" | "stopped" | "skipped" | "retry",
-      failureClass: "none" | "unknown" | "manual-attention" | "timeout" | "execution" | "closeout" | "git" = "none",
-      error?: string,
-    ): void => {
-      if (turnFinished) return;
-      turnFinished = true;
-      deps.uokObserver?.onTurnResult({
-        traceId: flowId,
-        turnId,
-        iteration,
-        unitType: observedUnitType,
-        unitId: observedUnitId,
-        status,
-        failureClass,
-        phaseResults: [],
-        error,
-        startedAt: turnStartedAt,
-        finishedAt: new Date().toISOString(),
-      });
-      s.currentTraceId = null;
-      s.currentTurnId = null;
-    };
-    deps.uokObserver?.onTurnStart({
+    const turnReporter = createWorkflowTurnReporter({
+      observer: deps.uokObserver,
       traceId: flowId,
       turnId,
       iteration,
       basePath: s.basePath,
       startedAt: turnStartedAt,
+      clearCurrentTurn: () => {
+        s.currentTraceId = null;
+        s.currentTurnId = null;
+      },
     });
+    const finishTurn = (
+      status: "completed" | "failed" | "paused" | "stopped" | "skipped" | "retry",
+      failureClass: "none" | "unknown" | "manual-attention" | "timeout" | "execution" | "closeout" | "git" = "none",
+      error?: string,
+    ): void => {
+      turnReporter.finish({
+        unitType: observedUnitType,
+        unitId: observedUnitId,
+        status,
+        failureClass,
+        error,
+      });
+    };
+    turnReporter.start();
 
     const iterationDecision = decideWorkflowLoop({
       active: s.active,
