@@ -102,6 +102,7 @@ async function gotoPackagedHost(
         state: "attached",
         timeout: 30_000,
       })
+      return
     }
 
     // Diagnostic dump — without this, all we see in CI is a generic
