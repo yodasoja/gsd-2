@@ -257,6 +257,33 @@ test("plan-milestone prompt substitutes skillActivation", () => {
   assert.ok(!result.includes("{{skillActivation}}"));
 });
 
+test("plan-milestone prompt: compact planning gates survive template substitution", () => {
+  const result = loadPrompt("plan-milestone", {
+    workingDirectory: fixtureRoot,
+    milestoneId: "M001",
+    milestoneTitle: "Test Milestone",
+    milestonePath: ".gsd/milestones/M001",
+    contextPath: ".gsd/milestones/M001/M001-CONTEXT.md",
+    researchPath: ".gsd/milestones/M001/M001-RESEARCH.md",
+    researchOutputPath: join(fixtureRoot, ".gsd", "milestones", "M001", "M001-RESEARCH.md"),
+    outputPath: join(fixtureRoot, ".gsd", "milestones", "M001", "M001-ROADMAP.md"),
+    secretsOutputPath: join(fixtureRoot, ".gsd", "milestones", "M001", "M001-SECRETS.md"),
+    inlinedContext: "Context",
+    sourceFilePaths: "- source",
+    skillDiscoveryMode: "manual",
+    skillDiscoveryInstructions: " Discover skills manually.",
+    skillActivation: "Load milestone planning skills first.",
+  });
+
+  assert.ok(result.includes("Already Planned? Soft Brake"));
+  assert.ok(result.includes("gsd_plan_milestone"));
+  assert.ok(result.includes("Dependency format is comma-separated"));
+  assert.ok(result.includes("phases.progressive_planning"));
+  assert.ok(result.includes("Single-Slice Fast Path"));
+  assert.ok(result.includes("Secrets Manifest"));
+  assert.ok(!result.includes("{{"));
+});
+
 test("guided research slice prompt substitutes skillActivation", () => {
   const result = loadPrompt("guided-research-slice", {
     milestoneId: "M001",
