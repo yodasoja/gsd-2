@@ -58,6 +58,7 @@ import {
   decideEngineDispatch,
   decideEngineReconcile,
   decideFinalizeResult,
+  decideMemoryPressure,
   decideWorkflowLoop,
 } from "./workflow-kernel.js";
 import { createWorkflowTurnReporter } from "./workflow-turn-reporter.js";
@@ -457,16 +458,11 @@ export async function autoLoop(
     if (iteration % MEMORY_CHECK_INTERVAL === 0) {
       const mem = checkMemoryPressure();
       debugLog("autoLoop", { phase: "memory-check", ...mem });
-      if (mem.pressured) {
-        logWarning("dispatch", `Memory pressure: ${mem.heapMB}MB / ${mem.limitMB}MB (${Math.round(mem.pct * 100)}%) — stopping auto-mode to prevent OOM kill`);
-        await deps.stopAuto(
-          ctx,
-          pi,
-          `Memory pressure: heap at ${mem.heapMB}MB / ${mem.limitMB}MB (${Math.round(mem.pct * 100)}%). ` +
-          `Stopping gracefully to prevent OOM kill after ${iteration} iterations. ` +
-          `Resume with /gsd auto to continue from where you left off.`,
-        );
-        finishTurn("stopped", "timeout", "memory-pressure");
+      const memoryDecision = decideMemoryPressure({ ...mem, iteration });
+      if (memoryDecision.action === "stop") {
+        logWarning("dispatch", memoryDecision.warningMessage);
+        await deps.stopAuto(ctx, pi, memoryDecision.stopMessage);
+        finishTurn("stopped", "timeout", memoryDecision.turnError);
         break;
       }
     }

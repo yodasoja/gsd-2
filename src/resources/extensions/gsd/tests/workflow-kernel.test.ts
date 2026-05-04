@@ -9,6 +9,7 @@ import {
   decideEngineDispatch,
   decideEngineReconcile,
   decideFinalizeResult,
+  decideMemoryPressure,
   decideWorkflowLoop,
 } from "../auto/workflow-kernel.ts";
 
@@ -178,4 +179,39 @@ test("decideEngineReconcile maps terminal outcomes", () => {
 
 test("decideEngineReconcile passes through continue outcomes", () => {
   assert.deepEqual(decideEngineReconcile({ outcome: "continue" }), { action: "continue" });
+});
+
+test("decideMemoryPressure continues when heap pressure is below threshold", () => {
+  assert.deepEqual(
+    decideMemoryPressure({
+      pressured: false,
+      heapMB: 512,
+      limitMB: 4096,
+      pct: 0.125,
+      iteration: 5,
+    }),
+    { action: "continue" },
+  );
+});
+
+test("decideMemoryPressure returns stable stop messages when pressured", () => {
+  assert.deepEqual(
+    decideMemoryPressure({
+      pressured: true,
+      heapMB: 3800,
+      limitMB: 4096,
+      pct: 0.927,
+      iteration: 10,
+    }),
+    {
+      action: "stop",
+      warningMessage:
+        "Memory pressure: 3800MB / 4096MB (93%) — stopping auto-mode to prevent OOM kill",
+      stopMessage:
+        "Memory pressure: heap at 3800MB / 4096MB (93%). " +
+        "Stopping gracefully to prevent OOM kill after 10 iterations. " +
+        "Resume with /gsd auto to continue from where you left off.",
+      turnError: "memory-pressure",
+    },
+  );
 });

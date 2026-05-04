@@ -62,6 +62,23 @@ export type EngineReconcileDecision =
   | { action: "stop"; reason: string }
   | { action: "continue" };
 
+export interface MemoryPressureInput {
+  pressured: boolean;
+  heapMB: number;
+  limitMB: number;
+  pct: number;
+  iteration: number;
+}
+
+export type MemoryPressureDecision =
+  | { action: "continue" }
+  | {
+      action: "stop";
+      warningMessage: string;
+      stopMessage: string;
+      turnError: "memory-pressure";
+    };
+
 export interface WorkflowLoopInput {
   active: boolean;
   iteration: number;
@@ -186,4 +203,22 @@ export function decideEngineReconcile(input: EngineReconcileInput): EngineReconc
   }
 
   return { action: "continue" };
+}
+
+export function decideMemoryPressure(input: MemoryPressureInput): MemoryPressureDecision {
+  if (!input.pressured) {
+    return { action: "continue" };
+  }
+
+  const pct = Math.round(input.pct * 100);
+  return {
+    action: "stop",
+    warningMessage:
+      `Memory pressure: ${input.heapMB}MB / ${input.limitMB}MB (${pct}%) — stopping auto-mode to prevent OOM kill`,
+    stopMessage:
+      `Memory pressure: heap at ${input.heapMB}MB / ${input.limitMB}MB (${pct}%). ` +
+      `Stopping gracefully to prevent OOM kill after ${input.iteration} iterations. ` +
+      "Resume with /gsd auto to continue from where you left off.",
+    turnError: "memory-pressure",
+  };
 }
