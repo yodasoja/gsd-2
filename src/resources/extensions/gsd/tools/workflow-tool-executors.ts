@@ -487,6 +487,7 @@ export async function executeCompleteMilestone(
         milestoneId: result.milestoneId,
         summaryPath: result.summaryPath,
         ...(result.alreadyComplete ? { alreadyComplete: true } : {}),
+        ...(result.stale ? { stale: true } : {}),
       },
     };
   } catch (err) {

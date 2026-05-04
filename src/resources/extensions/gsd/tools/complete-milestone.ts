@@ -1,3 +1,4 @@
+// GSD2 complete-milestone tool handler
 /**
  * complete-milestone handler — the core operation behind gsd_complete_milestone.
  *

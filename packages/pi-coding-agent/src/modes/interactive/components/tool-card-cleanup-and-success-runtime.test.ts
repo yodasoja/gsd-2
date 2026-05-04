@@ -17,6 +17,7 @@ import { Container, Text } from "@gsd/pi-tui";
 import stripAnsi from "strip-ansi";
 
 import { initTheme, theme } from "../theme/theme.js";
+import { renderExtensionNotifyInChat, shouldRenderExtensionNotifyInChat } from "../interactive-mode.js";
 import { DynamicBorder } from "./dynamic-border.js";
 import { ToolExecutionComponent } from "./tool-execution.js";
 
@@ -24,6 +25,36 @@ import { ToolExecutionComponent } from "./tool-execution.js";
 // Initialize once before any test that exercises themed rendering.
 before(() => {
 	initTheme("dark");
+});
+
+describe("Extension warning notifications", () => {
+	it("do not render into chat output", () => {
+		assert.equal(shouldRenderExtensionNotifyInChat("warning"), false);
+		assert.equal(shouldRenderExtensionNotifyInChat("error"), true);
+		assert.equal(shouldRenderExtensionNotifyInChat("success"), true);
+		assert.equal(shouldRenderExtensionNotifyInChat("info"), true);
+		assert.equal(shouldRenderExtensionNotifyInChat(undefined), true);
+
+		const warningChat = new Container();
+		const warningResult = renderExtensionNotifyInChat(warningChat, "extension warning", "warning");
+		assert.equal(warningResult.rendered, false);
+		assert.equal(
+			warningChat.render(80).map(stripAnsi).join("\n"),
+			"",
+			"warning notifications must not add chat output",
+		);
+
+		for (const type of ["error", "success", "info"] as const) {
+			const chat = new Container();
+			const result = renderExtensionNotifyInChat(chat, `${type} notification`, type);
+			assert.equal(result.rendered, true, `${type} notification should render`);
+			assert.match(
+				chat.render(80).map(stripAnsi).join("\n"),
+				new RegExp(`${type} notification`),
+				`${type} notification text should appear in chat output`,
+			);
+		}
+	});
 });
 
 interface MockTui {

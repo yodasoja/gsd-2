@@ -391,11 +391,13 @@ test("executeCompleteMilestone sanitizes raw params and writes milestone summary
   }
 });
 
-test("executeCompleteMilestone returns success for already-complete milestones", async () => {
+test("executeCompleteMilestone returns success for already-complete milestones without overwriting the existing summary", async () => {
   const base = makeTmpBase();
   try {
     openTestDb(base);
     seedMilestone("M003", "Milestone Three", "complete");
+    seedSlice("M003", "S03", "complete");
+    writeRoadmap(base, "M003", ["S03"]);
     const milestoneDir = join(base, ".gsd", "milestones", "M003");
     mkdirSync(milestoneDir, { recursive: true });
     const summaryPath = join(milestoneDir, "M003-SUMMARY.md");
@@ -413,6 +415,7 @@ test("executeCompleteMilestone returns success for already-complete milestones",
     assert.equal(result.details.operation, "complete_milestone");
     assert.equal(result.details.alreadyComplete, true);
     assert.match(result.content[0].text, /already complete/);
+    assert.doesNotMatch(result.content[0].text, /Summary written to/);
     assert.equal(readFileSync(summaryPath, "utf-8"), "# Existing Summary\n");
   } finally {
     closeDatabase();

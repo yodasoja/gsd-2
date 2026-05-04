@@ -1,3 +1,4 @@
+// GSD2 complete-milestone tests
 import { describe, test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
@@ -471,7 +472,6 @@ describe("complete-milestone", () => {
       };
 
       const result = await handleCompleteMilestone(params, base);
-
       assert.ok(!("error" in result), `already-complete re-dispatch should succeed: ${JSON.stringify(result)}`);
       assert.equal(result.alreadyComplete, true);
 
@@ -480,6 +480,20 @@ describe("complete-milestone", () => {
         actualContent,
         originalContent,
         "existing SUMMARY.md must not be overwritten on re-dispatch (#4598)",
+      );
+
+      // Repeated re-dispatch should also be idempotent.
+      const repeatResult = await handleCompleteMilestone(params, base);
+      assert.ok(!("error" in repeatResult), "repeated re-dispatch should also succeed");
+      assert.strictEqual(repeatResult.alreadyComplete, true, "repeated re-dispatch is identified as already-complete");
+      assert.ok(
+        repeatResult.summaryPath.endsWith(join(".gsd", "milestones", mid, `${mid}-SUMMARY.md`)),
+        "repeated re-dispatch returns the existing summary path",
+      );
+      assert.strictEqual(
+        readFileSync(summaryPath, "utf-8"),
+        originalContent,
+        "repeated re-dispatch must not overwrite SUMMARY.md",
       );
     } finally {
       try { closeDatabase(); } catch { /* */ }
