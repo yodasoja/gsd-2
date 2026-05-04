@@ -432,10 +432,9 @@ describe("complete-milestone", () => {
     }
   });
 
-  test("handleCompleteMilestone does not overwrite existing SUMMARY.md on re-dispatch (#4598)", async () => {
+  test("handleCompleteMilestone treats already-complete milestone as idempotent re-dispatch (#4598)", async () => {
     // This test verifies that when SUMMARY.md already exists (from a prior completion),
     // re-calling handleCompleteMilestone does not overwrite it.
-    // Before the fix this test FAILS because the handler unconditionally writes SUMMARY.md.
     const { handleCompleteMilestone } = await import("../tools/complete-milestone.ts");
     const base = createFixtureBase();
     const mid = "M001";
@@ -443,7 +442,7 @@ describe("complete-milestone", () => {
     try {
       // Set up DB with milestone and a complete slice + task
       openDatabase(dbPath);
-      insertMilestone({ id: mid, title: "Test Milestone", status: "active" });
+      insertMilestone({ id: mid, title: "Test Milestone", status: "complete" });
       insertSlice({ id: "S01", milestoneId: mid, title: "Slice One", status: "complete" });
       insertTask({ id: "T01", sliceId: "S01", milestoneId: mid, title: "Task One", status: "complete" });
 
@@ -473,8 +472,9 @@ describe("complete-milestone", () => {
 
       const result = await handleCompleteMilestone(params, base);
 
-      // The call may return an error (milestone already complete) or success
-      // but in either case the SUMMARY.md must NOT be overwritten.
+      assert.ok(!("error" in result), `already-complete re-dispatch should succeed: ${JSON.stringify(result)}`);
+      assert.equal(result.alreadyComplete, true);
+
       const actualContent = readFileSync(summaryPath, "utf-8");
       assert.strictEqual(
         actualContent,

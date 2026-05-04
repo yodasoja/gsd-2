@@ -477,12 +477,16 @@ export async function executeCompleteMilestone(
       isError: true,
       };
     }
+    const message = result.alreadyComplete
+      ? `Milestone ${result.milestoneId} is already complete. Summary available at ${result.summaryPath}`
+      : `Completed milestone ${result.milestoneId}. Summary written to ${result.summaryPath}`;
     return {
-      content: [{ type: "text", text: `Completed milestone ${result.milestoneId}. Summary written to ${result.summaryPath}` }],
+      content: [{ type: "text", text: message }],
       details: {
         operation: "complete_milestone",
         milestoneId: result.milestoneId,
         summaryPath: result.summaryPath,
+        ...(result.alreadyComplete ? { alreadyComplete: true } : {}),
       },
     };
   } catch (err) {

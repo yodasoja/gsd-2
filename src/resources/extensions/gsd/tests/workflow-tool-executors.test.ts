@@ -391,6 +391,35 @@ test("executeCompleteMilestone sanitizes raw params and writes milestone summary
   }
 });
 
+test("executeCompleteMilestone returns success for already-complete milestones", async () => {
+  const base = makeTmpBase();
+  try {
+    openTestDb(base);
+    seedMilestone("M003", "Milestone Three", "complete");
+    const milestoneDir = join(base, ".gsd", "milestones", "M003");
+    mkdirSync(milestoneDir, { recursive: true });
+    const summaryPath = join(milestoneDir, "M003-SUMMARY.md");
+    writeFileSync(summaryPath, "# Existing Summary\n");
+
+    const result = await inProjectDir(base, () => executeCompleteMilestone({
+      milestoneId: "M003",
+      title: "Milestone Three",
+      oneLiner: "Completed milestone",
+      narrative: "Everything shipped.",
+      verificationPassed: true,
+    }, base));
+
+    assert.equal(result.isError, undefined);
+    assert.equal(result.details.operation, "complete_milestone");
+    assert.equal(result.details.alreadyComplete, true);
+    assert.match(result.content[0].text, /already complete/);
+    assert.equal(readFileSync(summaryPath, "utf-8"), "# Existing Summary\n");
+  } finally {
+    closeDatabase();
+    cleanup(base);
+  }
+});
+
 test("executeReassessRoadmap writes assessment and updates roadmap projection", async () => {
   const base = makeTmpBase();
   try {
