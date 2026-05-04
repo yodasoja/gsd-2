@@ -10,6 +10,7 @@ import { join } from "node:path";
 test("execute-task prompt renders compact execution and completion gates", async (t) => {
   const previousGsdHome = process.env.GSD_HOME;
   const isolatedHome = mkdtempSync(join(tmpdir(), "gsd-execute-task-render-"));
+  const fixtureRoot = join("workspace", "gsd-fixture");
   process.env.GSD_HOME = isolatedHome;
   t.after(() => {
     if (previousGsdHome === undefined) delete process.env.GSD_HOME;
@@ -24,7 +25,7 @@ test("execute-task prompt renders compact execution and completion gates", async
     sliceId: "S01",
     sliceTitle: "Prompt reduction",
     milestoneId: "M001",
-    workingDirectory: "/tmp/gsd-fixture",
+    workingDirectory: fixtureRoot,
     overridesSection: "",
     runtimeContext: "Runtime context.",
     phaseAnchorSection: "",

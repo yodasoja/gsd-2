@@ -10,6 +10,7 @@ import { join } from "node:path";
 test("plan-milestone prompt renders compact DB-backed planning guidance", async (t) => {
   const previousGsdHome = process.env.GSD_HOME;
   const isolatedHome = mkdtempSync(join(tmpdir(), "gsd-plan-milestone-render-"));
+  const fixtureRoot = join("workspace", "gsd-fixture");
   process.env.GSD_HOME = isolatedHome;
   t.after(() => {
     if (previousGsdHome === undefined) delete process.env.GSD_HOME;
@@ -21,7 +22,7 @@ test("plan-milestone prompt renders compact DB-backed planning guidance", async 
   const prompt = loadPrompt("plan-milestone", {
     milestoneId: "M001",
     milestoneTitle: "Reduce prompt cost",
-    workingDirectory: "/tmp/gsd-fixture",
+    workingDirectory: fixtureRoot,
     inlinedContext: "## Roadmap\n\nUse the roadmap template.",
     outputPath: ".gsd/milestones/M001/M001-ROADMAP.md",
     skillDiscoveryMode: "filtered",

@@ -1,3 +1,6 @@
+// Project/App: GSD-2
+// File Purpose: Verifies GSD planning prompt placeholder rendering and DB-backed tool guidance.
+
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -6,6 +9,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const worktreePromptsDir = join(__dirname, "..", "prompts");
+const fixtureRoot = join("workspace", "test-project");
 
 function loadPrompt(name: string, vars: Record<string, string> = {}): string {
   const path = join(worktreePromptsDir, `${name}.md`);
@@ -17,12 +21,12 @@ function loadPrompt(name: string, vars: Record<string, string> = {}): string {
 }
 
 const BASE_VARS = {
-  workingDirectory: "/tmp/test-project",
+  workingDirectory: fixtureRoot,
   milestoneId: "M001", sliceId: "S01", sliceTitle: "Test Slice",
   slicePath: ".gsd/milestones/M001/slices/S01",
   roadmapPath: ".gsd/milestones/M001/M001-ROADMAP.md",
   researchPath: ".gsd/milestones/M001/slices/S01/S01-RESEARCH.md",
-  outputPath: "/tmp/test-project/.gsd/milestones/M001/slices/S01/S01-PLAN.md",
+  outputPath: join(fixtureRoot, ".gsd", "milestones", "M001", "slices", "S01", "S01-PLAN.md"),
   inlinedContext: "--- test inlined context ---",
   dependencySummaries: "", executorContextConstraints: "",
   sourceFilePaths: "- **Requirements**: `.gsd/REQUIREMENTS.md`",
@@ -100,7 +104,7 @@ test("domain-work prompts use skillActivation placeholder", () => {
 
 test("skillActivation default leaves no unresolved placeholder", () => {
   const result = loadPromptWithDefaultSkillActivation("execute-task", {
-    workingDirectory: "/tmp/test-project",
+    workingDirectory: fixtureRoot,
     milestoneId: "M001",
     sliceId: "S01",
     sliceTitle: "Test Slice",
@@ -113,7 +117,7 @@ test("skillActivation default leaves no unresolved placeholder", () => {
     carryForwardSection: "Carry forward",
     resumeSection: "Resume",
     priorTaskLines: "- (no prior tasks)",
-    taskSummaryPath: "/tmp/test-project/.gsd/milestones/M001/slices/S01/tasks/T01-SUMMARY.md",
+    taskSummaryPath: join(fixtureRoot, ".gsd", "milestones", "M001", "slices", "S01", "tasks", "T01-SUMMARY.md"),
     inlinedTemplates: "Template",
     verificationBudget: "~10K chars",
     overridesSection: "",
@@ -125,7 +129,7 @@ test("skillActivation default leaves no unresolved placeholder", () => {
 
 test("custom skillActivation is substituted into execute-task", () => {
   const result = loadPrompt("execute-task", {
-    workingDirectory: "/tmp/test-project",
+    workingDirectory: fixtureRoot,
     milestoneId: "M001",
     sliceId: "S01",
     sliceTitle: "Test Slice",
@@ -138,7 +142,7 @@ test("custom skillActivation is substituted into execute-task", () => {
     carryForwardSection: "Carry forward",
     resumeSection: "Resume",
     priorTaskLines: "- (no prior tasks)",
-    taskSummaryPath: "/tmp/test-project/.gsd/milestones/M001/slices/S01/tasks/T01-SUMMARY.md",
+    taskSummaryPath: join(fixtureRoot, ".gsd", "milestones", "M001", "slices", "S01", "tasks", "T01-SUMMARY.md"),
     inlinedTemplates: "Template",
     verificationBudget: "~10K chars",
     overridesSection: "",
@@ -162,12 +166,12 @@ test("guided resume prompt substitutes skillActivation", () => {
 
 test("research-milestone prompt substitutes skillActivation", () => {
   const result = loadPrompt("research-milestone", {
-    workingDirectory: "/tmp/test-project",
+    workingDirectory: fixtureRoot,
     milestoneId: "M001",
     milestoneTitle: "Test Milestone",
     milestonePath: ".gsd/milestones/M001",
     contextPath: ".gsd/milestones/M001/M001-CONTEXT.md",
-    outputPath: "/tmp/test-project/.gsd/milestones/M001/M001-RESEARCH.md",
+    outputPath: join(fixtureRoot, ".gsd", "milestones", "M001", "M001-RESEARCH.md"),
     inlinedContext: "Context",
     skillDiscoveryMode: "manual",
     skillDiscoveryInstructions: " Discover skills manually.",
@@ -180,12 +184,12 @@ test("research-milestone prompt substitutes skillActivation", () => {
 
 test("research-milestone prompt references gsd_summary_save, not direct write", () => {
   const result = loadPrompt("research-milestone", {
-    workingDirectory: "/tmp/test-project",
+    workingDirectory: fixtureRoot,
     milestoneId: "M001",
     milestoneTitle: "Test Milestone",
     milestonePath: ".gsd/milestones/M001",
     contextPath: ".gsd/milestones/M001/M001-CONTEXT.md",
-    outputPath: "/tmp/test-project/.gsd/milestones/M001/M001-RESEARCH.md",
+    outputPath: join(fixtureRoot, ".gsd", "milestones", "M001", "M001-RESEARCH.md"),
     inlinedContext: "Context",
     skillDiscoveryMode: "manual",
     skillDiscoveryInstructions: " Discover skills manually.",
@@ -208,7 +212,7 @@ test("research-milestone prompt references gsd_summary_save, not direct write", 
 
 test("research-slice prompt substitutes skillActivation", () => {
   const result = loadPrompt("research-slice", {
-    workingDirectory: "/tmp/test-project",
+    workingDirectory: fixtureRoot,
     milestoneId: "M001",
     sliceId: "S01",
     sliceTitle: "Test Slice",
@@ -216,7 +220,7 @@ test("research-slice prompt substitutes skillActivation", () => {
     roadmapPath: ".gsd/milestones/M001/M001-ROADMAP.md",
     contextPath: ".gsd/milestones/M001/M001-CONTEXT.md",
     milestoneResearchPath: ".gsd/milestones/M001/M001-RESEARCH.md",
-    outputPath: "/tmp/test-project/.gsd/milestones/M001/slices/S01/S01-RESEARCH.md",
+    outputPath: join(fixtureRoot, ".gsd", "milestones", "M001", "slices", "S01", "S01-RESEARCH.md"),
     inlinedContext: "Context",
     dependencySummaries: "",
     skillDiscoveryMode: "manual",
@@ -230,15 +234,15 @@ test("research-slice prompt substitutes skillActivation", () => {
 
 test("plan-milestone prompt substitutes skillActivation", () => {
   const result = loadPrompt("plan-milestone", {
-    workingDirectory: "/tmp/test-project",
+    workingDirectory: fixtureRoot,
     milestoneId: "M001",
     milestoneTitle: "Test Milestone",
     milestonePath: ".gsd/milestones/M001",
     contextPath: ".gsd/milestones/M001/M001-CONTEXT.md",
     researchPath: ".gsd/milestones/M001/M001-RESEARCH.md",
-    researchOutputPath: "/tmp/test-project/.gsd/milestones/M001/M001-RESEARCH.md",
-    outputPath: "/tmp/test-project/.gsd/milestones/M001/M001-ROADMAP.md",
-    secretsOutputPath: "/tmp/test-project/.gsd/milestones/M001/M001-SECRETS.md",
+    researchOutputPath: join(fixtureRoot, ".gsd", "milestones", "M001", "M001-RESEARCH.md"),
+    outputPath: join(fixtureRoot, ".gsd", "milestones", "M001", "M001-ROADMAP.md"),
+    secretsOutputPath: join(fixtureRoot, ".gsd", "milestones", "M001", "M001-SECRETS.md"),
     inlinedContext: "Context",
     sourceFilePaths: "- source",
     skillDiscoveryMode: "manual",
