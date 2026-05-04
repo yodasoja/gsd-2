@@ -131,9 +131,25 @@ jobs:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: node scripts/check-coderabbit-themes.mjs
 
+  ci-circuit-breaker-fast:
+    timeout-minutes: 2
+    needs: [detect-changes, docs-check, lint]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    if: always()
+    steps:
+      - name: Stop pipeline when fast gates fail
+        env:
+          DOCS_CHECK: ${{ needs.docs-check.result }}
+          LINT: ${{ needs.lint.result }}
+        run: |
+          if [ "$DOCS_CHECK" != "success" ] || [ "$LINT" != "success" ]; then
+            echo "::error::Fast gate failed (docs-check=$DOCS_CHECK, lint=$LINT). Cancelling follow-on CI jobs."
+            exit 1
+          fi
+
   build:
     timeout-minutes: 15
-    needs: detect-changes
+    needs: [detect-changes, ci-circuit-breaker-fast]
     if: needs.detect-changes.outputs.docs-only != 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
 
@@ -186,9 +202,24 @@ jobs:
       - name: Check test coverage thresholds
         run: npm run test:coverage
 
+  ci-circuit-breaker-build:
+    timeout-minutes: 2
+    needs: [detect-changes, build]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    if: always() && needs.detect-changes.outputs.docs-only != 'true'
+    steps:
+      - name: Stop pipeline when build gate fails
+        env:
+          BUILD: ${{ needs.build.result }}
+        run: |
+          if [ "$BUILD" != "success" ]; then
+            echo "::error::Build gate failed (build=$BUILD). Cancelling follow-on CI jobs."
+            exit 1
+          fi
+
   integration-tests:
     timeout-minutes: 15
-    needs: detect-changes
+    needs: [detect-changes, ci-circuit-breaker-build]
     if: needs.detect-changes.outputs.docs-only != 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
 
@@ -235,7 +266,7 @@ jobs:
     # workflow. Mirrors the Dev Publish smoke step at dev-publish.yml:84-88.
     # No untrusted GitHub event input is consumed in run: blocks.
     timeout-minutes: 10
-    needs: detect-changes
+    needs: [detect-changes, ci-circuit-breaker-build]
     if: needs.detect-changes.outputs.docs-only != 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
 
@@ -263,7 +294,7 @@ jobs:
 
   windows-portability:
     timeout-minutes: 25
-    needs: detect-changes
+    needs: [detect-changes, ci-circuit-breaker-build]
     if: >-
       needs.detect-changes.outputs.docs-only != 'true' &&
       needs.detect-changes.outputs.portability-changed == 'true'
@@ -301,7 +332,7 @@ jobs:
 
   rtk-portability:
     timeout-minutes: 20
-    needs: detect-changes
+    needs: [detect-changes, ci-circuit-breaker-build]
     if: >-
       needs.detect-changes.outputs.docs-only != 'true' &&
       needs.detect-changes.outputs.portability-changed == 'true'
