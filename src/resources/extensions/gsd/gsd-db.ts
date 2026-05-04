@@ -28,6 +28,7 @@ import { GSDError, GSD_STALE_STATE } from "./errors.js";
 import type { GsdWorkspace, MilestoneScope } from "./workspace.js";
 import { getGateIdsForTurn, type OwnerTurn } from "./gate-registry.js";
 import { logError, logWarning } from "./workflow-logger.js";
+import { createDbAdapter, type DbAdapter } from "./db-adapter.js";
 // Type-only import to avoid a circular runtime dep. The runtime side of
 // workflow-manifest.ts depends on this file, but the StateManifest type is
 // pure structure with no runtime coupling.
@@ -35,18 +36,6 @@ import type { StateManifest } from "./workflow-manifest.js";
 
 const _require = createRequire(import.meta.url);
 const BETTER_SQLITE3_PACKAGE = ["better", "sqlite3"].join("-");
-
-interface DbStatement {
-  run(...params: unknown[]): unknown;
-  get(...params: unknown[]): Record<string, unknown> | undefined;
-  all(...params: unknown[]): Record<string, unknown>[];
-}
-
-interface DbAdapter {
-  exec(sql: string): void;
-  prepare(sql: string): DbStatement;
-  close(): void;
-}
 
 type ProviderName = "node:sqlite" | "better-sqlite3";
 
@@ -108,63 +97,6 @@ function loadProvider(): void {
   process.stderr.write(
     `gsd-db: No SQLite provider available (tried node:sqlite, better-sqlite3).${versionHint}\n`,
   );
-}
-
-function normalizeRow(row: unknown): Record<string, unknown> | undefined {
-  if (row == null) return undefined;
-  if (Object.getPrototypeOf(row) === null) {
-    return { ...(row as Record<string, unknown>) };
-  }
-  return row as Record<string, unknown>;
-}
-
-function normalizeRows(rows: unknown[]): Record<string, unknown>[] {
-  return rows.map((r) => normalizeRow(r)!);
-}
-
-function createAdapter(rawDb: unknown): DbAdapter {
-  const db = rawDb as {
-    exec(sql: string): void;
-    prepare(sql: string): {
-      run(...args: unknown[]): unknown;
-      get(...args: unknown[]): unknown;
-      all(...args: unknown[]): unknown[];
-    };
-    close(): void;
-  };
-
-  const stmtCache = new Map<string, DbStatement>();
-
-  function wrapStmt(raw: { run(...a: unknown[]): unknown; get(...a: unknown[]): unknown; all(...a: unknown[]): unknown[] }): DbStatement {
-    return {
-      run(...params: unknown[]): unknown {
-        return raw.run(...params);
-      },
-      get(...params: unknown[]): Record<string, unknown> | undefined {
-        return normalizeRow(raw.get(...params));
-      },
-      all(...params: unknown[]): Record<string, unknown>[] {
-        return normalizeRows(raw.all(...params));
-      },
-    };
-  }
-
-  return {
-    exec(sql: string): void {
-      db.exec(sql);
-    },
-    prepare(sql: string): DbStatement {
-      let cached = stmtCache.get(sql);
-      if (cached) return cached;
-      cached = wrapStmt(db.prepare(sql));
-      stmtCache.set(sql, cached);
-      return cached;
-    },
-    close(): void {
-      stmtCache.clear();
-      db.close();
-    },
-  };
 }
 
 function openRawDb(path: string): unknown {
@@ -1666,7 +1598,7 @@ export function openDatabase(path: string): boolean {
   }
   if (!rawDb) return false;
 
-  const adapter = createAdapter(rawDb);
+  const adapter = createDbAdapter(rawDb);
   const fileBacked = path !== ":memory:";
   try {
     initSchema(adapter, fileBacked);
