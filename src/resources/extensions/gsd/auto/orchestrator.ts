@@ -113,6 +113,8 @@ export class AutoOrchestrator implements AutoOrchestrationModule {
 
       if (result.kind === "paused") {
         await this.deps.notifications.notifyLifecycle({ name: "pause", detail: recovery.reason });
+      } else if (result.kind === "stopped") {
+        await this.deps.notifications.notifyLifecycle({ name: "stopped", detail: recovery.reason });
       } else if (result.kind === "error") {
         await this.deps.notifications.notifyLifecycle({ name: "error", detail: recovery.reason });
       }
