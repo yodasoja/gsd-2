@@ -2244,29 +2244,31 @@ export function mergeMilestoneToMain(
   if (prefs.auto_pr === true && !nothingToCommit) {
     const remote = prefs.remote ?? "origin";
     const prTarget = prefs.pr_target_branch ?? mainBranch;
-    try {
-      // Push the milestone branch to remote first
-      execFileSync("git", ["push", remote, milestoneBranch], {
-        cwd: originalBasePath_,
-        stdio: ["ignore", "pipe", "pipe"],
-        encoding: "utf-8",
-      });
-      // Create PR via gh CLI with explicit --head and --base (#2302)
-      execFileSync("gh", [
-        "pr", "create", "--draft",
-        "--base", prTarget,
-        "--head", milestoneBranch,
-        "--title", `Milestone ${milestoneId} complete`,
-        "--body", "Auto-created by GSD on milestone completion.",
-      ], {
-        cwd: originalBasePath_,
-        stdio: ["ignore", "pipe", "pipe"],
-        encoding: "utf-8",
-      });
-      prCreated = true;
-    } catch (err) {
-      // PR creation failure is non-fatal — gh may not be installed or authenticated
-      logWarning("worktree", `PR creation failed: ${err instanceof Error ? err.message : String(err)}`);
+    if (gitRemoteExists(originalBasePath_, remote)) {
+      try {
+        // Push the milestone branch to remote first
+        execFileSync("git", ["push", remote, milestoneBranch], {
+          cwd: originalBasePath_,
+          stdio: ["ignore", "pipe", "pipe"],
+          encoding: "utf-8",
+        });
+        // Create PR via gh CLI with explicit --head and --base (#2302)
+        execFileSync("gh", [
+          "pr", "create", "--draft",
+          "--base", prTarget,
+          "--head", milestoneBranch,
+          "--title", `Milestone ${milestoneId} complete`,
+          "--body", "Auto-created by GSD on milestone completion.",
+        ], {
+          cwd: originalBasePath_,
+          stdio: ["ignore", "pipe", "pipe"],
+          encoding: "utf-8",
+        });
+        prCreated = true;
+      } catch (err) {
+        // PR creation failure is non-fatal — gh may not be installed or authenticated
+        logWarning("worktree", `PR creation failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
   }
 
