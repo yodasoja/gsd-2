@@ -47,7 +47,7 @@ const DESKTOP = { width: 1440, height: 900 } // xl-band
 async function gotoPackagedHost(
   page: Page,
   launch: RuntimeLaunchResult,
-  options?: { projectCwd?: string },
+  options?: { projectCwd?: string; devRoot?: string },
 ): Promise<void> {
   // The launcher hands an auth token via the fragment so the client
   // bootstrap can read it. Without it the shell renders the
@@ -89,16 +89,20 @@ async function gotoPackagedHost(
     // Fallback: if the project-selection gate is visible, select the first
     // discovered project and wait again for the responsive shell controls.
     const gateVisible = await page.locator('[data-testid="project-selection-gate"]').isVisible().catch(() => false)
-    if (gateVisible) {
-      const firstProjectButton = page.locator('[data-testid="project-selection-gate"] .divide-y > button').first()
-      if (await firstProjectButton.count()) {
-        await firstProjectButton.click()
-        await page.waitForSelector('[data-testid="mobile-nav-toggle"]', {
-          state: "attached",
-          timeout: 30_000,
+    if (gateVisible && options?.projectCwd && options?.devRoot) {
+      await page.evaluate(async ({ projectCwd, devRoot }) => {
+        await fetch("/api/preferences", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ devRoot, lastActiveProject: projectCwd }),
         })
-        return
-      }
+      }, { projectCwd: options.projectCwd, devRoot: options.devRoot })
+      await page.goto(target, { waitUntil: "load", timeout: 30_000 })
+      await page.waitForSelector('[data-testid="mobile-nav-toggle"]', {
+        state: "attached",
+        timeout: 30_000,
+      })
+      return
     }
 
     // Diagnostic dump — without this, all we see in CI is a generic
@@ -198,7 +202,7 @@ test("responsive contract: web host honours viewport-driven chrome", async (t) =
   context = await browser.newContext({ viewport: MOBILE })
   const page = await context.newPage()
 
-  await gotoPackagedHost(page, launch, { projectCwd })
+  await gotoPackagedHost(page, launch, { projectCwd, devRoot: tempRoot })
 
   // ───────────────────────────────────────────────────────────────────
   // 3. Mobile (≤767px): hamburger visible, bottom bar visible, drawer
