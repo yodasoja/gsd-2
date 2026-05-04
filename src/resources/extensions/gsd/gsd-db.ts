@@ -753,6 +753,11 @@ function columnExists(db: DbAdapter, table: string, column: string): boolean {
   return rows.some((row) => row["name"] === column);
 }
 
+function formatFtsUnavailableError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.replace(/\bmoduel\s*:\s*/gi, "module: ");
+}
+
 /**
  * Create the FTS5 virtual table for memories plus the triggers that keep it
  * in sync with the base table. FTS5 may be unavailable on stripped-down
@@ -787,7 +792,7 @@ export function tryCreateMemoriesFts(db: DbAdapter): boolean {
     `);
     return true;
   } catch (err) {
-    logWarning("db", `FTS5 unavailable — memory queries will use LIKE fallback: ${(err as Error).message}`);
+    logWarning("db", `FTS5 unavailable — memory queries will use LIKE fallback: ${formatFtsUnavailableError(err)}`);
     return false;
   }
 }
@@ -1738,6 +1743,35 @@ export function closeDatabase(): void {
   _dbOpenAttempted = false;
   _lastDbError = null;
   _lastDbPhase = null;
+}
+
+/**
+ * Re-open the active database connection from disk.
+ *
+ * Auto-mode can observe artifacts written by a workflow server running in a
+ * different process before its long-lived singleton has re-synchronized. The
+ * recovery path uses this to force the next state derivation to read from the
+ * current on-disk database instead of continuing with a possibly stale handle.
+ */
+export function refreshOpenDatabaseFromDisk(): boolean {
+  if (!currentDb || !currentPath) return false;
+  if (currentPath === ":memory:") return false;
+
+  const dbPath = currentPath;
+  const identityKey = _currentIdentityKey;
+
+  try {
+    closeDatabase();
+    const opened = openDatabase(dbPath);
+    if (opened && identityKey && currentDb) {
+      _dbCache.set(identityKey, { dbPath, db: currentDb });
+      _currentIdentityKey = identityKey;
+    }
+    return opened;
+  } catch (e) {
+    logWarning("db", `database refresh failed: ${(e as Error).message}`);
+    return false;
+  }
 }
 
 /** Run a full VACUUM — call sparingly (e.g. after milestone completion). */

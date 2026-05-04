@@ -14,7 +14,7 @@ import { appendEvent } from "./workflow-events.js";
 import { atomicWriteSync } from "./atomic-write.js";
 import { clearParseCache } from "./files.js";
 import { parseRoadmap as parseLegacyRoadmap, parsePlan as parseLegacyPlan } from "./parsers-legacy.js";
-import { isDbAvailable, getTask, getSlice, getSliceTasks, getPendingGates, updateTaskStatus, updateSliceStatus, insertSlice, getMilestone } from "./gsd-db.js";
+import { isDbAvailable, getTask, getSlice, getSliceTasks, getPendingGates, updateTaskStatus, updateSliceStatus, insertSlice, getMilestone, refreshOpenDatabaseFromDisk } from "./gsd-db.js";
 import { isValidationTerminal } from "./state.js";
 import { getErrorMessage } from "./error-utils.js";
 import { logWarning, logError } from "./workflow-logger.js";
@@ -588,19 +588,54 @@ export function verifyExpectedArtifact(
     }
   }
 
-  // plan-slice must produce a plan with actual task entries, not just a scaffold.
-  // The plan file may exist from a prior discussion/context step with only headings
-  // but no tasks. Without this check the artifact is considered "complete" and the
-  // unit gets skipped — but deriveState still returns phase:"planning" because the
-  // plan has no tasks, creating an infinite skip loop (#699).
+  // plan-slice verification is DB-primary. The slice plan is a projection, so
+  // DB task rows prove the slice was planned even if the rendered markdown no
+  // longer uses legacy checkbox/heading syntax.
   if (unitType === "plan-slice") {
-    const planContent = readFileSync(absPath, "utf-8");
-    // Accept checkbox-style (- [x] **T01: ...) or heading-style (### T01 -- / ### T01: / ### T01 —)
-    const hasCheckboxTask = /^- \[[xX ]\] \*\*T\d+:/m.test(planContent);
-    const hasHeadingTask = /^#{2,4}\s+T\d+\s*(?:--|—|:)/m.test(planContent);
-    if (!hasCheckboxTask && !hasHeadingTask) {
-      logWarning("recovery", `verify-fail ${unitType} ${unitId}: plan has no task checkbox/heading (len=${planContent.length}) at ${absPath}`);
-      return false;
+    const { milestone: mid, slice: sid } = parseUnitId(unitId);
+    if (mid && sid) {
+      try {
+        let taskIds: string[] | null = null;
+        if (isDbAvailable()) {
+          const refreshed = refreshOpenDatabaseFromDisk();
+          if (refreshed) {
+            const tasks = getSliceTasks(mid, sid);
+            if (tasks.length > 0) taskIds = tasks.map(t => t.id);
+          }
+        }
+
+        if (!taskIds) {
+          // LEGACY: DB unavailable or no tasks in DB. Require actual task
+          // entries so an empty scaffold cannot advance the pipeline (#699).
+          const planContent = readFileSync(absPath, "utf-8");
+          const hasCheckboxTask = /^\s*- \[[xX ]\] \*\*T\d+:/m.test(planContent);
+          const hasHeadingTask = /^\s*#{2,4}\s+T\d+\s*(?:--|—|:)/m.test(planContent);
+          if (!hasCheckboxTask && !hasHeadingTask) {
+            logWarning("recovery", `verify-fail ${unitType} ${unitId}: plan has no task checkbox/heading (len=${planContent.length}) at ${absPath}`);
+            return false;
+          }
+          const plan = parseLegacyPlan(planContent);
+          if (plan.tasks.length > 0) taskIds = plan.tasks.map((t: { id: string }) => t.id);
+        }
+
+        if (taskIds && taskIds.length > 0) {
+          const tasksDir = resolveTasksDir(base, mid, sid);
+          if (!tasksDir) {
+            logWarning("recovery", `verify-fail ${unitType} ${unitId}: resolveTasksDir returned null for ${mid}/${sid}`);
+            return false;
+          }
+          for (const tid of taskIds) {
+            const taskPlanFile = join(tasksDir, `${tid}-PLAN.md`);
+            if (!existsSync(taskPlanFile)) {
+              logWarning("recovery", `verify-fail ${unitType} ${unitId}: task plan missing ${taskPlanFile}`);
+              return false;
+            }
+          }
+        }
+      } catch (err) {
+        // Parse failure — don't block; slice plan may have non-standard format
+        logWarning("recovery", `plan-slice task plan verification failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
   }
 
@@ -625,49 +660,6 @@ export function verifyExpectedArtifact(
       } else {
         // DB available but task row not found — completion tool never ran (#3607)
         return false;
-      }
-    }
-  }
-
-  // plan-slice must also produce individual task plan files for every task listed
-  // in the slice plan. Without this check, a plan-slice that wrote S{sid}-PLAN.md
-  // but omitted T{tid}-PLAN.md files would be marked complete, causing execute-task
-  // to dispatch with a missing task plan (see issue #739).
-  if (unitType === "plan-slice") {
-    const { milestone: mid, slice: sid } = parseUnitId(unitId);
-    if (mid && sid) {
-      try {
-        // DB primary path — get task IDs to verify task plan files exist
-        let taskIds: string[] | null = null;
-        if (isDbAvailable()) {
-          const tasks = getSliceTasks(mid, sid);
-          if (tasks.length > 0) taskIds = tasks.map(t => t.id);
-        }
-
-        if (!taskIds) {
-          // LEGACY: DB unavailable or no tasks in DB — parse plan file for task IDs
-          const planContent = readFileSync(absPath, "utf-8");
-          const plan = parseLegacyPlan(planContent);
-          if (plan.tasks.length > 0) taskIds = plan.tasks.map((t: { id: string }) => t.id);
-        }
-
-        if (taskIds && taskIds.length > 0) {
-          const tasksDir = resolveTasksDir(base, mid, sid);
-          if (!tasksDir) {
-            logWarning("recovery", `verify-fail ${unitType} ${unitId}: resolveTasksDir returned null for ${mid}/${sid}`);
-            return false;
-          }
-          for (const tid of taskIds) {
-            const taskPlanFile = join(tasksDir, `${tid}-PLAN.md`);
-            if (!existsSync(taskPlanFile)) {
-              logWarning("recovery", `verify-fail ${unitType} ${unitId}: task plan missing ${taskPlanFile}`);
-              return false;
-            }
-          }
-        }
-      } catch (err) {
-        // Parse failure — don't block; slice plan may have non-standard format
-        logWarning("recovery", `plan-slice task plan verification failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
   }

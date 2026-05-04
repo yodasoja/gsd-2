@@ -55,7 +55,7 @@ import { writeUnitRuntimeRecord } from "../unit-runtime.js";
 import { withTimeout, FINALIZE_PRE_TIMEOUT_MS, FINALIZE_POST_TIMEOUT_MS } from "./finalize-timeout.js";
 import { getEligibleSlices } from "../slice-parallel-eligibility.js";
 import { startSliceParallel } from "../slice-parallel-orchestrator.js";
-import { isDbAvailable, getMilestoneSlices } from "../gsd-db.js";
+import { isDbAvailable, getMilestoneSlices, refreshOpenDatabaseFromDisk } from "../gsd-db.js";
 import type { MinimalModelRegistry } from "../context-budget.js";
 import { ensurePlanV2Graph, isEmptyPlanV2GraphResult, isMissingFinalizedContextResult } from "../uok/plan-v2.js";
 import { resolveUokFlags } from "../uok/flags.js";
@@ -74,6 +74,12 @@ import {
 /** Compare two paths for physical identity, tolerating trailing slashes and symlinks. */
 function isSamePathLocal(a: string, b: string): boolean {
   return normalizeWorktreePathForCompare(a) === normalizeWorktreePathForCompare(b);
+}
+
+function refreshPlanSliceRecoveryDbIfNeeded(unitType: string): boolean {
+  if (unitType !== "plan-slice") return true;
+  if (!isDbAvailable()) return true;
+  return refreshOpenDatabaseFromDisk();
 }
 
 // ─── Session timeout auto-resume state ────────────────────────────────────────
@@ -1065,7 +1071,16 @@ export async function runDispatch(
             `Stuck recovery: artifact for ${unitType} ${unitId} found on disk. Invalidating caches.`,
             "info",
           );
+          if (!refreshPlanSliceRecoveryDbIfNeeded(unitType)) {
+            ctx.ui.notify(
+              `Stuck recovery found ${unitType} ${unitId} artifacts, but the DB refresh failed. Keeping stuck state for retry.`,
+              "warning",
+            );
+            return { action: "continue" };
+          }
           deps.invalidateAllCaches();
+          loopState.recentUnits.length = 0;
+          loopState.stuckRecoveryAttempts = 0;
           return { action: "continue" };
         }
         ctx.ui.notify(
@@ -1075,6 +1090,32 @@ export async function runDispatch(
         deps.invalidateAllCaches();
       } else {
         // Level 2: hard stop — genuinely stuck
+        deps.invalidateAllCaches();
+        const artifactExists = verifyExpectedArtifact(
+          unitType,
+          unitId,
+          s.basePath,
+        );
+        if (artifactExists && unitType !== "complete-milestone") {
+          debugLog("autoLoop", {
+            phase: "stuck-recovery",
+            level: 2,
+            action: "artifact-found",
+          });
+          ctx.ui.notify(
+            `Stuck recovery: artifact for ${unitType} ${unitId} found on disk after cache invalidation. Continuing.`,
+            "info",
+          );
+          if (refreshPlanSliceRecoveryDbIfNeeded(unitType)) {
+            loopState.recentUnits.length = 0;
+            loopState.stuckRecoveryAttempts = 0;
+            return { action: "continue" };
+          }
+          ctx.ui.notify(
+            `Stuck recovery found ${unitType} ${unitId} artifacts, but the DB refresh failed. Stopping for manual recovery.`,
+            "warning",
+          );
+        }
         debugLog("autoLoop", {
           phase: "stuck-detected",
           unitType,
