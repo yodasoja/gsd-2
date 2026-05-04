@@ -32,7 +32,6 @@ import { isInfrastructureError, isTransientCooldownError, getCooldownRetryAfterM
 import { ModelPolicyDispatchBlockedError } from "../auto-model-selection.js";
 import { resolveEngine } from "../engine-resolver.js";
 import { logWarning } from "../workflow-logger.js";
-import { heartbeatAutoWorker } from "../db/auto-workers.js";
 import {
   recordDispatchClaim,
   markRunning as markDispatchRunning,
@@ -42,6 +41,7 @@ import {
   getRecentUnitKeysForProjectRoot,
 } from "../db/unit-dispatches.js";
 import { refreshMilestoneLease } from "../db/milestone-leases.js";
+import { heartbeatAutoWorker } from "../db/auto-workers.js";
 import { getRuntimeKv, setRuntimeKv } from "../db/runtime-kv.js";
 import { resolveUokFlags } from "../uok/flags.js";
 import { scheduleSidecarQueue } from "../uok/execution-graph.js";
@@ -83,6 +83,7 @@ import { createWorkflowPhaseReporter } from "./workflow-phase-reporter.js";
 import { createWorkflowTurnReporter } from "./workflow-turn-reporter.js";
 import { validateWorkflowSessionLock } from "./workflow-session-lock.js";
 import { dequeueSidecarItem } from "./workflow-sidecar-queue.js";
+import { maintainWorkerHeartbeat } from "./workflow-worker-heartbeat.js";
 
 // ── Stuck detection persistence (#3704) ──────────────────────────────────
 // Phase C migration: stuck-state.json deleted in favor of DB-backed
@@ -287,22 +288,14 @@ export async function autoLoop(
     iteration++;
     debugLog("autoLoop", { phase: "loop-top", iteration });
 
-    // Phase B: heartbeat the worker registry + active milestone lease so
-    // janitors and concurrent workers see a live process. Best-effort —
-    // DB unavailability or stale state must not stop the loop.
-    if (s.workerId) {
-      try {
-        heartbeatAutoWorker(s.workerId);
-        if (s.currentMilestoneId && s.milestoneLeaseToken) {
-          refreshMilestoneLease(s.workerId, s.currentMilestoneId, s.milestoneLeaseToken);
-        }
-      } catch (err) {
-        debugLog("autoLoop", {
-          phase: "heartbeat-failed",
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
+    maintainWorkerHeartbeat(s, {
+      heartbeatAutoWorker,
+      refreshMilestoneLease,
+      logHeartbeatFailure: err => debugLog("autoLoop", {
+        phase: "heartbeat-failed",
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    });
 
     // ── Journal: per-iteration flow grouping ──
     const flowId = randomUUID();
