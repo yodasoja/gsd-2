@@ -10,11 +10,10 @@
 import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
 
 import { randomUUID } from "node:crypto";
-import type { AutoSession, SidecarItem } from "./session.js";
+import type { AutoSession } from "./session.js";
 import type { LoopDeps } from "./loop-deps.js";
 import {
   MAX_LOOP_ITERATIONS,
-  type PhaseResult,
   type LoopState,
   type IterationContext,
   type IterationData,
@@ -24,7 +23,6 @@ import {
   runPreDispatch,
   runDispatch,
   runGuards,
-  runUnitPhase,
   runFinalize,
 } from "./phases.js";
 import { debugLog } from "../debug-logger.js";
@@ -45,15 +43,12 @@ import { heartbeatAutoWorker } from "../db/auto-workers.js";
 import { getRuntimeKv, setRuntimeKv } from "../db/runtime-kv.js";
 import { resolveUokFlags } from "../uok/flags.js";
 import { scheduleSidecarQueue } from "../uok/execution-graph.js";
-import { ExecutionGraphScheduler } from "../uok/execution-graph.js";
-import type { UokGraphNode } from "../uok/contracts.js";
 import { normalizeRealPath } from "../paths.js";
 import {
   decideCooldownRecovery,
   decideCustomEngineRecovery,
   decideCustomEngineVerifyRetry,
   decideDispatchClaim,
-  decideDispatchNodeKind,
   decideEngineDispatch,
   decideEngineReconcile,
   decideFinalizeResult,
@@ -86,6 +81,11 @@ import { dequeueSidecarItem } from "./workflow-sidecar-queue.js";
 import { maintainWorkerHeartbeat } from "./workflow-worker-heartbeat.js";
 import { measureMemoryPressure } from "./workflow-memory-pressure.js";
 import { buildSidecarIterationData } from "./workflow-sidecar-iteration.js";
+import {
+  createExecutionGraphUnitDispatchDeps,
+  runUnitPhaseViaContract,
+  type DispatchContract,
+} from "./workflow-unit-dispatch.js";
 
 // ── Stuck detection persistence (#3704) ──────────────────────────────────
 // Phase C migration: stuck-state.json deleted in favor of DB-backed
@@ -178,8 +178,6 @@ function logCustomVerifyRetrySaveFailure(err: unknown): void {
 const MEMORY_CHECK_INTERVAL = 5; // check every 5 iterations
 const MAX_CUSTOM_ENGINE_VERIFY_RETRIES = 3;
 
-type DispatchContract = "legacy-direct" | "uok-scheduler";
-
 interface AutoLoopOptions {
   dispatchContract?: DispatchContract;
 }
@@ -195,48 +193,6 @@ async function enforceMinRequestInterval(s: AutoSession, prefs: IterationContext
     debugLog("autoLoop", { phase: "rate-limit-wait", waitMs: decision.waitMs });
     await new Promise<void>(r => setTimeout(r, decision.waitMs));
   }
-}
-
-async function runUnitPhaseViaContract(
-  dispatchContract: DispatchContract,
-  ic: IterationContext,
-  iterData: IterationData,
-  loopState: LoopState,
-  sidecarItem?: SidecarItem,
-): Promise<PhaseResult<{ unitStartedAt?: number; requestDispatchedAt?: number }>> {
-  if (dispatchContract === "legacy-direct") {
-    return runUnitPhase(ic, iterData, loopState, sidecarItem);
-  }
-
-  const scheduler = new ExecutionGraphScheduler();
-  let outcome: PhaseResult<{ unitStartedAt?: number; requestDispatchedAt?: number }> | null = null;
-  const executeNode = async (): Promise<void> => {
-    outcome = await runUnitPhase(ic, iterData, loopState, sidecarItem);
-  };
-  const kinds: UokGraphNode["kind"][] = [
-    "unit",
-    "hook",
-    "subagent",
-    "team-worker",
-    "verification",
-    "reprocess",
-  ];
-  for (const kind of kinds) scheduler.registerHandler(kind, executeNode);
-
-  const nodeId = `dispatch:${ic.iteration}:${iterData.unitType}:${iterData.unitId}`;
-  await scheduler.run([
-    {
-      id: nodeId,
-      kind: decideDispatchNodeKind(iterData.unitType, sidecarItem?.kind) as UokGraphNode["kind"],
-      dependsOn: [],
-      metadata: {
-        unitType: iterData.unitType,
-        unitId: iterData.unitId,
-      },
-    },
-  ], { parallel: false, maxWorkers: 1 });
-
-  return outcome ?? { action: "break", reason: "scheduler-dispatch-missing-result" };
 }
 
 /**
@@ -257,6 +213,7 @@ export async function autoLoop(
   debugLog("autoLoop", { phase: "enter" });
   let iteration = 0;
   const dispatchContract = options?.dispatchContract ?? "legacy-direct";
+  const unitDispatchDeps = createExecutionGraphUnitDispatchDeps();
   // Load persisted stuck state so counters survive session restarts (#3704)
   const persisted = loadStuckState(s);
   const loopState: LoopState = {
@@ -531,6 +488,8 @@ export async function autoLoop(
           ic,
           iterData,
           loopState,
+          undefined,
+          unitDispatchDeps,
         );
         if (unitPhaseResult.action === "next") {
           const requestTimestamp = resolveUnitRequestTimestamp(unitPhaseResult.data);
@@ -748,6 +707,7 @@ export async function autoLoop(
           iterData,
           loopState,
           sidecarItem,
+          unitDispatchDeps,
         );
       } catch (err) {
         if (err instanceof ModelPolicyDispatchBlockedError) {
