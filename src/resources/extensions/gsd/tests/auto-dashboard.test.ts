@@ -233,18 +233,19 @@ test("auto progress widget renders RTK savings under the footer stats line", () 
 test("updateProgressWidget refreshes slice progress cache immediately", (t) => {
   const dir = makeTempDir("progress-cache");
   mkdirSync(join(dir, ".gsd"), { recursive: true });
-  openDatabase(join(dir, ".gsd", "gsd.db"));
-  insertMilestone({ id: "M001", title: "Milestone", status: "active" });
-  insertSlice({ milestoneId: "M001", id: "S01", title: "Done", status: "complete", sequence: 1 });
-  insertSlice({ milestoneId: "M001", id: "S02", title: "Active", status: "pending", sequence: 2 });
-  insertSlice({ milestoneId: "M001", id: "S03", title: "Pending", status: "pending", sequence: 3 });
-  insertTask({ milestoneId: "M001", sliceId: "S02", id: "T01", title: "Task", status: "complete" });
 
   t.after(() => {
     closeDatabase();
     clearSliceProgressCache();
     cleanup(dir);
   });
+
+  openDatabase(join(dir, ".gsd", "gsd.db"));
+  insertMilestone({ id: "M001", title: "Milestone", status: "active" });
+  insertSlice({ milestoneId: "M001", id: "S01", title: "Done", status: "complete", sequence: 1 });
+  insertSlice({ milestoneId: "M001", id: "S02", title: "Active", status: "pending", sequence: 2 });
+  insertSlice({ milestoneId: "M001", id: "S03", title: "Pending", status: "pending", sequence: 3 });
+  insertTask({ milestoneId: "M001", sliceId: "S02", id: "T01", title: "Task", status: "complete" });
 
   clearSliceProgressCache();
   updateProgressWidget(

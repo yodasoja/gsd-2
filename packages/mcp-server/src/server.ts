@@ -539,7 +539,8 @@ async function loadAskUserQuestionsWriteGateModule(): Promise<AskUserQuestionsWr
         if (/^[a-z]{2,}:/i.test(modulePath) && !modulePath.startsWith('file:')) {
           throw new Error('GSD_WORKFLOW_WRITE_GATE_MODULE only supports file: URLs or filesystem paths.');
         }
-        const specifier = modulePath.startsWith('file:') ? modulePath : pathToFileURL(resolve(modulePath)).href;
+        const baseRoot = process.env.GSD_WORKFLOW_PROJECT_ROOT?.trim() || process.cwd();
+        const specifier = modulePath.startsWith('file:') ? modulePath : pathToFileURL(resolve(baseRoot, modulePath)).href;
         const loaded = await import(specifier);
         return isAskUserQuestionsWriteGateModule(loaded) ? loaded : null;
       } catch (err) {
