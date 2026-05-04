@@ -261,6 +261,48 @@ jobs:
           export GSD_SMOKE_BINARY="$(pwd)/dist/loader.js"
           npm run test:live-regression
 
+  e2e:
+    # Real-process e2e tests in tests/e2e/. Spawns the built dist/loader.js
+    # through the shared harness in tests/e2e/_shared/. This is where new
+    # cross-process flows land (fake-LLM agent loops, MCP server, native
+    # ABI, migration chain, etc.) - see tests/e2e/README.md.
+    # No untrusted GitHub event input is consumed in run: blocks.
+    timeout-minutes: 15
+    needs: detect-changes
+    if: needs.detect-changes.outputs.docs-only != 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build core
+        run: npm run build:core
+
+      - name: Run e2e suite (against built binary)
+        run: |
+          chmod +x dist/loader.js
+          export GSD_SMOKE_BINARY="$(pwd)/dist/loader.js"
+          npm run test:e2e
+
+      - name: Upload e2e artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: test-results/e2e
+          if-no-files-found: ignore
+          retention-days: 7
+
   windows-portability:
     timeout-minutes: 25
     needs: detect-changes
