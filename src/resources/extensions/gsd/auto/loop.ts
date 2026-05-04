@@ -68,6 +68,7 @@ import {
   decideMinRequestInterval,
   decideWorkflowLoop,
 } from "./workflow-kernel.js";
+import { createWorkflowJournalReporter } from "./workflow-journal-reporter.js";
 import { createWorkflowTurnReporter } from "./workflow-turn-reporter.js";
 
 // ── Stuck detection persistence (#3704) ──────────────────────────────────
@@ -406,6 +407,11 @@ export async function autoLoop(
     const flowId = randomUUID();
     let seqCounter = 0;
     const nextSeq = () => ++seqCounter;
+    const journalReporter = createWorkflowJournalReporter({
+      emitJournalEvent: deps.emitJournalEvent,
+      flowId,
+      nextSeq,
+    });
     const turnId = randomUUID();
     s.currentTraceId = flowId;
     s.currentTurnId = turnId;
@@ -513,7 +519,11 @@ export async function autoLoop(
           unitType: sidecarItem.unitType,
           unitId: sidecarItem.unitId,
         });
-        deps.emitJournalEvent({ ts: new Date().toISOString(), flowId, seq: nextSeq(), eventType: "sidecar-dequeue", data: { kind: sidecarItem.kind, unitType: sidecarItem.unitType, unitId: sidecarItem.unitId } });
+        journalReporter.emit("sidecar-dequeue", {
+          kind: sidecarItem.kind,
+          unitType: sidecarItem.unitType,
+          unitId: sidecarItem.unitId,
+        });
       }
 
       const sessionLockBase = deps.lockBase();
@@ -545,7 +555,7 @@ export async function autoLoop(
       }
 
       const ic: IterationContext = { ctx, pi, s, deps, prefs, iteration, flowId, nextSeq };
-      deps.emitJournalEvent({ ts: new Date().toISOString(), flowId, seq: nextSeq(), eventType: "iteration-start", data: { iteration } });
+      journalReporter.emit("iteration-start", { iteration });
       let iterData: IterationData;
 
       // ── Custom engine path ──────────────────────────────────────────────
@@ -721,7 +731,7 @@ export async function autoLoop(
         consecutiveErrors = 0;
         consecutiveCooldowns = 0;
         recentErrorMessages.length = 0;
-        deps.emitJournalEvent({ ts: new Date().toISOString(), flowId, seq: nextSeq(), eventType: "iteration-end", data: { iteration } });
+        journalReporter.emit("iteration-end", { iteration });
         saveStuckState(s, loopState); // persist across session restarts (#3704)
         debugLog("autoLoop", { phase: "iteration-complete", iteration });
 
@@ -967,7 +977,7 @@ export async function autoLoop(
       consecutiveErrors = 0; // Iteration completed successfully
       consecutiveCooldowns = 0;
       recentErrorMessages.length = 0;
-      deps.emitJournalEvent({ ts: new Date().toISOString(), flowId, seq: nextSeq(), eventType: "iteration-end", data: { iteration } });
+      journalReporter.emit("iteration-end", { iteration });
       saveStuckState(s, loopState); // persist across session restarts (#4382)
       debugLog("autoLoop", { phase: "iteration-complete", iteration });
       finishTurn("completed");
@@ -989,7 +999,7 @@ export async function autoLoop(
       // Always emit iteration-end on error so the journal records iteration
       // completion even on failure (#2344). Without this, errors in
       // runFinalize leave the journal incomplete, making diagnosis harder.
-      deps.emitJournalEvent({ ts: new Date().toISOString(), flowId, seq: nextSeq(), eventType: "iteration-end", data: { iteration, error: msg } });
+      journalReporter.emit("iteration-end", { iteration, error: msg });
 
       // ── Pre-send model-policy block: not a retryable error (#4959 / #4850) ──
       // The model-policy gate runs before the prompt is sent.  When every
@@ -1014,13 +1024,7 @@ export async function autoLoop(
           reasons: loopErr.reasons,
         });
         ctx.ui.notify(policyDecision.notifyMessage, "error");
-        deps.emitJournalEvent({
-          ts: new Date().toISOString(),
-          flowId,
-          seq: nextSeq(),
-          eventType: "unit-end",
-          data: policyDecision.journalData,
-        });
+        journalReporter.emit("unit-end", policyDecision.journalData);
         // Carry the blocked unit identity into the turn-result observer:
         // the throw originated inside dispatch, so observedUnitType/Id were
         // not assigned by the success path at lines 453/631/647 — but the
