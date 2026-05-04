@@ -683,7 +683,7 @@ export function registerHooks(
       // Let recordToolInvocationError classify the failure so non-gsd_ harness
       // errors and deterministic policy rejections are handled consistently.
       recordToolInvocationError(event.toolName, errorText);
-    } else {
+    } else if (isAutoActive()) {
       clearToolInvocationError();
     }
     // Safety harness: record tool execution results for evidence cross-referencing
