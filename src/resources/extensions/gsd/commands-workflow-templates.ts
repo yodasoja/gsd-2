@@ -1,3 +1,6 @@
+// Project/App: GSD-2
+// File Purpose: Workflow template commands for starting, listing, and dispatching workflows.
+
 /**
  * GSD Workflow Template Commands — /gsd start, /gsd templates
  *
@@ -24,6 +27,7 @@ import { isAutoActive, isAutoPaused } from "./auto.js";
 import { getErrorMessage } from "./error-utils.js";
 import { resolvePlugin, type WorkflowPlugin } from "./workflow-plugins.js";
 import { currentDirectoryRoot } from "./commands/context.js";
+import { formatRecommendedProcessPaths } from "./process-task-path.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -328,6 +332,9 @@ export async function handleStart(
         "  /gsd start bugfix fix login button not responding\n" +
         "  /gsd start spike evaluate auth libraries\n" +
         "  /gsd start hotfix critical: API returns 500\n\n" +
+        "Recommended task paths:\n" +
+        formatRecommendedProcessPaths() +
+        "\n\n" +
         "Flags:\n" +
         "  --dry-run       Preview what would happen without executing\n" +
         "  --issue <ref>   Link to a GitHub issue\n\n" +
