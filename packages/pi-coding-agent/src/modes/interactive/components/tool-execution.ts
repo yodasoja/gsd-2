@@ -107,9 +107,9 @@ function renderToolFrame(
 
 	const borderColor = opts.tone === "error" ? "toolError" : opts.tone === "pending" ? "toolRunning" : "toolSuccess";
 	const topColor = borderColor;
-	const labelColor = opts.tone === "error" ? "toolError" : "surfaceTitle";
+	const labelColor = opts.tone === "error" ? "toolError" : opts.tone === "pending" ? "toolRunning" : "toolSuccess";
 	const statusColor = opts.tone === "error" ? "toolError" : opts.tone === "pending" ? "toolRunning" : "toolSuccess";
-	const leftStyled = theme.fg(labelColor, theme.bold(`• ${opts.label}`));
+	const leftStyled = theme.fg(labelColor, theme.bold(opts.label));
 	const rightStyled = theme.fg(statusColor, opts.status);
 	const gap = Math.max(1, outerWidth - visibleWidth(leftStyled) - visibleWidth(rightStyled));
 	const headerRow = `${leftStyled}${" ".repeat(gap)}${rightStyled}`;
@@ -126,6 +126,27 @@ function renderToolFrame(
 		.borderColor((line) => theme.fg(line.startsWith("─") ? topColor : borderColor, line))
 		.title(headerRow + " ".repeat(headerPad))
 		.render(bodyLines, outerWidth);
+}
+
+function renderCollapsedToolRow(
+	label: string,
+	status: string,
+	width: number,
+	tone: Extract<ToolFrameTone, "success">,
+): string[] {
+	const outerWidth = Math.max(20, width);
+	const contentWidth = Math.max(1, outerWidth - 2);
+	const statusColor = tone === "success" ? "toolSuccess" : "toolMuted";
+	const labelStyled = theme.fg(statusColor, label);
+	const statusStyled = theme.fg(statusColor, status);
+	const labelWidth = Math.max(1, contentWidth - visibleWidth(statusStyled) - 1);
+	const clippedLabel = truncateToWidth(labelStyled, labelWidth, "");
+	const gap = Math.max(1, contentWidth - visibleWidth(clippedLabel) - visibleWidth(statusStyled));
+	const line = `${clippedLabel}${" ".repeat(gap)}${statusStyled}`;
+	return style()
+		.border("minimal")
+		.borderColor((text) => theme.fg(statusColor, text))
+		.render([line], outerWidth);
 }
 
 const COMPACT_ARG_VALUE_LIMIT = 60;
@@ -559,18 +580,13 @@ export class ToolExecutionComponent extends Container {
 		const frameTone: ToolFrameTone =
 			this.result?.isError ? "error" : this.isPartial || !this.result ? "pending" : "success";
 		const elapsed = formatElapsed((this.endedAt ?? Date.now()) - this.startedAt);
-		const frameStatus = `${this.isPartial || !this.result ? "Running" : this.result.isError ? "Error" : "Done"} · ${elapsed}`;
+		const frameStatus = `${this.isPartial || !this.result ? "running" : this.result.isError ? "failed" : "success"} · ${elapsed}`;
 		const parsed = parseMcpToolName(this.toolName);
 		const frameLabel = parsed
-			? `Tool ${parsed.server}·${parsed.tool}`
-			: `Tool ${prettifyToolName(this.toolName, this.toolDefinition?.label) || "unknown"}`;
+			? `${parsed.server}·${parsed.tool}`
+			: prettifyToolName(this.toolName, this.toolDefinition?.label) || "unknown";
 		if (this.shouldRenderCompactSuccess()) {
-			const availableWidth = Math.max(1, frameWidth - 2);
-			const summaryWidth = Math.max(1, availableWidth - visibleWidth(frameStatus) - 1);
-			const summary = truncateToWidth(this.getCompactSummary(frameLabel), summaryWidth, "");
-			const gap = Math.max(1, availableWidth - visibleWidth(summary) - visibleWidth(frameStatus));
-			const line = `${theme.fg("toolSuccess", summary)}${" ".repeat(gap)}${theme.fg("toolSuccess", frameStatus)}`;
-			return ["", ...style().border("minimal").borderColor((text) => theme.fg("toolSuccess", text)).render([line], frameWidth)];
+			return ["", ...renderCollapsedToolRow(this.getCompactSummary(frameLabel), frameStatus, frameWidth, "success")];
 		}
 		const lines = super.render(contentWidth);
 		const framed = renderToolFrame(lines, frameWidth, {
@@ -584,7 +600,7 @@ export class ToolExecutionComponent extends Container {
 	private shouldRenderCompactSuccess(): boolean {
 		if (this.expanded || this.isPartial || !this.result || this.result.isError) return false;
 		const hasImages = this.result.content?.some((block) => block.type === "image") ?? false;
-		return !hasImages && this.getTextOutput().trim().length === 0;
+		return !hasImages;
 	}
 
 	getRollupPhase(): ToolExecutionPhase | null {
@@ -615,7 +631,7 @@ export class ToolExecutionComponent extends Container {
 	}
 
 	private getCompactSummary(frameLabel: string): string {
-		return `${frameLabel} Completed`;
+		return frameLabel;
 	}
 
 	private updateDisplay(): void {

@@ -2,8 +2,13 @@
 
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import stripAnsi from "strip-ansi";
 
+import { AdaptiveLayoutComponent } from "./components/adaptive-layout.js";
+import { initTheme } from "./theme/theme.js";
 import { resolveTuiMode } from "./tui-mode.js";
+
+initTheme("dark", false);
 
 describe("resolveTuiMode", () => {
 	test("explicit overrides beat auto selection", () => {
@@ -36,5 +41,25 @@ describe("resolveTuiMode", () => {
 
 	test("falls back to chat mode for plain conversation", () => {
 		assert.equal(resolveTuiMode({ terminalWidth: 100 }), "chat");
+	});
+});
+
+describe("AdaptiveLayoutComponent", () => {
+	test("renders workflow layout with prototype rule frames", () => {
+		const layout = new AdaptiveLayoutComponent(() => ({
+			override: "workflow",
+			activeToolCount: 2,
+			gsdPhase: "execute-task",
+			sessionName: "main",
+			cwd: "/Users/example/project",
+		}));
+
+		const plain = layout.render(120).map(stripAnsi);
+
+		assert.match(plain[0], /^─+/, "workflow layout should start with a rule frame");
+		assert.ok(plain.some((line) => line.includes("GSD Command Center")), "workflow title should render");
+		assert.ok(plain.some((line) => line.includes("signals")), "inspector title should render");
+		assert.ok(plain.some((line) => line.includes("│ Active")), "body rows should keep prototype gutter");
+		assert.ok(!plain.some((line) => /[╭╮╰╯]/.test(line)), "workflow layout should not use rounded box corners");
 	});
 });

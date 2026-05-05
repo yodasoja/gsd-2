@@ -51,24 +51,26 @@ function renderToolCollapsed(
 }
 
 describe("ToolExecutionComponent", () => {
-	test("renders framed header with Running status while tool is partial", () => {
+	test("renders framed header with running status while tool is partial", () => {
 		const rendered = renderToolCollapsed("mcp__demo__do_thing", { ok: true });
 
-		assert.match(rendered, /Tool demo\u00b7do_thing/);
-		assert.match(rendered, /Running/);
-		assert.match(rendered, /Running · \d+(ms|s)/);
+		assert.match(rendered, /demo\u00b7do_thing/);
+		assert.doesNotMatch(rendered, /Tool demo\u00b7do_thing/);
+		assert.match(rendered, /running/);
+		assert.match(rendered, /running · \d+(ms|s)/);
 	});
 
-	test("renders framed header with Error status for failed tool result", () => {
+	test("renders framed header with failed status for failed tool result", () => {
 		const rendered = renderTool(
 			"mcp__demo__do_thing",
 			{ ok: true },
 			{ content: [{ type: "text", text: "boom" }], isError: true },
 		);
 
-		assert.match(rendered, /Tool demo\u00b7do_thing/);
-		assert.match(rendered, /Error/);
-		assert.match(rendered, /Error · \d+(ms|s)/);
+		assert.match(rendered, /demo\u00b7do_thing/);
+		assert.doesNotMatch(rendered, /Tool demo\u00b7do_thing/);
+		assert.match(rendered, /failed/);
+		assert.match(rendered, /failed · \d+(ms|s)/);
 		assert.match(rendered, /boom/);
 	});
 
@@ -79,8 +81,9 @@ describe("ToolExecutionComponent", () => {
 			{ content: [], isError: false },
 		);
 
-		assert.match(rendered, /Done · \d+(ms|s)/);
-		assert.match(rendered, /Completed/);
+		assert.match(rendered, /success · \d+(ms|s)/);
+		assert.match(rendered, /demo\u00b7noop/);
+		assert.doesNotMatch(rendered, /Completed/);
 		assert.doesNotMatch(rendered, /ok=true/);
 	});
 
@@ -143,7 +146,7 @@ describe("ToolExecutionComponent", () => {
 			},
 		);
 
-		assert.match(rendered, /Error/);
+		assert.match(rendered, /failed/);
 		assert.match(rendered, /custom saw error/);
 		assert.doesNotMatch(rendered, /custom saw success/);
 	});
@@ -206,14 +209,16 @@ describe("ToolExecutionComponent", () => {
 			{ label: "Complete Slice" },
 		);
 
-		assert.match(rendered, /Tool Complete Slice/);
+		assert.match(rendered, /Complete Slice/);
+		assert.doesNotMatch(rendered, /Tool Complete Slice/);
 		assert.doesNotMatch(rendered, /gsd_slice_complete/);
 	});
 
 	test("frame header strips gsd_ prefix and title-cases when no label is registered", () => {
 		const rendered = renderToolCollapsed("gsd_requirement_update", { id: "R005" });
 
-		assert.match(rendered, /Tool Requirement Update/);
+		assert.match(rendered, /Requirement Update/);
+		assert.doesNotMatch(rendered, /Tool Requirement Update/);
 		assert.doesNotMatch(rendered, /gsd_requirement_update/);
 	});
 
@@ -242,7 +247,7 @@ describe("ToolExecutionComponent", () => {
 		assert.doesNotMatch(rendered, /…/);
 	});
 
-	test("generic fallback truncates long output when collapsed", () => {
+	test("generic fallback collapses successful output rows until expanded", () => {
 		const longOutput = Array.from({ length: 25 }, (_, i) => `line ${i + 1}`).join("\n");
 		const rendered = renderToolCollapsed(
 			"mcp__demo__do_thing",
@@ -250,10 +255,10 @@ describe("ToolExecutionComponent", () => {
 			{ content: [{ type: "text", text: longOutput }], isError: false },
 		);
 
-		assert.match(rendered, /line 1\b/);
-		assert.match(rendered, /line 10\b/);
-		assert.doesNotMatch(rendered, /line 20\b/);
-		assert.match(rendered, /\(15 more lines/);
+		assert.match(rendered, /demo\u00b7do_thing/);
+		assert.match(rendered, /success · \d+(ms|s)/);
+		assert.doesNotMatch(rendered, /line 1\b/);
+		assert.doesNotMatch(rendered, /\(15 more lines/);
 	});
 
 	test("generic fallback falls back to truncated JSON for complex args", () => {

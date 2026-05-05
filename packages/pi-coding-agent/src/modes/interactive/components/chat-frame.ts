@@ -1,3 +1,4 @@
+// GSD2 TUI - Shared chat frame renderer for assistant, user, and system cards.
 import { style, truncateToWidth, visibleWidth } from "@gsd/pi-tui";
 import { theme } from "../theme/theme.js";
 import { formatTimestamp, type TimestampFormat } from "./timestamp.js";
@@ -34,7 +35,7 @@ export function renderChatFrame(
 				: "borderAccent";
 	const borderMuted = isPurple ? "customMessageLabel" : "borderMuted";
 	const border = (s: string) => theme.fg(borderColor, s);
-	const leftRaw = `• ${opts.label}`;
+	const leftRaw = opts.label;
 	const rightRaw =
 		opts.showTimestamp === false || !opts.timestamp
 			? ""

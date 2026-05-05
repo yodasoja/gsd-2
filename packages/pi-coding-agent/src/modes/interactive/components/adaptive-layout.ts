@@ -126,8 +126,8 @@ export class AdaptiveLayoutComponent implements Component {
 
 	private frame(lines: string[], width: number, title: string, rightTitle: string, accent: ThemeColor): string[] {
 		return style()
-			.border("rounded")
-			.density("comfortable")
+			.border("rule")
+			.density("compact")
 			.toneColor((text) => theme.fg("surfaceMuted", text))
 			.borderColor((text) => theme.fg("surfaceBorder", text))
 			.title(theme.fg("surfaceTitle", title))
