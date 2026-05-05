@@ -9,7 +9,7 @@
 
 import { describe, test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
@@ -72,8 +72,6 @@ function hasXcodeBundle(basePath: string): boolean {
   } catch { return false; }
 }
 
-import { existsSync } from "node:fs";
-
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 test("PROJECT_FILES is exported and contains expected multi-ecosystem entries", () => {
@@ -86,6 +84,19 @@ test("PROJECT_FILES is exported and contains expected multi-ecosystem entries", 
   assert.ok(PROJECT_FILES.includes("package.json"), "includes JS marker");
   assert.ok(PROJECT_FILES.includes("pom.xml"), "includes Java marker");
   assert.ok(PROJECT_FILES.includes("Package.swift"), "includes Swift marker");
+});
+
+test("runUnitPhase fails closed when classification returns invalid-repo", () => {
+  const source = readFileSync(join(process.cwd(), "src/resources/extensions/gsd/auto/phases.ts"), "utf-8");
+  const invalidRepoBranch = source.slice(
+    source.indexOf('projectClassification.kind === "invalid-repo"'),
+    source.indexOf('projectClassification.kind === "greenfield"'),
+  );
+
+  assert.match(invalidRepoBranch, /ctx\.ui\.notify\(msg,\s*"error"\)/);
+  assert.match(invalidRepoBranch, /await deps\.stopAuto\(ctx,\s*pi,\s*msg\)/);
+  assert.match(invalidRepoBranch, /return \{ action: "break", reason: "worktree-invalid" \}/);
+  assert.match(invalidRepoBranch, /classified as invalid-repo/);
 });
 
 describe("health check with git repo", () => {
