@@ -324,6 +324,20 @@ export function createBaseSchemaObjects(db: DbAdapter, hooks: BaseSchemaHooks): 
   `);
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS milestone_commit_attributions (
+      commit_sha TEXT NOT NULL,
+      milestone_id TEXT NOT NULL,
+      slice_id TEXT DEFAULT NULL,
+      task_id TEXT DEFAULT NULL,
+      source TEXT NOT NULL DEFAULT 'recorded',
+      confidence REAL NOT NULL DEFAULT 1.0,
+      files_json TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY (commit_sha, milestone_id)
+    )
+  `);
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS audit_events (
       event_id TEXT PRIMARY KEY,
       trace_id TEXT NOT NULL,
@@ -359,6 +373,7 @@ export function createBaseSchemaObjects(db: DbAdapter, hooks: BaseSchemaHooks): 
   db.exec("CREATE INDEX IF NOT EXISTS idx_gate_runs_turn ON gate_runs(trace_id, turn_id)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_gate_runs_lookup ON gate_runs(milestone_id, slice_id, task_id, gate_id)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_turn_git_tx_turn ON turn_git_transactions(trace_id, turn_id)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_milestone_commit_attr_milestone ON milestone_commit_attributions(milestone_id)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_audit_events_trace ON audit_events(trace_id, ts)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_audit_events_turn ON audit_events(trace_id, turn_id, ts)");
 

@@ -106,10 +106,10 @@ describe("db-schema-metadata", () => {
   test("records schema version rows with timestamps", () => {
     const db = new FakeAdapter();
 
-    recordSchemaVersion(db, 25);
+    recordSchemaVersion(db, 26);
 
     assert.equal(db.runCalls.length, 1);
-    assert.equal((db.runCalls[0][0] as Record<string, unknown>)[":version"], 25);
+    assert.equal((db.runCalls[0][0] as Record<string, unknown>)[":version"], 26);
     assert.equal(typeof (db.runCalls[0][0] as Record<string, unknown>)[":applied_at"], "string");
   });
 });

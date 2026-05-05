@@ -399,6 +399,23 @@ export function applyMigrationV23MilestoneQueue(db: DbAdapter): void {
   ensureColumn(db, "milestones", "sequence", "ALTER TABLE milestones ADD COLUMN sequence INTEGER DEFAULT 0");
 }
 
+export function applyMigrationV26MilestoneCommitAttributions(db: DbAdapter): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS milestone_commit_attributions (
+      commit_sha TEXT NOT NULL,
+      milestone_id TEXT NOT NULL,
+      slice_id TEXT DEFAULT NULL,
+      task_id TEXT DEFAULT NULL,
+      source TEXT NOT NULL DEFAULT 'recorded',
+      confidence REAL NOT NULL DEFAULT 1.0,
+      files_json TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY (commit_sha, milestone_id)
+    )
+  `);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_milestone_commit_attr_milestone ON milestone_commit_attributions(milestone_id)");
+}
+
 export interface MigrationV22Hooks {
   copyQualityGateRowsToRepairedTable(db: DbAdapter): void;
 }

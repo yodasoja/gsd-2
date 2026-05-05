@@ -14,7 +14,7 @@ import { appendEvent } from "./workflow-events.js";
 import { atomicWriteSync } from "./atomic-write.js";
 import { clearParseCache } from "./files.js";
 import { parseRoadmap as parseLegacyRoadmap, parsePlan as parseLegacyPlan } from "./parsers-legacy.js";
-import { isDbAvailable, getTask, getSlice, getSliceTasks, getPendingGates, updateTaskStatus, updateSliceStatus, insertSlice, getMilestone, refreshOpenDatabaseFromDisk } from "./gsd-db.js";
+import { isDbAvailable, getTask, getSlice, getSliceTasks, getPendingGates, updateTaskStatus, updateSliceStatus, insertSlice, getMilestone, refreshOpenDatabaseFromDisk, getCompletedMilestoneTaskFileHints, getMilestoneCommitAttributionShas, recordMilestoneCommitAttribution } from "./gsd-db.js";
 import { isValidationTerminal } from "./state.js";
 import { getErrorMessage } from "./error-utils.js";
 import { logWarning, logError } from "./workflow-logger.js";
@@ -147,9 +147,9 @@ export function hasImplementationArtifacts(basePath: string, milestoneId?: strin
     // milestone commits instead of treating the self-diff as proof of no work.
     if (changedFiles.length === 0) {
       if (milestoneId && currentBranch === integrationBranch) {
-        const tagged = getChangedFilesFromMilestoneTaggedCommits(basePath, milestoneId);
-        if (!tagged.ok) return "unknown";
-        if (tagged.matched) return classifyImplementationFiles(tagged.files);
+        const milestoneEvidence = getChangedFilesFromMilestoneEvidence(basePath, milestoneId);
+        if (!milestoneEvidence.ok) return "unknown";
+        if (milestoneEvidence.matched) return classifyImplementationFiles(milestoneEvidence.files);
       }
       if (currentBranch && currentBranch !== "HEAD") return "absent";
       return "unknown";
@@ -164,9 +164,9 @@ export function hasImplementationArtifacts(basePath: string, milestoneId?: strin
     // insufficient; use the same milestone-tagged evidence fallback as the
     // self-diff retry path before declaring the milestone implementation-free.
     if (milestoneId) {
-      const tagged = getChangedFilesFromMilestoneTaggedCommits(basePath, milestoneId);
-      if (!tagged.ok) return "unknown";
-      if (tagged.matched) return classifyImplementationFiles(tagged.files);
+      const milestoneEvidence = getChangedFilesFromMilestoneEvidence(basePath, milestoneId);
+      if (!milestoneEvidence.ok) return "unknown";
+      if (milestoneEvidence.matched) return classifyImplementationFiles(milestoneEvidence.files);
     }
 
     return "absent";
@@ -197,6 +197,10 @@ function classifyImplementationFiles(files: readonly string[]): "present" | "abs
 
 function isImplementationPath(file: string): boolean {
   return !file.startsWith(".gsd/") && !file.startsWith(".gsd\\");
+}
+
+function normalizeRepoPath(file: string): string {
+  return file.trim().replace(/\\/g, "/").replace(/^\.\/+/, "");
 }
 
 /**
@@ -299,6 +303,126 @@ function getChangedFilesFromMilestoneTaggedCommits(
     matched: true,
     files: [...new Set([...scoped.files, ...unscoped.files])],
   };
+}
+
+function getChangedFilesFromMilestoneEvidence(
+  basePath: string,
+  milestoneId: string,
+): { ok: boolean; matched: boolean; files: string[] } {
+  const tagged = getChangedFilesFromMilestoneTaggedCommits(basePath, milestoneId);
+  if (!tagged.ok) return tagged;
+  if (tagged.matched && classifyImplementationFiles(tagged.files) === "present") return tagged;
+
+  const attributed = getChangedFilesFromAttributedMilestoneCommits(basePath, milestoneId);
+  if (!attributed.ok) return tagged.matched ? tagged : attributed;
+  if (attributed.matched && classifyImplementationFiles(attributed.files) === "present") return attributed;
+
+  const backfilled = backfillChangedFilesFromUntaggedMilestoneCommits(basePath, milestoneId);
+  if (!backfilled.ok) return tagged.matched ? tagged : attributed.matched ? attributed : backfilled;
+  if (!backfilled.matched) {
+    if (tagged.matched) return tagged;
+    return attributed.matched ? attributed : backfilled;
+  }
+
+  return {
+    ok: true,
+    matched: true,
+    files: [...new Set([...tagged.files, ...attributed.files, ...backfilled.files])],
+  };
+}
+
+function getChangedFilesFromAttributedMilestoneCommits(
+  basePath: string,
+  milestoneId: string,
+): { ok: boolean; matched: boolean; files: string[] } {
+  try {
+    const shas = getMilestoneCommitAttributionShas(milestoneId);
+    if (shas.length === 0) return { ok: true, matched: false, files: [] };
+
+    const files = new Set<string>();
+    let matched = false;
+    for (const sha of shas) {
+      if (!isFullCommitSha(sha)) continue;
+      const commitFiles = getChangedFilesForCommit(basePath, sha);
+      if (commitFiles.length === 0) continue;
+      matched = true;
+      for (const file of commitFiles) files.add(file);
+    }
+    return { ok: true, matched, files: [...files] };
+  } catch (e) {
+    logWarning("recovery", `milestone attribution scan failed: ${(e as Error).message}`);
+    return { ok: false, matched: false, files: [] };
+  }
+}
+
+function backfillChangedFilesFromUntaggedMilestoneCommits(
+  basePath: string,
+  milestoneId: string,
+): { ok: boolean; matched: boolean; files: string[] } {
+  try {
+    const milestone = getMilestone(milestoneId);
+    const milestoneStartedAt = milestone?.created_at ? Math.floor(Date.parse(milestone.created_at) / 1000) * 1000 : NaN;
+    if (!Number.isFinite(milestoneStartedAt)) return { ok: true, matched: false, files: [] };
+
+    const taskFileHints = getCompletedMilestoneTaskFileHints(milestoneId);
+    if (taskFileHints.length === 0) return { ok: true, matched: false, files: [] };
+
+    const hintSet = new Set(taskFileHints.map(normalizeRepoPath).filter(Boolean));
+    if (hintSet.size === 0) return { ok: true, matched: false, files: [] };
+
+    const records = getCommitRecords(basePath);
+    const files = new Set<string>();
+    let matched = false;
+    for (const record of records) {
+      if (!isFullCommitSha(record.hash)) continue;
+      if (Date.parse(record.committedAt) < milestoneStartedAt) continue;
+      if (record.parents.trim().split(/\s+/).filter(Boolean).length > 1) continue;
+      if (commitMessageHasGsdTrailer(record.message)) continue;
+
+      const commitFiles = getChangedFilesForCommit(basePath, record.hash);
+      const implementationFiles = commitFiles.map(normalizeRepoPath).filter(isImplementationPath);
+      if (implementationFiles.length === 0) continue;
+      if (!implementationFiles.some((file) => hintSet.has(file))) continue;
+
+      matched = true;
+      for (const file of implementationFiles) files.add(file);
+      recordMilestoneCommitAttribution({
+        commitSha: record.hash,
+        milestoneId,
+        source: "backfill",
+        confidence: 0.8,
+        files: implementationFiles,
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    return { ok: true, matched, files: [...files] };
+  } catch (e) {
+    logWarning("recovery", `milestone attribution backfill failed: ${(e as Error).message}`);
+    return { ok: false, matched: false, files: [] };
+  }
+}
+
+function getCommitRecords(basePath: string): Array<{ hash: string; parents: string; committedAt: string; message: string }> {
+  const logOutput = execFileSync("git", ["log", "--format=%H%x1f%P%x1f%cI%x1f%B%x1e", "HEAD"], {
+    cwd: basePath,
+    stdio: ["ignore", "pipe", "pipe"],
+    encoding: "utf-8",
+  });
+  return logOutput
+    .split("\x1e")
+    .map((record) => record.trim())
+    .filter(Boolean)
+    .flatMap((record) => {
+      const parts = record.split("\x1f");
+      if (parts.length < 4) return [];
+      const [hash, parents, committedAt, ...messageParts] = parts;
+      return [{ hash: hash.trim(), parents: parents.trim(), committedAt: committedAt.trim(), message: messageParts.join("\x1f") }];
+    });
+}
+
+function isFullCommitSha(value: string): boolean {
+  return /^[0-9a-f]{40}$/i.test(value);
 }
 
 function scanGsdTaggedCommits(

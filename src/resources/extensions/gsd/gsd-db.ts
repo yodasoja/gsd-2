@@ -77,6 +77,7 @@ import {
   applyMigrationV21StructuredMemories,
   applyMigrationV22QualityGateRepair,
   applyMigrationV23MilestoneQueue,
+  applyMigrationV26MilestoneCommitAttributions,
 } from "./db-migration-steps.js";
 import { isMemoriesFtsAvailableSchema, tryCreateMemoriesFtsSchema } from "./db-memory-fts-schema.js";
 import { createDbOpenState, type DbOpenPhase } from "./db-open-state.js";
@@ -105,7 +106,7 @@ const providerLoader = createSqliteProviderLoader({
   writeStderr: (message: string) => process.stderr.write(message),
 });
 
-export const SCHEMA_VERSION = 25;
+export const SCHEMA_VERSION = 26;
 
 function initSchema(db: DbAdapter, fileBacked: boolean): void {
   if (fileBacked) db.exec("PRAGMA journal_mode=WAL");
@@ -327,6 +328,11 @@ function migrateSchema(db: DbAdapter): void {
       // createRuntimeKvTableV25 for the full schema + invariants.
       createRuntimeKvTableV25(db);
       recordSchemaVersion(db, 25);
+    }
+
+    if (currentVersion < 26) {
+      applyMigrationV26MilestoneCommitAttributions(db);
+      recordSchemaVersion(db, 26);
     }
 
     db.exec("COMMIT");
@@ -1349,6 +1355,45 @@ export function getSliceTasks(milestoneId: string, sliceId: string): TaskRow[] {
   return rows.map(rowToTask);
 }
 
+export function getCompletedMilestoneTaskFileHints(milestoneId: string): string[] {
+  if (!currentDb) return [];
+  const rows = currentDb.prepare(
+    `SELECT files, key_files
+     FROM tasks
+     WHERE milestone_id = :mid AND status IN ('complete', 'done')`,
+  ).all({ ":mid": milestoneId }) as Array<Record<string, unknown>>;
+
+  const hints = new Set<string>();
+  for (const row of rows) {
+    for (const raw of [row["files"], row["key_files"]]) {
+      for (const file of parseStringArrayColumn(raw)) {
+        const normalized = normalizeRepoPath(file);
+        if (normalized) hints.add(normalized);
+      }
+    }
+  }
+  return [...hints];
+}
+
+function parseStringArrayColumn(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.filter((entry): entry is string => typeof entry === "string");
+  if (typeof raw !== "string") return [];
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) return parsed.filter((entry): entry is string => typeof entry === "string");
+    if (typeof parsed === "string") return [parsed];
+  } catch {
+    return trimmed.split(",");
+  }
+  return [];
+}
+
+function normalizeRepoPath(file: string): string {
+  return file.trim().replace(/\\/g, "/").replace(/^\.\/+/, "");
+}
+
 // ─── ADR-011 Phase 2 escalation helpers ──────────────────────────────────
 
 /** Set pause-on-escalation state on a completed task. Mutually exclusive with awaiting_review. */
@@ -2074,6 +2119,9 @@ export function deleteMilestone(milestoneId: string): void {
       `DELETE FROM artifacts WHERE milestone_id = :mid`,
     ).run({ ":mid": milestoneId });
     currentDb!.prepare(
+      `DELETE FROM milestone_commit_attributions WHERE milestone_id = :mid`,
+    ).run({ ":mid": milestoneId });
+    currentDb!.prepare(
       `DELETE FROM milestone_leases WHERE milestone_id = :mid`,
     ).run({ ":mid": milestoneId });
     currentDb!.prepare(
@@ -2391,6 +2439,75 @@ export function upsertTurnGitTransaction(entry: {
   });
 }
 
+export function getMilestoneCommitAttributionShas(milestoneId: string): string[] {
+  if (!currentDb) return [];
+  const rows = currentDb.prepare(
+    `SELECT commit_sha
+     FROM milestone_commit_attributions
+     WHERE milestone_id = :mid
+     ORDER BY created_at, commit_sha`,
+  ).all({ ":mid": milestoneId }) as Array<Record<string, unknown>>;
+  return rows
+    .map((row) => typeof row["commit_sha"] === "string" ? row["commit_sha"] : "")
+    .filter(Boolean);
+}
+
+export function recordMilestoneCommitAttribution(entry: {
+  commitSha: string;
+  milestoneId: string;
+  sliceId?: string;
+  taskId?: string;
+  source: "recorded" | "backfill";
+  confidence: number;
+  files: string[];
+  createdAt: string;
+}): void {
+  if (!currentDb) return;
+  transaction(() => {
+    currentDb!.prepare(
+      `INSERT OR REPLACE INTO milestone_commit_attributions (
+        commit_sha, milestone_id, slice_id, task_id, source, confidence, files_json, created_at
+      ) VALUES (
+        :commit_sha, :milestone_id, :slice_id, :task_id, :source, :confidence, :files_json, :created_at
+      )`,
+    ).run({
+      ":commit_sha": entry.commitSha,
+      ":milestone_id": entry.milestoneId,
+      ":slice_id": entry.sliceId ?? null,
+      ":task_id": entry.taskId ?? null,
+      ":source": entry.source,
+      ":confidence": entry.confidence,
+      ":files_json": JSON.stringify(entry.files),
+      ":created_at": entry.createdAt,
+    });
+
+    currentDb!.prepare(
+      `INSERT OR IGNORE INTO audit_events (
+        event_id, trace_id, turn_id, caused_by, category, type, ts, payload_json
+      ) VALUES (
+        :event_id, :trace_id, :turn_id, :caused_by, :category, :type, :ts, :payload_json
+      )`,
+    ).run({
+      ":event_id": `milestone-commit-attribution:${entry.milestoneId}:${entry.commitSha}`,
+      ":trace_id": "milestone-commit-attribution",
+      ":turn_id": null,
+      ":caused_by": null,
+      ":category": "git",
+      ":type": "milestone-commit-attribution-recorded",
+      ":ts": entry.createdAt,
+      ":payload_json": JSON.stringify({
+        commitSha: entry.commitSha,
+        milestoneId: entry.milestoneId,
+        sliceId: entry.sliceId ?? null,
+        taskId: entry.taskId ?? null,
+        source: entry.source,
+        confidence: entry.confidence,
+        files: entry.files,
+      }),
+    });
+  });
+}
+
 export function insertAuditEvent(entry: {
   eventId: string;
   traceId: string;
@@ -2494,6 +2611,7 @@ export function clearEngineHierarchy(): void {
     currentDb!.exec("DELETE FROM slice_dependencies");
     currentDb!.exec("DELETE FROM assessments");
     currentDb!.exec("DELETE FROM replan_history");
+    currentDb!.exec("DELETE FROM milestone_commit_attributions");
     currentDb!.exec("DELETE FROM tasks");
     currentDb!.exec("DELETE FROM slices");
     currentDb!.exec("DELETE FROM milestone_leases");
