@@ -16,15 +16,14 @@ Start with what the excerpts give you. Read full files when the section heads si
 
 **On-demand Read ordering:** Complete all slice SUMMARY Reads you need for cross-slice synthesis, the Decision Re-evaluation table, and LEARNINGS **before** calling `gsd_complete_milestone` (step 12). Once that tool runs, the milestone is marked complete in the DB, so it must be the final persistent milestone-closeout write.
 
-### Delegate Review Work
+### Closeout Review Mode
 
-Use `subagent` for review work needing fresh context, before drafting LEARNINGS:
+The inlined context includes a validation status block.
 
-- Cross-slice integrations or new public APIs -> **reviewer** with milestone diff and roadmap.
-- Auth, network, parsing, file IO, shell exec, or crypto -> **security** audit.
-- Significant tests added or changed -> **tester** coverage check against success criteria.
+- If it says a passing validation artifact is present, treat that artifact as authoritative for success criteria, requirement coverage, verification classes, and cross-slice integration. Do not delegate fresh reviewer/security/tester audits unless the validation artifact is internally inconsistent with the inlined summaries.
+- If validation is missing, stale, non-pass, or internally inconsistent, use `subagent` for review work needing fresh context before drafting LEARNINGS: cross-slice integrations or new public APIs -> **reviewer**; auth, network, parsing, file IO, shell exec, or crypto -> **security**; significant tests added or changed -> **tester**.
 
-Subagents report only; they do not write user source. Fold findings into Decision Re-evaluation and LEARNINGS before completion.
+Subagents report only; they do not write user source. Fold any findings into Decision Re-evaluation and LEARNINGS before completion.
 
 {{inlinedContext}}
 
@@ -33,8 +32,8 @@ Subagents report only; they do not write user source. Fold findings into Decisio
 1. Use the **Milestone Summary** output template from the inlined context above
 2. {{skillActivation}}
 3. **Verify code changes exist.** Compare milestone work against the integration branch (`main`, `master`, or recorded branch), using merge-base as older revision and `HEAD` as newer. If the diff lists non-`.gsd/` files, pass. If `HEAD` equals the integration branch/merge-base, treat it as a self-diff retry: inspect milestone-scoped commit evidence (`GSD-Unit: {{milestoneId}}` or production `GSD-Task: Sxx/Tyy` trailers touching `.gsd/milestones/{{milestoneId}}/`) and verify those commits touched non-`.gsd/` files. Record **verification failure** only when neither source shows implementation files.
-4. Verify every **success criterion** from `{{roadmapPath}}` with evidence from summaries, tests, or observable behavior. Record unmet criteria as **verification failure**.
-5. Verify **definition of done**: all slices `[x]`, summaries exist, and integrations work. Record unmet items as **verification failure**.
+4. Verify every **success criterion** from `{{roadmapPath}}`. If passing validation is present, summarize the validation evidence instead of re-auditing it; otherwise verify with evidence from summaries, tests, or observable behavior. Record unmet criteria as **verification failure**.
+5. Verify **definition of done**: all slices `[x]`, summaries exist, and integrations work. If passing validation is present, trust its integration/verification verdict unless inconsistent with current artifacts. Record unmet items as **verification failure**.
 6. If the roadmap includes a **Horizontal Checklist**, verify each item and note unchecked items in the summary.
 7. Fill the **Decision Re-evaluation** table: compare each key `.gsd/DECISIONS.md` decision from this milestone with what shipped, and flag decisions to revisit.
 8. Validate **requirement status transitions**. For each changed requirement, confirm evidence supports the new status. Requirements may move between Active, Validated, Deferred, Blocked, or Out of Scope only with proof.
