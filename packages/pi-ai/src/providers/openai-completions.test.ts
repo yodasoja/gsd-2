@@ -77,4 +77,59 @@ describe("applyOpenAICompatibleProviderOptions", () => {
 
 		assert.equal(params.temperature, 0.2);
 	});
+
+	it("does not overwrite explicit per-request values for top_p, top_k, min_p, presence_penalty, repetition_penalty", () => {
+		const model = makeModel({
+			providerOptions: {
+				payload: {
+					top_p: 0.95,
+					top_k: 20,
+					min_p: 0,
+					presence_penalty: 1.5,
+					repetition_penalty: 1.0,
+				},
+			},
+		});
+
+		const params = applyOpenAICompatibleProviderOptions(model, {
+			model: model.id,
+			messages: [],
+			stream: true,
+			top_p: 0.8,
+			top_k: 50,
+			min_p: 0.1,
+			presence_penalty: -0.5,
+			repetition_penalty: 1.1,
+		} as any);
+
+		assert.equal((params as any).top_p, 0.8);
+		assert.equal((params as any).top_k, 50);
+		assert.equal((params as any).min_p, 0.1);
+		assert.equal((params as any).presence_penalty, -0.5);
+		assert.equal((params as any).repetition_penalty, 1.1);
+	});
+
+	it("does not overwrite explicit chat_template_kwargs from request", () => {
+		const model = makeModel({
+			providerOptions: {
+				payload: {
+					chat_template_kwargs: {
+						enable_thinking: true,
+						preserve_thinking: true,
+					},
+				},
+			},
+		});
+
+		const params = applyOpenAICompatibleProviderOptions(model, {
+			model: model.id,
+			messages: [],
+			stream: true,
+			chat_template_kwargs: {
+				enable_thinking: false,
+			},
+		} as any);
+
+		assert.deepEqual((params as any).chat_template_kwargs, { enable_thinking: false });
+	});
 });

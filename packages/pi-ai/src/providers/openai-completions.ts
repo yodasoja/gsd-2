@@ -97,29 +97,29 @@ export function applyOpenAICompatibleProviderOptions(
 		nextParams.temperature = defaultPayload.temperature;
 	}
 
-	if (defaultPayload.top_p !== undefined) {
+	if (defaultPayload.top_p !== undefined && (nextParams as any).top_p === undefined) {
 		(nextParams as typeof nextParams & { top_p: number }).top_p = defaultPayload.top_p;
 	}
 
-	if (defaultPayload.top_k !== undefined) {
+	if (defaultPayload.top_k !== undefined && (nextParams as any).top_k === undefined) {
 		(nextParams as typeof nextParams & { top_k: number }).top_k = defaultPayload.top_k;
 	}
 
-	if (defaultPayload.min_p !== undefined) {
+	if (defaultPayload.min_p !== undefined && (nextParams as any).min_p === undefined) {
 		(nextParams as typeof nextParams & { min_p: number }).min_p = defaultPayload.min_p;
 	}
 
-	if (defaultPayload.presence_penalty !== undefined) {
+	if (defaultPayload.presence_penalty !== undefined && (nextParams as any).presence_penalty === undefined) {
 		(nextParams as typeof nextParams & { presence_penalty: number }).presence_penalty =
 			defaultPayload.presence_penalty;
 	}
 
-	if (defaultPayload.repetition_penalty !== undefined) {
+	if (defaultPayload.repetition_penalty !== undefined && (nextParams as any).repetition_penalty === undefined) {
 		(nextParams as typeof nextParams & { repetition_penalty: number }).repetition_penalty =
 			defaultPayload.repetition_penalty;
 	}
 
-	if (defaultPayload.chat_template_kwargs !== undefined) {
+	if (defaultPayload.chat_template_kwargs !== undefined && (nextParams as any).chat_template_kwargs === undefined) {
 		(nextParams as typeof nextParams & { chat_template_kwargs: Record<string, unknown> }).chat_template_kwargs =
 			defaultPayload.chat_template_kwargs;
 	}
