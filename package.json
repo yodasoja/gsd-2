@@ -105,7 +105,8 @@
     "docker:build-runtime": "docker build --target runtime -t ghcr.io/gsd-build/gsd-pi .",
     "docker:build-builder": "docker build --target builder -t ghcr.io/gsd-build/gsd-ci-builder .",
     "prepublishOnly": "npm run sync-pkg-version && npm run sync-platform-versions && node scripts/prepublish-check.mjs && npm run build && npm run typecheck:extensions && npm run validate-pack",
-    "test:live-regression": "node --experimental-strip-types tests/live-regression/run.ts"
+    "test:live-regression": "node --experimental-strip-types tests/live-regression/run.ts",
+    "test:e2e": "node --experimental-strip-types --test \"tests/e2e/**/*.e2e.test.ts\""
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",
