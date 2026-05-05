@@ -127,6 +127,60 @@ describe("ExtensionRunner.createContext", () => {
 		assert.equal(runner.createContext().cwd, realProjectDir);
 		assert.equal(runner.createCommandContext().cwd, realProjectDir);
 	});
+
+	it("does not let lifecycle event handlers close the TUI", async (t) => {
+		const dir = mkdtempSync(join(tmpdir(), "runner-test-"));
+		t.after(() => {
+			rmSync(dir, { recursive: true, force: true });
+		});
+
+		const sessionManager = SessionManager.create(dir, dir);
+		const authStorage = AuthStorage.create();
+		const modelRegistry = new ModelRegistry(authStorage, join(dir, "models.json"));
+		const runtime = makeMinimalRuntime();
+		let shutdownCount = 0;
+		const handlers = new Map();
+		handlers.set("agent_end", [
+			async (_event: unknown, ctx: { shutdown: () => void }) => {
+				ctx.shutdown();
+			},
+		]);
+		const extension = {
+			path: "/test/shutdown-on-agent-end",
+			handlers,
+			commands: new Map(),
+			shortcuts: new Map(),
+			tools: new Map(),
+			flags: new Map(),
+			diagnostics: [],
+		} as unknown as Extension;
+		const runner = new ExtensionRunner([extension], runtime, dir, sessionManager, modelRegistry);
+		runner.bindCore({} as any, {
+			getModel: () => undefined,
+			isIdle: () => true,
+			abort: () => {},
+			hasPendingMessages: () => false,
+			shutdown: () => {
+				shutdownCount += 1;
+			},
+			getContextUsage: () => undefined,
+			compact: () => {},
+			getSystemPrompt: () => "",
+		});
+
+		const errors: any[] = [];
+		runner.onError((err) => errors.push(err));
+
+		await runner.emit({ type: "agent_end", messages: [] } as any);
+
+		assert.equal(shutdownCount, 0);
+		assert.equal(errors.length, 1);
+		assert.equal(errors[0].event, "agent_end");
+		assert.match(errors[0].error, /cannot request TUI shutdown/);
+
+		runner.createCommandContext().shutdown();
+		assert.equal(shutdownCount, 1);
+	});
 });
 
 describe("ExtensionRunner protected commands", () => {

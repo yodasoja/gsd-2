@@ -717,6 +717,15 @@ export class ExtensionRunner {
 		};
 	}
 
+	private createEventContext(eventType: string): ExtensionContext {
+		return {
+			...this.createContext(),
+			shutdown: () => {
+				throw new Error(`Extension event '${eventType}' cannot request TUI shutdown`);
+			},
+		};
+	}
+
 	createCommandContext(): ExtensionCommandContext {
 		return {
 			...this.createContext(),
@@ -757,7 +766,7 @@ export class ExtensionRunner {
 		getEvent: () => unknown,
 		processResult: (handlerResult: unknown, extensionPath: string) => { done: boolean },
 	): Promise<void> {
-		const ctx = this.createContext();
+		const ctx = this.createEventContext(eventType);
 
 		for (const ext of this.extensions) {
 			const handlers = ext.handlers.get(eventType);
