@@ -1053,6 +1053,42 @@ test("chat-controller rolls up only contiguous low-signal tool runs on message_e
 	assert.equal(host.chatContainer._prevRender, null, "summary reposition must invalidate the chat container render cache");
 });
 
+test("chat-controller rolls up low-signal direct tool execution events on agent_end", async () => {
+	(globalThis as any)[Symbol.for("@gsd/pi-coding-agent:theme")] = {
+		fg: (_key: string, text: string) => text,
+		bg: (_key: string, text: string) => text,
+		bold: (text: string) => text,
+		italic: (text: string) => text,
+		truncate: (text: string) => text,
+	};
+
+	const host = createHost();
+	host.getMarkdownThemeWithSettings = () => ({});
+
+	for (const toolCallId of ["bash-1", "bash-2", "bash-3"]) {
+		await handleAgentEvent(host, {
+			type: "tool_execution_start",
+			toolCallId,
+			toolName: "bash",
+			args: { command: "true" },
+		} as any);
+		await handleAgentEvent(host, {
+			type: "tool_execution_end",
+			toolCallId,
+			isError: false,
+			result: { content: [], details: {} },
+		} as any);
+	}
+
+	assert.equal(host.chatContainer.children.length, 3, "direct tool events render as individual rows while running");
+
+	await handleAgentEvent(host, { type: "agent_end" } as any);
+
+	assert.equal(host.chatContainer.children.length, 1, "direct low-signal tool rows should roll up on agent_end");
+	assert.equal(host.chatContainer.children[0]?.constructor?.name, "ToolPhaseSummaryComponent");
+	assert.match(host.chatContainer.children[0].render(120).join("\n"), /Setup \/ shell 3 actions/);
+});
+
 // Regression test for issue #4144: interleaved text/tool content must render in content[] index order.
 // Stream: [text "A", toolCall T1, text "B", toolCall T2, text "C"]
 // Expected chatContainer order: textRun(A), toolExec(T1), textRun(B), toolExec(T2), textRun(C)

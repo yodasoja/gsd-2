@@ -894,6 +894,7 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 				component.setExpanded(host.toolOutputExpanded);
 				host.chatContainer.addChild(component);
 				host.pendingTools.set(event.toolCallId, component);
+				renderedSegments.push({ kind: "tool", contentIndex: Number.MAX_SAFE_INTEGER, component });
 				host.ui.requestRender();
 			}
 			break;
@@ -927,6 +928,7 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 				host.streamingComponent.setShowMetadata(true);
 				host.streamingComponent.updateContent(host.streamingMessage);
 			}
+			replaceCompactToolRowsWithPhaseSummary(host);
 			host.streamingComponent = undefined;
 			host.streamingMessage = undefined;
 			renderedSegments = [];
