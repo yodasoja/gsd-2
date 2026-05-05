@@ -17,6 +17,19 @@ GSD_SMOKE_BINARY="$(pwd)/dist/loader.js" npm run test:e2e
 If `GSD_SMOKE_BINARY` is not set, the suite falls back to whatever `gsd`
 resolves on PATH (matching the convention used by `tests/live-regression`).
 
+### Docker e2e (separate suite)
+
+The Docker runtime smoke is a separate, slower suite. It builds the
+`runtime-local` Dockerfile target from a `npm pack` tarball and runs the
+binary inside the container.
+
+```bash
+npm run test:e2e:docker
+```
+
+Skipped automatically if `docker` is not on PATH. CI runs this only on
+Docker-relevant changes (Dockerfile, scripts/, package*.json, src/, etc.).
+
 ## Writing a new e2e test
 
 1. Create `tests/e2e/<feature>.e2e.test.ts`. The `.e2e.test.ts` suffix is
@@ -77,9 +90,21 @@ describe("my feature", () => {
 
 - ✅ Phase 0 (shared harness)
 - ✅ Phase 1a (sanity: `--version`, `--help`, env isolation)
-- ⏳ Phase 1b (fake-LLM provider + agent loop test) — next PR
+- ✅ B (docker runtime smoke against current source)
+- ✅ D (Windows runner — non-blocking; promotes to required after 5 consecutive green)
+- ⏳ Phase 1b (fake-LLM provider + agent loop test)
 - ⏳ Phase 2 (real-process MCP server e2e)
 - ⏳ Phase 6 (native TS↔Rust ABI smoke)
 - ⏳ Phase 7 (migration smoke)
+- ⏳ E (`gsd undo` e2e — schema rollback dropped; not a shipped feature)
+- ⏳ A (Studio launch-only — defer feature-level e2e until Studio ships features)
 
 See the e2e remediation plan in the parent PR description for the full sequence.
+
+## CI runners
+
+- **`e2e`** (linux) — required gate.
+- **`docker-e2e`** (linux) — gated on Docker-relevant change filter.
+- **`e2e-windows`** (windows) — non-blocking until 5 consecutive green; runs the
+  same suite as `e2e` against `dist/loader.js`. Catches Windows-specific path,
+  TMPDIR, and child-process regressions.
