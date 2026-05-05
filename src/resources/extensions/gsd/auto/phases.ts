@@ -684,6 +684,7 @@ export async function runPreDispatch(
       deps.postflightPopStash(
         s.originalBasePath || s.basePath,
         s.currentMilestoneId!,
+        preflightTransition.stashMarker,
         ctx.ui.notify.bind(ctx.ui),
       );
     }
@@ -797,6 +798,7 @@ export async function runPreDispatch(
           deps.postflightPopStash(
             s.originalBasePath || s.basePath,
             s.currentMilestoneId,
+            preflightAllComplete.stashMarker,
             ctx.ui.notify.bind(ctx.ui),
           );
         }
@@ -925,6 +927,7 @@ export async function runPreDispatch(
         deps.postflightPopStash(
           s.originalBasePath || s.basePath,
           s.currentMilestoneId,
+          preflightComplete.stashMarker,
           ctx.ui.notify.bind(ctx.ui),
         );
       }

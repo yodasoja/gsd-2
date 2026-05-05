@@ -116,6 +116,19 @@ test("complete-milestone prompt trusts passing validation artifact", async () =>
   }
 });
 
+test("complete-milestone prompt trusts centralized markdown body pass verdict", async () => {
+  const base = makeRepo({ "index.html": "<!doctype html>\n<title>Test</title>\n" });
+  try {
+    writeCompleteMilestoneFiles(base, "# Validation\n\n**Verdict:** PASS\n\nAll checks passed.");
+    const prompt = await buildCompleteMilestonePrompt("M001", "Polish static page", base, "minimal");
+    assert.match(prompt, /Passing Validation Artifact/);
+    assert.match(prompt, /Treat it as authoritative/);
+    assert.match(prompt, /Do not delegate fresh reviewer\/security\/tester audits/);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test("complete-milestone prompt keeps deeper review path without passing validation", async () => {
   const base = makeRepo({ "index.html": "<!doctype html>\n<title>Test</title>\n" });
   try {

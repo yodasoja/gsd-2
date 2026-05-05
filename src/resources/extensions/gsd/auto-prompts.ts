@@ -8,7 +8,7 @@
 
 import { loadFile, parseContinue, parseSummary, loadActiveOverrides, formatOverridesSection, parseTaskPlanFile } from "./files.js";
 import type { Override, UatType } from "./files.js";
-import { hasVerdict, getUatType } from "./verdict-parser.js";
+import { hasVerdict, getUatType, extractVerdict } from "./verdict-parser.js";
 import { loadPrompt, inlineTemplate } from "./prompt-loader.js";
 import {
   resolveMilestoneFile, resolveSliceFile, resolveSlicePath,
@@ -119,17 +119,9 @@ function formatProjectClassificationForPlanning(classification: ProjectClassific
   return lines.join("\n");
 }
 
-function extractValidationVerdict(content: string | null): string | null {
-  if (!content) return null;
-  const frontmatter = content.match(/^---\n([\s\S]*?)\n---/);
-  const source = frontmatter?.[1] ?? content;
-  const match = source.match(/^verdict:\s*["']?([a-zA-Z_-]+)["']?/m);
-  return match?.[1]?.toLowerCase() ?? null;
-}
-
 function formatCloseoutReviewInstructions(validationContent: string | null, validationRel: string): string {
-  const verdict = extractValidationVerdict(validationContent);
-  if (verdict === "pass" || verdict === "passed") {
+  const verdict = validationContent ? extractVerdict(validationContent) : null;
+  if (verdict === "pass") {
     return [
       "### Passing Validation Artifact",
       "",

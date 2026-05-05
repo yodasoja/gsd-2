@@ -139,6 +139,7 @@ export interface LoopDeps {
   postflightPopStash: (
     basePath: string,
     milestoneId: string,
+    stashMarker: string | undefined,
     notify: (message: string, level: "info" | "warning" | "error") => void,
   ) => void;
 
