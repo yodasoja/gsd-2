@@ -73,6 +73,19 @@ export type UnitRuntimePhase =
   | "paused"
   | "skipped";
 
+export const IN_FLIGHT_RUNTIME_PHASES: ReadonlySet<UnitRuntimePhase> = new Set([
+  "dispatched",
+  "wrapup-warning-sent",
+  "timeout",
+  "finalize-timeout",
+  "crashed",
+  "paused",
+]);
+
+export function isInFlightRuntimePhase(phase: UnitRuntimePhase): boolean {
+  return IN_FLIGHT_RUNTIME_PHASES.has(phase);
+}
+
 export interface ExecuteTaskRecoveryStatus {
   planPath: string;
   summaryPath: string;

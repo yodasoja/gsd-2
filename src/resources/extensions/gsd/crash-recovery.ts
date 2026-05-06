@@ -38,7 +38,7 @@ import { _getAdapter, isDbAvailable } from "./gsd-db.js";
 import { gsdRoot, normalizeRealPath } from "./paths.js";
 import { atomicWriteSync } from "./atomic-write.js";
 import { effectiveLockFile } from "./session-lock.js";
-import { listUnitRuntimeRecords, type AutoUnitRuntimeRecord } from "./unit-runtime.js";
+import { isInFlightRuntimePhase, listUnitRuntimeRecords, type AutoUnitRuntimeRecord } from "./unit-runtime.js";
 
 export interface LockData {
   pid: number;
@@ -51,14 +51,6 @@ export interface LockData {
 }
 
 const SESSION_FILE_KV_KEY = "session_file";
-const IN_FLIGHT_RUNTIME_PHASES = new Set([
-  "dispatched",
-  "wrapup-warning-sent",
-  "timeout",
-  "finalize-timeout",
-  "crashed",
-  "paused",
-]);
 
 function lockPath(basePath: string): string {
   return join(gsdRoot(basePath), effectiveLockFile());
@@ -114,7 +106,7 @@ function getLatestDispatchForWorker(workerId: string):
 
 function latestInFlightRuntimeRecord(basePath: string): AutoUnitRuntimeRecord | null {
   const records = listUnitRuntimeRecords(basePath).filter((record) =>
-    IN_FLIGHT_RUNTIME_PHASES.has(record.phase),
+    isInFlightRuntimePhase(record.phase),
   );
   if (records.length === 0) return null;
   return records.sort((a, b) => {

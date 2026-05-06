@@ -203,6 +203,36 @@ async function enforceMinRequestInterval(s: AutoSession, prefs: IterationContext
   }
 }
 
+function closeOutCrashedUnit(s: AutoSession, iterData: IterationData, err: unknown): void {
+  const summary = formatDispatchExceptionSummary({ error: err });
+  try {
+    emitOpenUnitEndForUnit(
+      s.basePath,
+      iterData.unitType,
+      iterData.unitId,
+      "cancelled",
+      {
+        message: summary,
+        category: "unit-exception",
+        isTransient: false,
+      },
+    );
+    writeUnitRuntimeRecord(
+      s.basePath,
+      iterData.unitType,
+      iterData.unitId,
+      s.currentUnit?.startedAt ?? Date.now(),
+      {
+        phase: "crashed",
+        lastProgressAt: Date.now(),
+        lastProgressKind: "unit-exception",
+      },
+    );
+  } catch (closeoutErr) {
+    logWarning("dispatch", `unit crash closeout failed: ${closeoutErr instanceof Error ? closeoutErr.message : String(closeoutErr)}`);
+  }
+}
+
 /**
  * Main auto-mode execution loop. Iterates: derive → dispatch → guards →
  * runUnit → finalize → repeat. Exits when s.active becomes false or a
@@ -495,14 +525,23 @@ export async function autoLoop(
 
         // ── Unit execution (shared with dev path) ──
         await enforceMinRequestInterval(s, prefs);
-        const unitPhaseResult = await runUnitPhaseViaContract(
-          dispatchContract,
-          ic,
-          iterData,
-          loopState,
-          undefined,
-          unitDispatchDeps,
-        );
+        let unitPhaseResult: Awaited<ReturnType<typeof runUnitPhaseViaContract>>;
+        try {
+          unitPhaseResult = await runUnitPhaseViaContract(
+            dispatchContract,
+            ic,
+            iterData,
+            loopState,
+            undefined,
+            unitDispatchDeps,
+          );
+        } catch (err) {
+          if (err instanceof ModelPolicyDispatchBlockedError) {
+            throw err;
+          }
+          closeOutCrashedUnit(s, iterData, err);
+          throw err;
+        }
         if (unitPhaseResult.action === "next") {
           const requestTimestamp = resolveUnitRequestTimestamp(unitPhaseResult.data);
           if (requestTimestamp !== undefined) s.lastRequestTimestamp = requestTimestamp;
@@ -702,32 +741,7 @@ export async function autoLoop(
         if (err instanceof ModelPolicyDispatchBlockedError) {
           throw err;
         }
-        try {
-          emitOpenUnitEndForUnit(
-            s.basePath,
-            iterData.unitType,
-            iterData.unitId,
-            "cancelled",
-            {
-              message: formatDispatchExceptionSummary({ error: err }),
-              category: "unit-exception",
-              isTransient: false,
-            },
-          );
-          writeUnitRuntimeRecord(
-            s.basePath,
-            iterData.unitType,
-            iterData.unitId,
-            s.currentUnit?.startedAt ?? Date.now(),
-            {
-              phase: "crashed",
-              lastProgressAt: Date.now(),
-              lastProgressKind: "unit-exception",
-            },
-          );
-        } catch {
-          // Best-effort observability: the original exception still controls flow.
-        }
+        closeOutCrashedUnit(s, iterData, err);
         dispatchSettled = settleDispatchFailed(
           dispatchId,
           formatDispatchExceptionSummary({ error: err }),
