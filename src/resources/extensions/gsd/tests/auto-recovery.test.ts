@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 
-import { verifyExpectedArtifact, hasImplementationArtifacts, resolveExpectedArtifactPath, diagnoseExpectedArtifact, buildLoopRemediationSteps, writeBlockerPlaceholder } from "../auto-recovery.ts";
+import { verifyExpectedArtifact, hasImplementationArtifacts, resolveExpectedArtifactPath, diagnoseExpectedArtifact, buildLoopRemediationSteps, writeBlockerPlaceholder, refreshRecoveryDbForArtifact } from "../auto-recovery.ts";
 import { resolveMilestoneFile } from "../paths.ts";
 import { openDatabase, closeDatabase, insertMilestone, insertSlice, insertGateRow, insertTask, getMilestoneCommitAttributionShas } from "../gsd-db.ts";
 import { clearParseCache } from "../files.ts";
@@ -173,6 +173,19 @@ test("resolveExpectedArtifactPath returns correct path for all slice-level types
   } finally {
     cleanup(base);
   }
+});
+
+test("refreshRecoveryDbForArtifact treats missing execute-task DB rows as fatal mismatches", () => {
+  makeTmpProject();
+
+  const result = refreshRecoveryDbForArtifact("execute-task", "M001/S01/T01");
+
+  assert.deepEqual(result, {
+    ok: false,
+    fatal: true,
+    reason: "execute-task-artifact-db-missing",
+    message: "Stuck recovery found execute-task M001/S01/T01 artifacts, but no matching DB task row exists after refresh.",
+  });
 });
 
 // ─── diagnoseExpectedArtifact ─────────────────────────────────────────────

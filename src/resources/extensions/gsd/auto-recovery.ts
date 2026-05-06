@@ -67,6 +67,60 @@ export {
 
 // ─── Artifact Resolution & Verification ───────────────────────────────────────
 
+export type ArtifactRecoveryDbRefreshResult =
+  | { ok: true }
+  | { ok: false; fatal: boolean; message: string; reason: string };
+
+export function refreshRecoveryDbForArtifact(
+  unitType: string,
+  unitId: string,
+): ArtifactRecoveryDbRefreshResult {
+  if (unitType !== "plan-slice" && unitType !== "execute-task") return { ok: true };
+  if (!isDbAvailable()) return { ok: true };
+
+  if (!refreshOpenDatabaseFromDisk()) {
+    return {
+      ok: false,
+      fatal: unitType === "execute-task",
+      reason: `${unitType}-db-refresh-failed`,
+      message: `Stuck recovery found ${unitType} ${unitId} artifacts, but the DB refresh failed.`,
+    };
+  }
+
+  if (unitType !== "execute-task") return { ok: true };
+
+  const { milestone: mid, slice: sid, task: tid } = parseUnitId(unitId);
+  if (!mid || !sid || !tid) {
+    return {
+      ok: false,
+      fatal: true,
+      reason: "execute-task-invalid-unit-id",
+      message: `Stuck recovery found execute-task ${unitId} artifacts, but the unit id could not be parsed for DB verification.`,
+    };
+  }
+
+  const task = getTask(mid, sid, tid);
+  if (!task) {
+    return {
+      ok: false,
+      fatal: true,
+      reason: "execute-task-artifact-db-missing",
+      message: `Stuck recovery found execute-task ${unitId} artifacts, but no matching DB task row exists after refresh.`,
+    };
+  }
+
+  if (!isClosedStatus(task.status)) {
+    return {
+      ok: false,
+      fatal: true,
+      reason: "execute-task-artifact-db-mismatch",
+      message: `Stuck recovery found execute-task ${unitId} artifacts, but the DB task status is still '${task.status}' after refresh.`,
+    };
+  }
+
+  return { ok: true };
+}
+
 function hasCapturedWorkflowPrefs(base: string): boolean {
   const prefsPath = resolveExpectedArtifactPath("workflow-preferences", "WORKFLOW-PREFS", base);
   if (!prefsPath || !existsSync(prefsPath)) return false;

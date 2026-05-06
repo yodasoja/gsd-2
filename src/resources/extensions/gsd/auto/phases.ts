@@ -50,12 +50,12 @@ import {
 } from "../workflow-logger.js";
 import { gsdRoot } from "../paths.js";
 import { atomicWriteSync } from "../atomic-write.js";
-import { verifyExpectedArtifact, diagnoseExpectedArtifact, buildLoopRemediationSteps } from "../auto-recovery.js";
+import { verifyExpectedArtifact, diagnoseExpectedArtifact, buildLoopRemediationSteps, refreshRecoveryDbForArtifact } from "../auto-recovery.js";
 import { writeUnitRuntimeRecord } from "../unit-runtime.js";
 import { withTimeout, FINALIZE_PRE_TIMEOUT_MS, FINALIZE_POST_TIMEOUT_MS } from "./finalize-timeout.js";
 import { getEligibleSlices } from "../slice-parallel-eligibility.js";
 import { startSliceParallel } from "../slice-parallel-orchestrator.js";
-import { isDbAvailable, getMilestoneSlices, refreshOpenDatabaseFromDisk } from "../gsd-db.js";
+import { isDbAvailable, getMilestoneSlices } from "../gsd-db.js";
 import type { MinimalModelRegistry } from "../context-budget.js";
 import { ensurePlanV2Graph, isEmptyPlanV2GraphResult, isMissingFinalizedContextResult } from "../uok/plan-v2.js";
 import { resolveUokFlags } from "../uok/flags.js";
@@ -74,12 +74,6 @@ import {
 /** Compare two paths for physical identity, tolerating trailing slashes and symlinks. */
 function isSamePathLocal(a: string, b: string): boolean {
   return normalizeWorktreePathForCompare(a) === normalizeWorktreePathForCompare(b);
-}
-
-function refreshPlanSliceRecoveryDbIfNeeded(unitType: string): boolean {
-  if (unitType !== "plan-slice") return true;
-  if (!isDbAvailable()) return true;
-  return refreshOpenDatabaseFromDisk();
 }
 
 // ─── Session timeout auto-resume state ────────────────────────────────────────
@@ -1104,11 +1098,18 @@ export async function runDispatch(
             `Stuck recovery: artifact for ${unitType} ${unitId} found on disk. Invalidating caches.`,
             "info",
           );
-          if (!refreshPlanSliceRecoveryDbIfNeeded(unitType)) {
+          const recoveryDb = refreshRecoveryDbForArtifact(unitType, unitId);
+          if (!recoveryDb.ok) {
             ctx.ui.notify(
-              `Stuck recovery found ${unitType} ${unitId} artifacts, but the DB refresh failed. Keeping stuck state for retry.`,
+              recoveryDb.fatal
+                ? `${recoveryDb.message} Pausing auto-mode for manual recovery.`
+                : `${recoveryDb.message} Keeping stuck state for retry.`,
               "warning",
             );
+            if (recoveryDb.fatal) {
+              await deps.pauseAuto(ctx, pi);
+              return { action: "break", reason: recoveryDb.reason };
+            }
             return { action: "continue" };
           }
           deps.invalidateAllCaches();
@@ -1135,19 +1136,26 @@ export async function runDispatch(
             level: 2,
             action: "artifact-found",
           });
-          ctx.ui.notify(
-            `Stuck recovery: artifact for ${unitType} ${unitId} found on disk after cache invalidation. Continuing.`,
-            "info",
-          );
-          if (refreshPlanSliceRecoveryDbIfNeeded(unitType)) {
+          const recoveryDb = refreshRecoveryDbForArtifact(unitType, unitId);
+          if (recoveryDb.ok) {
+            ctx.ui.notify(
+              `Stuck recovery: artifact for ${unitType} ${unitId} found on disk after cache invalidation. Continuing.`,
+              "info",
+            );
             loopState.recentUnits.length = 0;
             loopState.stuckRecoveryAttempts = 0;
             return { action: "continue" };
           }
           ctx.ui.notify(
-            `Stuck recovery found ${unitType} ${unitId} artifacts, but the DB refresh failed. Stopping for manual recovery.`,
+            recoveryDb.fatal
+              ? `${recoveryDb.message} Pausing auto-mode for manual recovery.`
+              : `${recoveryDb.message} Keeping stuck state for retry.`,
             "warning",
           );
+          if (recoveryDb.fatal) {
+            await deps.pauseAuto(ctx, pi);
+            return { action: "break", reason: recoveryDb.reason };
+          }
         }
         debugLog("autoLoop", {
           phase: "stuck-detected",
