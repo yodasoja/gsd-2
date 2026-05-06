@@ -68,6 +68,8 @@ import {
   settleDispatchCompleted,
   settleDispatchFailed,
 } from "./workflow-dispatch-ledger.js";
+import { emitOpenUnitEndForUnit } from "../crash-recovery.js";
+import { writeUnitRuntimeRecord } from "../unit-runtime.js";
 import { openDispatchClaim } from "./workflow-dispatch-claim.js";
 import { completeWorkflowIteration } from "./workflow-iteration-completion.js";
 import { createWorkflowJournalReporter } from "./workflow-journal-reporter.js";
@@ -198,6 +200,36 @@ async function enforceMinRequestInterval(s: AutoSession, prefs: IterationContext
   if (decision.action === "wait") {
     debugLog("autoLoop", { phase: "rate-limit-wait", waitMs: decision.waitMs });
     await new Promise<void>(r => setTimeout(r, decision.waitMs));
+  }
+}
+
+function closeOutCrashedUnit(s: AutoSession, iterData: IterationData, err: unknown): void {
+  const summary = formatDispatchExceptionSummary({ error: err });
+  try {
+    emitOpenUnitEndForUnit(
+      s.basePath,
+      iterData.unitType,
+      iterData.unitId,
+      "cancelled",
+      {
+        message: summary,
+        category: "unit-exception",
+        isTransient: false,
+      },
+    );
+    writeUnitRuntimeRecord(
+      s.basePath,
+      iterData.unitType,
+      iterData.unitId,
+      s.currentUnit?.startedAt ?? Date.now(),
+      {
+        phase: "crashed",
+        lastProgressAt: Date.now(),
+        lastProgressKind: "unit-exception",
+      },
+    );
+  } catch (closeoutErr) {
+    logWarning("dispatch", `unit crash closeout failed: ${closeoutErr instanceof Error ? closeoutErr.message : String(closeoutErr)}`);
   }
 }
 
@@ -493,14 +525,23 @@ export async function autoLoop(
 
         // ── Unit execution (shared with dev path) ──
         await enforceMinRequestInterval(s, prefs);
-        const unitPhaseResult = await runUnitPhaseViaContract(
-          dispatchContract,
-          ic,
-          iterData,
-          loopState,
-          undefined,
-          unitDispatchDeps,
-        );
+        let unitPhaseResult: Awaited<ReturnType<typeof runUnitPhaseViaContract>>;
+        try {
+          unitPhaseResult = await runUnitPhaseViaContract(
+            dispatchContract,
+            ic,
+            iterData,
+            loopState,
+            undefined,
+            unitDispatchDeps,
+          );
+        } catch (err) {
+          if (err instanceof ModelPolicyDispatchBlockedError) {
+            throw err;
+          }
+          closeOutCrashedUnit(s, iterData, err);
+          throw err;
+        }
         if (unitPhaseResult.action === "next") {
           const requestTimestamp = resolveUnitRequestTimestamp(unitPhaseResult.data);
           if (requestTimestamp !== undefined) s.lastRequestTimestamp = requestTimestamp;
@@ -700,6 +741,7 @@ export async function autoLoop(
         if (err instanceof ModelPolicyDispatchBlockedError) {
           throw err;
         }
+        closeOutCrashedUnit(s, iterData, err);
         dispatchSettled = settleDispatchFailed(
           dispatchId,
           formatDispatchExceptionSummary({ error: err }),

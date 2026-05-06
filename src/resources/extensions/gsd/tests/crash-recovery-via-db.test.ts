@@ -30,6 +30,7 @@ import {
   isLockProcessAlive,
 } from "../crash-recovery.ts";
 import { normalizeRealPath } from "../paths.ts";
+import { writeUnitRuntimeRecord } from "../unit-runtime.ts";
 
 function makeBase(): string {
   const base = mkdtempSync(join(tmpdir(), "gsd-crash-recovery-"));
@@ -100,6 +101,27 @@ test("readCrashLock synthesizes LockData from a stale dead worker (no dispatches
   assert.equal(lock!.unitType, "starting");
   assert.equal(lock!.unitId, "bootstrap");
   assert.ok(lock!.startedAt, "startedAt populated from workers.started_at");
+});
+
+test("readCrashLock falls back to latest in-flight runtime record when dispatch claim is missing", (t) => {
+  const base = makeBase();
+  t.after(() => cleanup(base));
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  const projectRoot = normalizeRealPath(base);
+  const workerId = registerAutoWorker({ projectRootRealpath: projectRoot });
+  writeUnitRuntimeRecord(base, "execute-task", "M008/S04/T02", 1778069087937, {
+    phase: "dispatched",
+    lastProgressAt: 1778069087937,
+    lastProgressKind: "dispatch",
+  });
+  setWorkerPid(workerId, 99999);
+  expireWorker(workerId);
+
+  const lock = readCrashLock(base);
+  assert.ok(lock, "stale worker surfaced as a crash lock");
+  assert.equal(lock!.unitType, "execute-task");
+  assert.equal(lock!.unitId, "M008/S04/T02");
+  assert.equal(lock!.unitStartedAt, new Date(1778069087937).toISOString());
 });
 
 test("readCrashLock includes the most recent dispatch as unitType/unitId", (t) => {

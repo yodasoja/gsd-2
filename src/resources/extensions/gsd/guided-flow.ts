@@ -30,7 +30,7 @@ import {
   formatInterruptedSessionRunningMessage,
   formatInterruptedSessionSummary,
 } from "./interrupted-session.js";
-import { listUnitRuntimeRecords, clearUnitRuntimeRecord } from "./unit-runtime.js";
+import { listUnitRuntimeRecords, clearUnitRuntimeRecord, isInFlightRuntimePhase } from "./unit-runtime.js";
 import { resolveExpectedArtifactPath } from "./auto.js";
 import { gsdHome } from "./gsd-home.js";
 import {
@@ -1802,8 +1802,8 @@ function selfHealRuntimeRecords(basePath: string, ctx: ExtensionContext): { clea
         cleared++;
         continue;
       }
-      // Clear records stuck in dispatched or timeout phase (process died mid-unit)
-      if (phase === "dispatched" || phase === "timeout") {
+      // Clear records stuck in an in-flight phase (process died mid-unit).
+      if (isInFlightRuntimePhase(phase)) {
         clearUnitRuntimeRecord(basePath, unitType, unitId);
         cleared++;
       }

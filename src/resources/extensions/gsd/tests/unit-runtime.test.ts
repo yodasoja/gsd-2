@@ -5,6 +5,7 @@ import {
   clearUnitRuntimeRecord,
   formatExecuteTaskRecoveryStatus,
   inspectExecuteTaskDurability,
+  isInFlightRuntimePhase,
   readUnitRuntimeRecord,
   writeUnitRuntimeRecord,
 } from "../unit-runtime.ts";
@@ -21,6 +22,12 @@ writeFileSync(
   "# S02: Test Slice\n\n## Tasks\n\n- [ ] **T09: Do the thing** `est:10m`\n  Description.\n",
   "utf-8",
 );
+
+console.log("\n=== in-flight runtime phases ===");
+{
+  assert.equal(isInFlightRuntimePhase("crashed"), true, "crashed records remain recoverable");
+  assert.equal(isInFlightRuntimePhase("finalized"), false, "finalized records are terminal");
+}
 
 console.log("\n=== runtime record write/read/update ===");
 {
