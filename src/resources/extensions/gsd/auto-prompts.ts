@@ -35,6 +35,7 @@ import {
 import { formatDecisionsCompact, formatRequirementsCompact } from "./structured-data-formatter.js";
 import { readPhaseAnchor, formatAnchorForPrompt } from "./phase-anchor.js";
 import { composeContextModeInstructions, composeInlinedContext, type ArtifactResolver, type ContextModeRenderMode } from "./unit-context-composer.js";
+import { readCompactionSnapshot } from "./compaction-snapshot.js";
 import { logWarning } from "./workflow-logger.js";
 import { inlineGraphSubgraph } from "./graph-context.js";
 import { buildExtractionStepsBlock } from "./commands-extract-learnings.js";
@@ -102,13 +103,28 @@ function renderContextModeForPrompt(
   });
 }
 
+function renderContextModeBlockForPrompt(
+  unitType: string,
+  base: string,
+  renderMode: ContextModeRenderMode = "standalone",
+): string {
+  const contextMode = renderContextModeForPrompt(unitType, base, renderMode);
+  if (!contextMode) return "";
+  if (renderMode === "nested") return contextMode;
+
+  const snapshot = readCompactionSnapshot(base);
+  if (!snapshot?.trim()) return contextMode;
+
+  return `${contextMode}\n\n## Context Snapshot\nSource: \`.gsd/last-snapshot.md\`\n\n${snapshot.trimEnd()}`;
+}
+
 function prependContextModeToBlock(
   unitType: string,
   base: string,
   block: string,
   renderMode: ContextModeRenderMode = "standalone",
 ): string {
-  const contextMode = renderContextModeForPrompt(unitType, base, renderMode);
+  const contextMode = renderContextModeBlockForPrompt(unitType, base, renderMode);
   if (!contextMode) return block;
   if (!block.trim()) return contextMode;
   return `${contextMode}\n\n${block}`;

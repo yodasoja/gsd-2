@@ -361,7 +361,7 @@ The database is authoritative for milestones, slices, tasks, requirements, decis
 
 2. **Context pre-loading** — The dispatch prompt includes inlined task plans, slice plans, prior task summaries, dependency summaries, roadmap excerpts, and decisions register. The LLM starts with everything it needs instead of spending tool calls reading files.
 
-3. **Context Mode** — Context Mode is enabled by default and gives every auto-mode unit guidance for preserving context. Agents are steered toward `gsd_exec` for noisy scans, builds, tests, and diagnostics; full stdout/stderr is saved under `.gsd/exec/` while only a short digest enters the conversation. `gsd_exec_search` lets agents reuse prior runs instead of repeating expensive checks, and `gsd_resume` reads `.gsd/last-snapshot.md` after compaction or resume. Opt out with `context_mode.enabled: false`; tune sandbox timeout/output caps with `context_mode.exec_timeout_ms`, `context_mode.exec_stdout_cap_bytes`, and `context_mode.exec_digest_chars`.
+3. **Context Mode** — Context Mode is enabled by default and gives eligible auto-mode units guidance for preserving context. Agents are steered toward `gsd_exec` for noisy scans, builds, tests, and diagnostics; capped stdout/stderr and metadata are saved under `.gsd/exec/` while only a short digest enters the conversation. `gsd_exec_search` lets agents reuse prior runs instead of repeating expensive checks, and `gsd_resume` reads a prior compaction snapshot from `.gsd/last-snapshot.md` when one exists. Opt out with `context_mode.enabled: false` to disable Context Mode guidance, snapshot injection, `gsd_exec`, `gsd_exec_search`, and `gsd_resume`; tune sandbox timeout/output caps and environment forwarding with `context_mode.exec_timeout_ms`, `context_mode.exec_stdout_cap_bytes`, `context_mode.exec_digest_chars`, and `context_mode.exec_env_allowlist`.
 
 4. **Git isolation** — When `git.isolation` is set to `worktree` or `branch`, each milestone runs on its own `milestone/<MID>` branch (in a worktree or in-place). All slice work commits sequentially — no branch switching, no merge conflicts. When the milestone completes, it's squash-merged to main as one clean commit. The default is `none` (work on the current branch), configurable via preferences. If `worktree` is configured in a repo with no committed `HEAD`, GSD temporarily behaves as `none` until the first commit exists because git worktrees need a committed start point.
 
@@ -659,10 +659,11 @@ auto_report: true
 | `unique_milestone_ids`            | Uses unique milestone names to avoid clashes when working in teams of people                          |
 | `git.isolation`                   | `none` (default), `worktree`, or `branch` — enable worktree or branch isolation for milestone work. `worktree` requires a committed `HEAD`; zero-commit repos temporarily run as `none`    |
 | `git.manage_gitignore`            | Set `false` to prevent GSD from modifying `.gitignore`                                                |
-| `context_mode.enabled`            | Context Mode is default-on; set `false` to disable `gsd_exec`, exec history guidance, and resume snapshots |
+| `context_mode.enabled`            | Context Mode is default-on; set `false` to disable prompt guidance, snapshot injection, `gsd_exec`, `gsd_exec_search`, and `gsd_resume` |
 | `context_mode.exec_timeout_ms`    | Timeout for sandboxed `gsd_exec` runs (default: 30000)                                                |
 | `context_mode.exec_stdout_cap_bytes` | Persisted stdout cap for `gsd_exec` output (default: 1048576)                                      |
 | `context_mode.exec_digest_chars`  | Trailing stdout characters returned to the agent context (default: 300)                              |
+| `context_mode.exec_env_allowlist` | Environment variables forwarded to sandboxed `gsd_exec` runs in addition to `PATH` and `HOME`        |
 | `verification_commands`           | Array of shell commands to run after task execution (e.g., `["npm run lint", "npm run test"]`)        |
 | `verification_auto_fix`           | Auto-retry on verification failures (default: true)                                                   |
 | `verification_max_retries`        | Max retries for verification failures (default: 2)                                                    |

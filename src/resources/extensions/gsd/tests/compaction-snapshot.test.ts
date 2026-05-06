@@ -121,3 +121,14 @@ test('executeResume: reports friendly empty state when no snapshot exists', () =
     cleanup(base);
   }
 });
+
+test('executeResume: returns disabled error when context_mode.enabled=false', () => {
+  const base = freshBase();
+  try {
+    const result = executeResume({}, { baseDir: base, preferences: { context_mode: { enabled: false } } });
+    assert.equal(result.isError, true);
+    assert.equal((result.details as { error?: string }).error, 'context_mode_disabled');
+  } finally {
+    cleanup(base);
+  }
+});
