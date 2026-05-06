@@ -28,7 +28,8 @@ type RenderedSegment =
 		contentType: "text" | "thinking";
 		component: AssistantMessageComponent;
 	}
-	| { kind: "tool"; contentIndex: number; component: ToolExecutionComponent };
+	| { kind: "tool"; contentIndex: number; component: ToolExecutionComponent }
+	| { kind: "tool-summary"; component: ToolPhaseSummaryComponent; phases: ToolExecutionPhase[] };
 
 let renderedSegments: RenderedSegment[] = [];
 // When providers reuse one assistant lifecycle across internal sub-turns,
@@ -124,17 +125,25 @@ function replaceCompactToolRowsWithPhaseSummary(
 ): void {
 	let changed = false;
 	const nextRenderedSegments: RenderedSegment[] = [];
-	let rollupRun: Array<{ seg: Extract<RenderedSegment, { kind: "tool" }>; phase: ToolExecutionPhase }> = [];
+	let rollupRun: Array<{
+		seg: Extract<RenderedSegment, { kind: "tool" | "tool-summary" }>;
+		phases: ToolExecutionPhase[];
+	}> = [];
 
 	const flushRollupRun = () => {
-		if (rollupRun.length < 2) {
+		const actionCount = rollupRun.reduce(
+			(total, item) => total + item.phases.reduce((sum, phase) => sum + phase.count, 0),
+			0,
+		);
+		if (actionCount < 2) {
 			nextRenderedSegments.push(...rollupRun.map((item) => item.seg));
 			rollupRun = [];
 			return;
 		}
 
 		const firstIndex = Math.max(0, host.chatContainer.children.indexOf(rollupRun[0].seg.component));
-		const summary = new ToolPhaseSummaryComponent(mergeToolPhases(rollupRun.map((item) => item.phase)));
+		const phases = mergeToolPhases(rollupRun.flatMap((item) => item.phases));
+		const summary = new ToolPhaseSummaryComponent(phases);
 
 		for (const { seg } of rollupRun) {
 			host.chatContainer.removeChild(seg.component);
@@ -149,13 +158,18 @@ function replaceCompactToolRowsWithPhaseSummary(
 		}
 
 		changed = true;
+		nextRenderedSegments.push({ kind: "tool-summary", component: summary, phases });
 		rollupRun = [];
 	};
 
 	for (const seg of renderedSegments) {
 		const phase = seg.kind === "tool" ? seg.component.getRollupPhase() : null;
 		if (seg.kind === "tool" && phase) {
-			rollupRun.push({ seg, phase });
+			rollupRun.push({ seg, phases: [phase] });
+			continue;
+		}
+		if (seg.kind === "tool-summary") {
+			rollupRun.push({ seg, phases: seg.component.getPhases() });
 			continue;
 		}
 
@@ -409,6 +423,7 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 							details: externalToolResult.details,
 							isError: externalToolResult.isError,
 						});
+						replaceCompactToolRowsWithPhaseSummary(host);
 					}
 				}
 
@@ -843,7 +858,6 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 					host.streamingComponent.setShowMetadata(true);
 					host.streamingComponent.updateContent(host.streamingMessage);
 				}
-				replaceCompactToolRowsWithPhaseSummary(host);
 
 				if (host.streamingMessage.stopReason === "aborted" || host.streamingMessage.stopReason === "error") {
 					if (!errorMessage) {
@@ -862,6 +876,7 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 					for (const [, component] of host.pendingTools.entries()) {
 						component.setArgsComplete();
 					}
+					replaceCompactToolRowsWithPhaseSummary(host);
 				}
 				host.streamingComponent = undefined;
 				host.streamingMessage = undefined;
@@ -912,7 +927,7 @@ export async function handleAgentEvent(host: InteractiveModeStateHost & {
 			const component = host.pendingTools.get(event.toolCallId);
 			if (component) {
 				component.updateResult({ ...event.result, isError: event.isError });
-				host.pendingTools.delete(event.toolCallId);
+				replaceCompactToolRowsWithPhaseSummary(host);
 				host.ui.requestRender();
 			}
 			break;

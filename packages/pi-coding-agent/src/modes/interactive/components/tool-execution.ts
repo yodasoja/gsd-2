@@ -1287,6 +1287,10 @@ export class ToolPhaseSummaryComponent extends Container {
 		super();
 	}
 
+	getPhases(): ToolExecutionPhase[] {
+		return this.phases.map((phase) => ({ ...phase }));
+	}
+
 	override render(width: number): string[] {
 		const frameWidth = Math.max(20, width);
 		const rows = this.phases.map((phase) => {

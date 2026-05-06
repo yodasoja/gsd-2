@@ -1080,7 +1080,9 @@ test("chat-controller rolls up low-signal direct tool execution events on agent_
 		} as any);
 	}
 
-	assert.equal(host.chatContainer.children.length, 3, "direct tool events render as individual rows while running");
+	assert.equal(host.chatContainer.children.length, 1, "direct tool events roll up as they finish");
+	assert.equal(host.chatContainer.children[0]?.constructor?.name, "ToolPhaseSummaryComponent");
+	assert.match(host.chatContainer.children[0].render(120).join("\n"), /Setup \/ shell 3 actions/);
 
 	await handleAgentEvent(host, { type: "agent_end" } as any);
 
