@@ -2135,16 +2135,23 @@ export async function showSmartEntry(
         summary: ["No active milestone."],
         actions: [
           {
+            id: "quick_task",
+            label: "Quick task",
+            description: "For small bounded work, run /gsd quick <task> or /gsd do <task>.",
+            recommended: true,
+          },
+          {
             id: "new_milestone",
             label: "Create next milestone",
-            description: "Define what to build next.",
-            recommended: true,
+            description: "Define a larger body of work with planning artifacts.",
           },
         ],
         notYetMessage: "Run /gsd when ready.",
       });
 
-      if (choice === "new_milestone") {
+      if (choice === "quick_task") {
+        ctx.ui.notify("Run /gsd quick <task> for small bounded work, or /gsd do <task> for natural-language routing.", "info");
+      } else if (choice === "new_milestone") {
         setPendingAutoStart(basePath, { ctx, pi, basePath, milestoneId: nextId, step: stepMode });
         await dispatchWorkflow(pi, await prepareAndBuildDiscussPrompt(ctx, pi, nextId,
           `New milestone ${nextId}.`,
@@ -2182,10 +2189,15 @@ export async function showSmartEntry(
       summary: ["All milestones complete."],
       actions: [
         {
+          id: "quick_task",
+          label: "Quick task",
+          description: "Do a small bounded task without opening a milestone.",
+          recommended: true,
+        },
+        {
           id: "new_milestone",
           label: "Start new milestone",
           description: "Define and plan the next milestone.",
-          recommended: true,
         },
         {
           id: "status",
@@ -2196,7 +2208,9 @@ export async function showSmartEntry(
       notYetMessage: "Run /gsd when ready.",
     });
 
-    if (choice === "new_milestone") {
+    if (choice === "quick_task") {
+      ctx.ui.notify("Run /gsd quick <task> for small bounded work, or /gsd do <task> for natural-language routing.", "info");
+    } else if (choice === "new_milestone") {
       const milestoneIds = findMilestoneIds(basePath);
       const uniqueMilestoneIds = !!loadEffectiveGSDPreferences()?.preferences?.unique_milestone_ids;
       const nextId = nextMilestoneIdReserved(milestoneIds, uniqueMilestoneIds, basePath);
@@ -2301,12 +2315,17 @@ export async function showSmartEntry(
 
       const actions = [
         {
+          id: "quick_task",
+          label: "Quick task instead",
+          description: "Use this when the work is small and should not become a milestone.",
+          recommended: true,
+        },
+        {
           id: "plan",
           label: "Create roadmap",
           description: hasContext
             ? "Context captured. Decompose into slices with a boundary map."
             : "Decompose the milestone into slices with a boundary map.",
-          recommended: true,
         },
         ...(!hasContext ? [{
           id: "discuss",
@@ -2332,7 +2351,9 @@ export async function showSmartEntry(
         notYetMessage: "Run /gsd when ready.",
       });
 
-      if (choice === "plan") {
+      if (choice === "quick_task") {
+        ctx.ui.notify("Run /gsd quick <task> for small bounded work, or /gsd do <task> for natural-language routing.", "info");
+      } else if (choice === "plan") {
         setPendingAutoStart(basePath, { ctx, pi, basePath, milestoneId, step: stepMode });
         await dispatchWorkflow(
           pi,
