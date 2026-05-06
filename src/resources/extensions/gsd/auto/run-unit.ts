@@ -11,7 +11,12 @@ import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
 import type { AutoSession } from "./session.js";
 import { NEW_SESSION_TIMEOUT_MS } from "./session.js";
 import type { UnitResult } from "./types.js";
-import { _clearCurrentResolve, _setCurrentResolve, _setSessionSwitchInFlight } from "./resolve.js";
+import {
+  _clearCurrentResolve,
+  _consumePendingSwitchCancellation,
+  _setCurrentResolve,
+  _setSessionSwitchInFlight,
+} from "./resolve.js";
 import {
   getCurrentTurnGeneration,
   runWithTurnGeneration,
@@ -97,6 +102,7 @@ export async function runUnit(
     sessionResult = await Promise.race([sessionPromise, timeoutPromise]);
   } catch (sessionErr) {
     if (sessionTimeoutHandle) clearTimeout(sessionTimeoutHandle);
+    _consumePendingSwitchCancellation();
     const msg =
       sessionErr instanceof Error ? sessionErr.message : String(sessionErr);
     debugLog("runUnit", {
@@ -110,17 +116,20 @@ export async function runUnit(
   if (sessionTimeoutHandle) clearTimeout(sessionTimeoutHandle);
 
   if (sessionResult.cancelled) {
+    _consumePendingSwitchCancellation();
     debugLog("runUnit-session-timeout", { unitType, unitId });
     return { status: "cancelled", errorContext: { message: "Session creation timed out", category: "timeout", isTransient: true } };
   }
 
   if (!s.active) {
+    _consumePendingSwitchCancellation();
     return { status: "cancelled" };
   }
 
   if (s.currentUnitModel && typeof pi.setModel === "function") {
     const restored = await pi.setModel(s.currentUnitModel, { persist: false });
     if (!restored) {
+      _consumePendingSwitchCancellation();
       const message =
         `Failed to restore configured model ${s.currentUnitModel.provider}/${s.currentUnitModel.id} after session creation`;
       ctx.ui.notify(
@@ -145,6 +154,14 @@ export async function runUnit(
   const unitPromise = new Promise<UnitResult>((resolve) => {
     _setCurrentResolve(resolve);
   });
+  const pendingSwitchCancellation = _consumePendingSwitchCancellation();
+  if (pendingSwitchCancellation) {
+    _clearCurrentResolve();
+    return {
+      status: "cancelled",
+      ...(pendingSwitchCancellation.errorContext ? { errorContext: pendingSwitchCancellation.errorContext } : {}),
+    };
+  }
 
   // ── Provider request-readiness pre-check (#4555) ──
   // Verify the provider can accept requests before dispatching. If the token

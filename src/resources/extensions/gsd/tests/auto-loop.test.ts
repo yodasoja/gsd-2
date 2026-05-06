@@ -10,6 +10,8 @@ import {
   _resetPendingResolve,
   _hasPendingResolveForTest,
   _setActiveSession,
+  _setSessionSwitchInFlight,
+  _consumePendingSwitchCancellation,
   isSessionSwitchInFlight,
 } from "../auto/resolve.js";
 import { runUnit } from "../auto/run-unit.js";
@@ -206,6 +208,28 @@ test("runUnit returns cancelled when session creation fails", async () => {
   assert.equal(pi.calls.length, 0);
 });
 
+test("runUnit clears queued switch cancellation when session creation fails", async () => {
+  _resetPendingResolve();
+
+  const ctx = makeMockCtx();
+  const pi = makeMockPi();
+  const s = makeMockSession({
+    newSessionThrows: "connection refused",
+    onNewSessionStart: () => {
+      resolveAgentEndCancelled({
+        message: "Claude Code process aborted by user",
+        category: "aborted",
+        isTransient: false,
+      });
+    },
+  });
+
+  const result = await runUnit(ctx, pi, s, "task", "T01", "prompt");
+
+  assert.equal(result.status, "cancelled");
+  assert.equal(_consumePendingSwitchCancellation(), null);
+});
+
 test("runUnit returns cancelled when session creation times out", async () => {
   _resetPendingResolve();
 
@@ -219,6 +243,34 @@ test("runUnit returns cancelled when session creation times out", async () => {
   assert.equal(result.status, "cancelled");
   assert.equal(result.event, undefined);
   assert.equal(pi.calls.length, 0);
+});
+
+test("runUnit consumes a cancellation queued during session switch before dispatch", async () => {
+  _resetPendingResolve();
+
+  const ctx = makeMockCtx();
+  const pi = makeMockPi();
+  let cancellationQueued = false;
+  const s = makeMockSession({
+    newSessionDelayMs: 10,
+    onNewSessionStart: () => {
+      setTimeout(() => {
+        cancellationQueued = !resolveAgentEndCancelled({
+          message: "Claude Code process aborted by user",
+          category: "aborted",
+          isTransient: false,
+        });
+      }, 0);
+    },
+  });
+
+  const result = await runUnit(ctx, pi, s, "plan-slice", "M009/S01", "prompt");
+
+  assert.equal(cancellationQueued, true);
+  assert.equal(result.status, "cancelled");
+  assert.equal(result.errorContext?.category, "aborted");
+  assert.equal(result.errorContext?.message, "Claude Code process aborted by user");
+  assert.equal(pi.calls.length, 0, "queued switch cancellation must prevent prompt dispatch");
 });
 
 test("runUnit keeps the session-switch guard across a late newSession settlement", async () => {
@@ -2087,6 +2139,25 @@ test("resolveAgentEndCancelled without args produces no errorContext field", asy
   const resolved = await p;
   assert.equal(resolved.status, "cancelled");
   assert.equal(resolved.errorContext, undefined, "errorContext must not be present when no args passed");
+});
+
+test("resolveAgentEndCancelled queues cancellation that arrives during session switch", () => {
+  _resetPendingResolve();
+
+  _setSessionSwitchInFlight(true);
+  const resolved = resolveAgentEndCancelled({
+    message: "Claude Code process aborted by user",
+    category: "aborted",
+    isTransient: false,
+  });
+
+  assert.equal(resolved, false);
+  const pending = _consumePendingSwitchCancellation();
+  assert.ok(pending?.errorContext, "queued cancellation should preserve errorContext");
+  assert.equal(pending.errorContext.category, "aborted");
+  assert.equal(pending.errorContext.message, "Claude Code process aborted by user");
+  assert.equal(_consumePendingSwitchCancellation(), null);
+  _resetPendingResolve();
 });
 
 // ─── #1571: artifact verification retry ──────────────────────────────────────

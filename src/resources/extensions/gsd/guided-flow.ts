@@ -87,6 +87,34 @@ import { logWarning } from "./workflow-logger.js";
 import { deleteRuntimeKv } from "./db/runtime-kv.js";
 import { PAUSED_SESSION_KV_KEY } from "./interrupted-session.js";
 
+type AutoStartOptions = Parameters<typeof startAutoDetached>[4];
+type AutoStartLauncher = typeof startAutoDetached;
+
+function scheduleAutoStartAfterIdle(
+  ctx: ExtensionCommandContext,
+  pi: ExtensionAPI,
+  basePath: string,
+  verboseMode: boolean,
+  options?: AutoStartOptions,
+  launch: AutoStartLauncher = startAutoDetached,
+): void {
+  const waitForIdle =
+    typeof (ctx as { waitForIdle?: unknown }).waitForIdle === "function"
+      ? ctx.waitForIdle.bind(ctx)
+      : async () => {};
+  void waitForIdle()
+    .then(() => {
+      setTimeout(() => launch(ctx, pi, basePath, verboseMode, options), 0);
+    })
+    .catch((err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      ctx.ui.notify(`Auto-start failed while waiting for the prior turn to settle: ${message}`, "error");
+      logWarning("guided", `auto-start idle wait failed: ${message}`);
+    });
+}
+
+export const _scheduleAutoStartAfterIdleForTest = scheduleAutoStartAfterIdle;
+
 // ─── Scope-based validator wrappers ──────────────────────────────────────────
 // These thin wrappers accept a MilestoneScope so callers that already hold a
 // pinned scope never have to re-derive (basePath, milestoneId) separately.
@@ -446,7 +474,7 @@ async function dispatchNextDeepProjectSetupStage(entry: PendingDeepProjectSetupE
 
   if (!hasPendingDeepStage(prefs, entry.basePath)) {
     pendingDeepProjectSetupMap.delete(entry.basePath);
-    startAutoDetached(entry.ctx, entry.pi, entry.basePath, false, { step: entry.step });
+    scheduleAutoStartAfterIdle(entry.ctx, entry.pi, entry.basePath, false, { step: entry.step });
     return true;
   }
 
@@ -479,7 +507,7 @@ async function dispatchNextDeepProjectSetupStage(entry: PendingDeepProjectSetupE
       entry.ctx.ui.notify(result.reason, result.level);
     } else if (hasPendingDeepStage(prefs, entry.basePath)) {
       pendingDeepProjectSetupMap.delete(entry.basePath);
-      startAutoDetached(entry.ctx, entry.pi, entry.basePath, false, { step: entry.step });
+      scheduleAutoStartAfterIdle(entry.ctx, entry.pi, entry.basePath, false, { step: entry.step });
       return true;
     }
     return false;
@@ -487,7 +515,7 @@ async function dispatchNextDeepProjectSetupStage(entry: PendingDeepProjectSetupE
 
   if (!USER_DRIVEN_DEEP_SETUP_UNITS.has(result.unitType)) {
     pendingDeepProjectSetupMap.delete(entry.basePath);
-    startAutoDetached(entry.ctx, entry.pi, entry.basePath, false, { step: entry.step });
+    scheduleAutoStartAfterIdle(entry.ctx, entry.pi, entry.basePath, false, { step: entry.step });
     return true;
   }
 
@@ -693,7 +721,7 @@ export function checkAutoStartAfterDiscuss(): boolean {
 
   pendingAutoStartMap.delete(basePath);
   ctx.ui.notify(`Milestone ${milestoneId} ready.`, "success");
-  startAutoDetached(ctx, pi, basePath, false, { step });
+  scheduleAutoStartAfterIdle(ctx, pi, basePath, false, { step });
   return true;
 }
 

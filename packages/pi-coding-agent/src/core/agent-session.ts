@@ -1626,6 +1626,11 @@ export class AgentSession {
 		// message_end/agent_end events fire while listeners are still connected.
 		// During agent_end handling the turn is already ending; aborting there can
 		// convert a successful auto-mode handoff into an aborted provider message.
+		if (!this.agent.state.isStreaming) {
+			this._retryHandler.abortRetry();
+			await this.agent.waitForIdle();
+			return;
+		}
 		await this.abort();
 	}
 

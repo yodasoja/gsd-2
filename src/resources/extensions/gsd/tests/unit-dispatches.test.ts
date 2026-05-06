@@ -21,6 +21,7 @@ import {
   markFailed,
   markStuck,
   markCanceled,
+  markLatestActiveForWorkerCanceled,
   getRecentForUnit,
   getLatestForUnit,
 } from "../db/unit-dispatches.ts";
@@ -194,6 +195,35 @@ test("markStuck and markCanceled set their respective statuses", (t) => {
   if (!b.ok) return;
   markCanceled(b.dispatchId, "user-cancel");
   assert.equal(getLatestForUnit("M001/S01/T01")!.status, "canceled");
+});
+
+test("markLatestActiveForWorkerCanceled cancels only the latest active dispatch for a worker", (t) => {
+  const base = makeBase();
+  t.after(() => cleanup(base));
+  const { workerId, leaseToken } = setup(base);
+
+  const first = recordDispatchClaim({
+    traceId: "tc-1", workerId, milestoneLeaseToken: leaseToken,
+    milestoneId: "M001", unitType: "plan-slice", unitId: "M001/S01",
+  });
+  assert.equal(first.ok, true);
+  if (!first.ok) return;
+  markCompleted(first.dispatchId);
+
+  const second = recordDispatchClaim({
+    traceId: "tc-2", workerId, milestoneLeaseToken: leaseToken,
+    milestoneId: "M001", unitType: "run-task", unitId: "M001/S01/T01",
+  });
+  assert.equal(second.ok, true);
+  if (!second.ok) return;
+  markRunning(second.dispatchId);
+
+  assert.equal(markLatestActiveForWorkerCanceled(workerId, "signal-exit"), true);
+  assert.equal(getLatestForUnit("M001/S01")!.status, "completed");
+  const latest = getLatestForUnit("M001/S01/T01")!;
+  assert.equal(latest.status, "canceled");
+  assert.equal(latest.exit_reason, "signal-exit");
+  assert.equal(markLatestActiveForWorkerCanceled(workerId, "signal-exit"), false);
 });
 
 test("terminal transitions do not overwrite an already terminal dispatch", (t) => {

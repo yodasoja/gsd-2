@@ -360,6 +360,47 @@ export function markCanceled(dispatchId: number, reason: string): void {
 }
 
 /**
+ * Best-effort signal/crash cleanup: cancel the latest active dispatch owned by
+ * a worker when the process is exiting before the normal loop can settle it.
+ */
+export function markLatestActiveForWorkerCanceled(workerId: string, reason: string): boolean {
+  if (!isDbAvailable()) return false;
+  const now = new Date().toISOString();
+  const db = _getAdapter()!;
+  const result = transaction(() => {
+    return db.prepare(
+      `UPDATE unit_dispatches
+       SET status = 'canceled', ended_at = :ended_at, exit_reason = :reason
+       WHERE id = (
+         SELECT id FROM unit_dispatches
+         WHERE worker_id = :worker_id
+           AND status IN ('pending','claimed','running')
+         ORDER BY id DESC
+         LIMIT 1
+       )`,
+    ).run({
+      ":ended_at": now,
+      ":reason": reason,
+      ":worker_id": workerId,
+    });
+  });
+  const changes =
+    typeof (result as { changes?: unknown }).changes === "number"
+      ? (result as { changes: number }).changes
+      : 0;
+  if (changes <= 0) return false;
+  insertAuditEvent({
+    eventId: randomUUID(),
+    traceId: workerId,
+    category: "orchestration",
+    type: "dispatch-canceled",
+    ts: now,
+    payload: { workerId, reason },
+  });
+  return true;
+}
+
+/**
  * Fetch the most recent N dispatches for a unit. Used by recordDispatchClaim
  * callers to compute attempt_n and by detect-stuck.ts (B3) to consult
  * retry budget before tripping the stuck verdict.

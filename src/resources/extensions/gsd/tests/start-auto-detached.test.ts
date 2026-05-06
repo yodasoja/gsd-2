@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { _withDetachedAutoKeepaliveForTest } from "../auto.ts";
+import { _scheduleAutoStartAfterIdleForTest } from "../guided-flow.ts";
 
 const gsdDir = resolve(import.meta.dirname, "..");
 
@@ -201,4 +202,41 @@ test("detached auto-start preserves milestone lock across pause/stop cleanup (#3
     sessionSrc.includes("sessionMilestoneLock: string | null = null;"),
     "AutoSession should track the detached milestone lock explicitly",
   );
+});
+
+test("discussion auto-start waits for the current command context to become idle", async () => {
+  let releaseIdle!: () => void;
+  const idle = new Promise<void>((resolveIdle) => {
+    releaseIdle = resolveIdle;
+  });
+  const launches: unknown[][] = [];
+  const ctx = {
+    waitForIdle: () => idle,
+    ui: {
+      notify: () => {},
+    },
+  } as any;
+
+  _scheduleAutoStartAfterIdleForTest(
+    ctx,
+    {} as any,
+    "/tmp/gsd-auto-start-idle-test",
+    false,
+    { step: true },
+    (...args: unknown[]) => {
+      launches.push(args);
+    },
+  );
+
+  await Promise.resolve();
+  assert.equal(launches.length, 0, "auto-start must not launch before waitForIdle resolves");
+
+  releaseIdle();
+  await Promise.resolve();
+  assert.equal(launches.length, 0, "auto-start should defer launch to the next timer turn");
+
+  await new Promise((resolveTimer) => setTimeout(resolveTimer, 0));
+  assert.equal(launches.length, 1);
+  assert.equal(launches[0][2], "/tmp/gsd-auto-start-idle-test");
+  assert.deepEqual(launches[0][4], { step: true });
 });

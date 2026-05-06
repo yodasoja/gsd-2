@@ -59,6 +59,7 @@ import {
   isLockProcessAlive,
   formatCrashInfo,
   emitCrashRecoveredUnitEnd,
+  emitOpenUnitEndForUnit,
 } from "./crash-recovery.js";
 import {
   acquireSessionLock,
@@ -200,6 +201,8 @@ import {
   detectWorkingTreeActivity,
 } from "./auto-supervisor.js";
 import { isDbAvailable, getMilestone } from "./gsd-db.js";
+import { markLatestActiveForWorkerCanceled } from "./db/unit-dispatches.js";
+import { writeUnitRuntimeRecord } from "./unit-runtime.js";
 import { countPendingCaptures } from "./captures.js";
 import { CMUX_CHANNELS, type CmuxLogLevel } from "../shared/cmux-events.js";
 import { ensureDbOpen } from "./bootstrap/dynamic-tools.js";
@@ -505,9 +508,54 @@ export {
   getBudgetEnforcementAction,
 } from "./auto-budget.js";
 
+function closeOutSignalInterruptedUnit(currentBasePath: string): void {
+  const currentUnit = s.currentUnit;
+  if (!currentUnit) return;
+
+  const reason = "Auto-mode process received a termination signal";
+  const errorContext: ErrorContext = {
+    message: reason,
+    category: "aborted",
+    isTransient: false,
+  };
+  const basePath = s.basePath || currentBasePath;
+
+  try {
+    emitOpenUnitEndForUnit(basePath, currentUnit.type, currentUnit.id, "cancelled", errorContext);
+  } catch (err) {
+    logWarning("engine", `signal unit-end cleanup failed: ${getErrorMessage(err)}`, { file: "auto.ts" });
+  }
+
+  try {
+    writeUnitRuntimeRecord(basePath, currentUnit.type, currentUnit.id, currentUnit.startedAt, {
+      phase: "crashed",
+      lastProgressAt: Date.now(),
+      lastProgressKind: "signal",
+    });
+  } catch (err) {
+    logWarning("engine", `signal runtime cleanup failed: ${getErrorMessage(err)}`, { file: "auto.ts" });
+  }
+
+  try {
+    if (s.workerId) markLatestActiveForWorkerCanceled(s.workerId, "signal-exit");
+  } catch (err) {
+    logWarning("engine", `signal dispatch cleanup failed: ${getErrorMessage(err)}`, { file: "auto.ts" });
+  }
+
+  try {
+    resolveAgentEndCancelled(errorContext);
+  } catch (err) {
+    logWarning("engine", `signal resolve cleanup failed: ${getErrorMessage(err)}`, { file: "auto.ts" });
+  }
+}
+
 /** Wrapper: register SIGTERM handler and store reference. */
 function registerSigtermHandler(currentBasePath: string): void {
-  s.sigtermHandler = _registerSigtermHandler(currentBasePath, s.sigtermHandler);
+  s.sigtermHandler = _registerSigtermHandler(
+    currentBasePath,
+    s.sigtermHandler,
+    () => closeOutSignalInterruptedUnit(currentBasePath),
+  );
 }
 
 /** Wrapper: deregister SIGTERM handler and clear reference. */

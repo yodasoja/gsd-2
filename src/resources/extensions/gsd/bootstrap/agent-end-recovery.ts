@@ -153,9 +153,29 @@ export async function handleAgentEnd(
   if (maybeHandleEmptyIntentTurn(event, isAutoActive())) return;
 
   if (!isAutoActive()) return;
-  if (isSessionSwitchInFlight()) return;
 
   const lastMsg = event.messages[event.messages.length - 1];
+  if (isSessionSwitchInFlight()) {
+    if (lastMsg && "stopReason" in lastMsg && lastMsg.stopReason === "error") {
+      const rawErrorMsg = ("errorMessage" in lastMsg && lastMsg.errorMessage) ? String(lastMsg.errorMessage) : "";
+      if (isUserInitiatedAbortMessage(rawErrorMsg)) {
+        resolveAgentEndCancelled({
+          message: rawErrorMsg,
+          category: "aborted",
+          isTransient: false,
+        });
+      }
+    } else if (lastMsg && "stopReason" in lastMsg && lastMsg.stopReason === "aborted") {
+      const content = "content" in lastMsg ? lastMsg.content : undefined;
+      const hasEmptyContent = Array.isArray(content) && content.length === 0;
+      const hasErrorMessage = "errorMessage" in lastMsg && !!lastMsg.errorMessage;
+      if (!hasEmptyContent || hasErrorMessage) {
+        resolveAgentEndCancelled(_buildAbortedPauseContext(lastMsg as { errorMessage?: unknown }));
+      }
+    }
+    return;
+  }
+
   if (lastMsg && "stopReason" in lastMsg && lastMsg.stopReason === "aborted") {
     // Empty content with aborted stopReason is a non-fatal agent stop (the LLM
     // chose to end without producing output). Only pause on genuine fatal aborts
