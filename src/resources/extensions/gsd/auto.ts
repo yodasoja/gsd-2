@@ -293,11 +293,15 @@ const STATE_REBUILD_MIN_INTERVAL_MS = 30_000;
  * the DB is unavailable (e.g. fresh project before init) we skip registration
  * silently rather than blocking session start.
  */
-function registerAutoWorkerForSession(session: AutoSession): void {
+function registerAutoWorkerForSession(
+  session: AutoSession,
+  projectRootOverride?: string,
+): void {
   if (session.workerId) return; // already registered (e.g. resume re-runs)
   try {
     const projectRootRealpath = normalizeRealPath(
-      session.scope?.workspace.projectRoot
+      projectRootOverride
+        ?? session.scope?.workspace.projectRoot
         ?? (session.originalBasePath || session.basePath),
     );
     session.workerId = registerAutoWorker({ projectRootRealpath });
@@ -2056,6 +2060,11 @@ export async function startAuto(
     lockBase,
     buildResolver,
   };
+
+  // Register the worker before bootstrap enters a milestone worktree.
+  // This ensures enterMilestone can claim a lease and seed dispatch claims
+  // for crash-recovery fidelity (#5405).
+  registerAutoWorkerForSession(s, base);
 
   const ready = await bootstrapAutoSession(
     s,

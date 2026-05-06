@@ -96,6 +96,23 @@ test("auto bootstrap validates blocked directories before touching .gsd migratio
   );
 });
 
+test("fresh start registers the auto worker before bootstrap enters worktree flow (#5405)", () => {
+  const autoSrc = readGsdFile("auto.ts");
+  const startAutoIdx = autoSrc.indexOf("export async function startAuto(");
+  const startAutoBody = autoSrc.slice(startAutoIdx);
+
+  const preBootstrapRegisterIdx = startAutoBody.indexOf("registerAutoWorkerForSession(s, base);");
+  const bootstrapCallIdx = startAutoBody.indexOf("const ready = await bootstrapAutoSession(");
+
+  assert.ok(startAutoIdx > -1, "startAuto should exist");
+  assert.ok(preBootstrapRegisterIdx > -1, "startAuto should register worker before bootstrap");
+  assert.ok(bootstrapCallIdx > -1, "startAuto should call bootstrapAutoSession");
+  assert.ok(
+    preBootstrapRegisterIdx < bootstrapCallIdx,
+    "worker registration must happen before bootstrap so enterMilestone can claim milestone leases on first entry",
+  );
+});
+
 test("startAutoDetached reports failures asynchronously (#3733)", () => {
   const autoSrc = readGsdFile("auto.ts");
 
