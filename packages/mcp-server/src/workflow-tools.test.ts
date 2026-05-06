@@ -191,6 +191,27 @@ describe("workflow MCP tools", () => {
     }
   });
 
+  it("gsd_exec is blocked by the MCP discussion-gate write gate", async () => {
+    const base = makeTmpBase();
+    try {
+      writeWriteGateSnapshot(base, { pendingGateId: "depth_verification_M001_confirm" });
+      const server = makeMockServer();
+      registerWorkflowTools(server as any);
+      const tool = server.tools.find((t) => t.name === "gsd_exec");
+      assert.ok(tool, "exec tool should be registered");
+
+      const result = await tool!.handler({
+        projectDir: base,
+        runtime: "bash",
+        script: "echo should-not-run",
+      });
+
+      assertToolError(result, /Discussion gate .* has not been confirmed/);
+    } finally {
+      cleanup(base);
+    }
+  });
+
   it("gsd_exec_search finds a prior gsd_exec run", async () => {
     const base = makeTmpBase();
     try {
@@ -222,6 +243,28 @@ describe("workflow MCP tools", () => {
     }
   });
 
+  it("gsd_exec_search returns an MCP error when context mode is disabled", async () => {
+    const base = makeTmpBase();
+    try {
+      writeFileSync(
+        join(base, ".gsd", "PREFERENCES.md"),
+        "---\ncontext_mode:\n  enabled: false\n---\n",
+        "utf-8",
+      );
+      const server = makeMockServer();
+      registerWorkflowTools(server as any);
+      const tool = server.tools.find((t) => t.name === "gsd_exec_search");
+      assert.ok(tool, "exec search tool should be registered");
+
+      const result = await tool!.handler({ projectDir: base, query: "anything" });
+
+      assertToolError(result, /context_mode\.enabled: false/);
+      assert.equal((result as any).structuredContent.error, "context_mode_disabled");
+    } finally {
+      cleanup(base);
+    }
+  });
+
   it("gsd_resume reads the context snapshot", async () => {
     const base = makeTmpBase();
     try {
@@ -243,6 +286,29 @@ describe("workflow MCP tools", () => {
         found: true,
         bytes: Buffer.byteLength("# GSD context snapshot\n\nResume from here.\n", "utf-8"),
       });
+    } finally {
+      cleanup(base);
+    }
+  });
+
+  it("gsd_resume returns an MCP error when context mode is disabled", async () => {
+    const base = makeTmpBase();
+    try {
+      writeFileSync(
+        join(base, ".gsd", "PREFERENCES.md"),
+        "---\ncontext_mode:\n  enabled: false\n---\n",
+        "utf-8",
+      );
+      writeFileSync(join(base, ".gsd", "last-snapshot.md"), "# GSD context snapshot\n\nHidden.\n", "utf-8");
+      const server = makeMockServer();
+      registerWorkflowTools(server as any);
+      const tool = server.tools.find((t) => t.name === "gsd_resume");
+      assert.ok(tool, "resume tool should be registered");
+
+      const result = await tool!.handler({ projectDir: base });
+
+      assertToolError(result, /context_mode\.enabled: false/);
+      assert.equal((result as any).structuredContent.error, "context_mode_disabled");
     } finally {
       cleanup(base);
     }

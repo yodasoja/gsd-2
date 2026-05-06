@@ -251,7 +251,7 @@ export class TUI extends Container {
 	public onDebug?: () => void;
 	private renderRequested = false;
 	private cursorRow = 0; // Logical cursor row (end of rendered content)
-	private hardwareCursorRow = 0; // Actual terminal cursor row (may differ due to IME positioning)
+	private hardwareCursorRow = 0; // Logical content row of the terminal cursor; physical screen row = hardwareCursorRow - previousViewportTop
 	private inputBuffer = ""; // Buffer for parsing terminal responses
 	private cellSizeQueryPending = false;
 	private showHardwareCursor = process.env.PI_HARDWARE_CURSOR === "1" || process.env.TERM_PROGRAM === "WarpTerminal";
