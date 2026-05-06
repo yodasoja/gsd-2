@@ -235,6 +235,7 @@ export class ExtensionRunner {
 	private getContextUsageFn: () => ContextUsage | undefined = () => undefined;
 	private compactFn: (options?: CompactOptions) => void = () => {};
 	private getSystemPromptFn: () => string = () => "";
+	private setCompactionThresholdOverrideFn: (percent: number | undefined) => void = () => {};
 	private newSessionHandler: NewSessionHandler = async () => {
 		throw new Error("Command context not yet bound: newSession is unavailable during early lifecycle");
 	};
@@ -428,6 +429,7 @@ export class ExtensionRunner {
 		this.getContextUsageFn = contextActions.getContextUsage;
 		this.compactFn = contextActions.compact;
 		this.getSystemPromptFn = contextActions.getSystemPrompt;
+		this.setCompactionThresholdOverrideFn = contextActions.setCompactionThresholdOverride;
 
 		// Flush provider registrations queued during extension loading
 		for (const { name, config } of this.runtime.pendingProviderRegistrations) {
@@ -714,6 +716,7 @@ export class ExtensionRunner {
 			getContextUsage: () => this.getContextUsageFn(),
 			compact: (options) => this.compactFn(options),
 			getSystemPrompt: () => this.getSystemPromptFn(),
+			setCompactionThresholdOverride: (percent) => this.setCompactionThresholdOverrideFn(percent),
 		};
 	}
 

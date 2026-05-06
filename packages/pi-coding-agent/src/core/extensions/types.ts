@@ -289,6 +289,12 @@ export interface ExtensionContext {
 	compact(options?: CompactOptions): void;
 	/** Get the current effective system prompt. */
 	getSystemPrompt(): string;
+	/**
+	 * Set or clear an in-memory compaction threshold-percent override (0 < value < 1).
+	 * Pass `undefined` to clear. The override is not persisted; host integrations
+	 * are expected to re-apply on each session_start.
+	 */
+	setCompactionThresholdOverride(percent: number | undefined): void;
 }
 
 /**
@@ -1741,6 +1747,7 @@ export interface ExtensionContextActions {
 	getContextUsage: () => ContextUsage | undefined;
 	compact: (options?: CompactOptions) => void;
 	getSystemPrompt: () => string;
+	setCompactionThresholdOverride: (percent: number | undefined) => void;
 }
 
 /**

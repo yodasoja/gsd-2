@@ -1378,6 +1378,9 @@ export class InteractiveMode {
 				})();
 			},
 			getSystemPrompt: () => this.session.systemPrompt,
+			setCompactionThresholdOverride: (percent) => {
+				this.session.settingsManager.setCompactionThresholdOverride(percent);
+			},
 		});
 
 		// Set up the extension shortcut handler on the default editor

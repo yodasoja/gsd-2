@@ -141,6 +141,7 @@ describe("ExtensionRunner.emitToolCall", () => {
 			getContextUsage: () => undefined,
 			compact: () => {},
 			getSystemPrompt: () => "",
+			setCompactionThresholdOverride: () => {},
 		});
 
 		const errors: any[] = [];
@@ -220,6 +221,7 @@ describe("ExtensionRunner.createContext", () => {
 			getContextUsage: () => undefined,
 			compact: () => {},
 			getSystemPrompt: () => "",
+			setCompactionThresholdOverride: () => {},
 		});
 
 		const errors: any[] = [];

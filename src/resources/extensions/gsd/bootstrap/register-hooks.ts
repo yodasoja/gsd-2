@@ -65,6 +65,26 @@ async function applyDisabledModelProviderPolicy(ctx: ExtensionContext): Promise<
   }
 }
 
+/**
+ * Bridge `context_management.compaction_threshold_percent` from GSD preferences
+ * into the agent's runtime compaction settings (#5475). The preference is
+ * validated to (0.5, 0.95) at load time, but defense-in-depth normalization
+ * here protects against a stale or hand-edited prefs file. Calling with
+ * `undefined` clears any prior override so a removed preference does not leak.
+ */
+async function applyCompactionThresholdOverride(ctx: ExtensionContext): Promise<void> {
+  try {
+    const { loadEffectiveGSDPreferences } = await import("../preferences.js");
+    const prefs = loadEffectiveGSDPreferences();
+    const raw = prefs?.preferences.context_management?.compaction_threshold_percent;
+    const value =
+      typeof raw === "number" && Number.isFinite(raw) && raw > 0 && raw < 1 ? raw : undefined;
+    ctx.setCompactionThresholdOverride(value);
+  } catch {
+    // Non-fatal: leave any existing override in place.
+  }
+}
+
 export function resolveNotificationStoreBasePath(cwd: string = process.cwd()): string {
   return resolveWorktreeProjectRoot(cwd);
 }
@@ -123,6 +143,7 @@ export function registerHooks(
     await resetAskUserQuestionsTurnCache();
     await syncServiceTierStatus(ctx);
     await applyDisabledModelProviderPolicy(ctx);
+    await applyCompactionThresholdOverride(ctx);
     // Skip MCP auto-prep when running inside an auto-worktree (see session_switch below).
     const { isInAutoWorktree } = await import("../auto-worktree.js");
     if (!isInAutoWorktree(process.cwd())) {
@@ -172,6 +193,7 @@ export function registerHooks(
     clearDiscussionFlowState(process.cwd());
     await syncServiceTierStatus(ctx);
     await applyDisabledModelProviderPolicy(ctx);
+    await applyCompactionThresholdOverride(ctx);
     // Skip MCP auto-prep when running inside an auto-worktree. The worktree
     // already has .mcp.json from createAutoWorktree, and re-running the writer
     // post-chdir rewrites the file mid-run (non-idempotent due to cwd-relative

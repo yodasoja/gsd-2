@@ -2211,6 +2211,9 @@ export class AgentSession {
 					})();
 				},
 				getSystemPrompt: () => this.systemPrompt,
+				setCompactionThresholdOverride: (percent) => {
+					this.settingsManager.setCompactionThresholdOverride(percent);
+				},
 			},
 		);
 	}
