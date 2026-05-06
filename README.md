@@ -259,6 +259,7 @@ Full documentation is in the [`docs/`](./docs/) directory:
 
 - **[Architecture](./docs/dev/architecture.md)** — system design and dispatch pipeline
 - **[CI/CD Pipeline](./docs/dev/ci-cd-pipeline.md)** — three-stage promotion pipeline (Dev → Test → Prod)
+- **[E2E Testing](./tests/e2e/README.md)** — real-process CLI/runtime coverage and CI runner expectations
 - **[Pipeline Simplification (ADR-003)](./docs/dev/ADR-003-pipeline-simplification.md)** — merged research into planning, mechanical completion
 - **[VS Code Extension](./vscode-extension/README.md)** — chat participant, sidebar dashboard, RPC integration
 

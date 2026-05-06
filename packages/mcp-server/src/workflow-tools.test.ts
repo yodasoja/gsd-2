@@ -82,6 +82,11 @@ function assertToolError(result: unknown, expected: RegExp | string): string {
   return text;
 }
 
+function cacheBustedWorkflowToolsImport(tag: string): string {
+  const extension = import.meta.url.includes("/dist-test/") ? "js" : "ts";
+  return `./workflow-tools.${extension}?${tag}=${randomUUID()}`;
+}
+
 describe("workflow MCP tools", () => {
   it("registers the full headless-safe workflow tool surface", () => {
     const server = makeMockServer();
@@ -471,7 +476,9 @@ describe("workflow MCP tools", () => {
     try {
       process.env.GSD_WORKFLOW_PROJECT_ROOT = base;
       process.env.GSD_WORKFLOW_EXECUTORS_MODULE = "data:text/javascript,export default {}";
-      const { registerWorkflowTools: freshRegisterWorkflowTools } = await import(`./workflow-tools.ts?bad-module=${randomUUID()}`);
+      const { registerWorkflowTools: freshRegisterWorkflowTools } = await import(
+        cacheBustedWorkflowToolsImport("bad-module")
+      );
       const server = makeMockServer();
       freshRegisterWorkflowTools(server as any);
       const tool = server.tools.find((t) => t.name === "gsd_summary_save");
@@ -657,7 +664,7 @@ export const executeTaskComplete = async (params, projectDir) => {
       // Fresh import bypasses the cached workflowToolExecutorsPromise so the
       // mock module is actually loaded for this test.
       const { registerWorkflowTools: freshRegisterWorkflowTools } = await import(
-        `./workflow-tools.ts?escalation-test=${randomUUID()}`
+        cacheBustedWorkflowToolsImport("escalation-test")
       );
       const server = makeMockServer();
       freshRegisterWorkflowTools(server as any);
