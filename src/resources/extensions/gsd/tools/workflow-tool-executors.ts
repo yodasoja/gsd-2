@@ -813,7 +813,7 @@ export async function executeMilestoneStatus(
 
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-        details: { operation: "milestone_status", milestoneId: milestone.id, sliceCount: slices.length },
+        details: { operation: "milestone_status", ...result },
       };
     });
   } catch (err) {

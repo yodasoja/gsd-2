@@ -2273,6 +2273,13 @@ export async function runFinalize(
 
   // Both pre and post verification completed without timeout — reset counter
   loopState.consecutiveFinalizeTimeouts = 0;
+  if (preUnitSnapshot) {
+    writeUnitRuntimeRecord(s.basePath, preUnitSnapshot.type, preUnitSnapshot.id, preUnitSnapshot.startedAt, {
+      phase: "finalized",
+      lastProgressAt: Date.now(),
+      lastProgressKind: "finalize-success",
+    });
+  }
   s.currentUnit = null;
   clearCurrentPhase();
 

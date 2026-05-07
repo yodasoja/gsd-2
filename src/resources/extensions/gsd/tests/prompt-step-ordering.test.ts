@@ -65,6 +65,25 @@ describe('prompt step ordering (#3696)', () => {
     assert.ok(learningsIdx < completeMilestoneIdx, 'learnings extraction must happen before gsd_complete_milestone');
   });
 
+  test('complete-milestone duplicate guard checks milestone status before durable writes', () => {
+    const guardMatch = completeMilestoneMd.match(/^\d+\.\s.*gsd_milestone_status/m);
+    const reqUpdateMatch = completeMilestoneMd.match(/^\d+\.\s.*gsd_requirement_update/m);
+    assert.ok(guardMatch, 'complete-milestone must start with a gsd_milestone_status duplicate guard');
+    assert.ok(reqUpdateMatch, 'gsd_requirement_update should appear in a numbered step');
+
+    const guardIdx = completeMilestoneMd.indexOf(guardMatch![0]);
+    const reqUpdateIdx = completeMilestoneMd.indexOf(reqUpdateMatch![0]);
+    assert.ok(
+      guardIdx < reqUpdateIdx,
+      'duplicate guard must run before requirement/project/learnings writes',
+    );
+    assert.match(
+      completeMilestoneMd,
+      /status(?:`|\*\*)?\s+(?:is\s+)?(?:`complete`|"complete")/i,
+      'duplicate guard must tell the agent to stop when status is complete',
+    );
+  });
+
   test('complete-slice.md uses gsd_requirement_update', () => {
     assert.match(completeSliceMd, /gsd_requirement_update/,
       'complete-slice.md should reference gsd_requirement_update');

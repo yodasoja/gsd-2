@@ -165,6 +165,9 @@ test("executeMilestoneStatus returns milestone metadata and slice counts", async
     assert.equal(parsed.sliceCount, 1);
     assert.equal(parsed.slices[0].id, "S01");
     assert.equal(parsed.slices[0].taskCounts.pending, 1);
+    assert.equal(result.details.status, "active");
+    assert.equal(result.details.title, "Milestone One");
+    assert.deepEqual(result.details.slices, parsed.slices);
   } finally {
     closeDatabase();
     cleanup(base);
