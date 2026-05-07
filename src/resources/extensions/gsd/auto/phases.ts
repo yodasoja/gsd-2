@@ -57,6 +57,7 @@ import { getEligibleSlices } from "../slice-parallel-eligibility.js";
 import { startSliceParallel } from "../slice-parallel-orchestrator.js";
 import { isDbAvailable, getMilestoneSlices } from "../gsd-db.js";
 import type { MinimalModelRegistry } from "../context-budget.js";
+import type { PostflightResult, PreflightResult } from "../clean-root-preflight.js";
 import { ensurePlanV2Graph, isEmptyPlanV2GraphResult, isMissingFinalizedContextResult } from "../uok/plan-v2.js";
 import { resolveUokFlags } from "../uok/flags.js";
 import { UokGateRunner } from "../uok/gate-runner.js";
@@ -207,6 +208,38 @@ async function closeoutAndStop(
     s.currentUnit = null;
   }
   await deps.stopAuto(ctx, pi, reason);
+}
+
+async function stopOnPostflightRecoveryNeeded(
+  ic: IterationContext,
+  result: PostflightResult,
+  milestoneId: string,
+): Promise<{ action: "break"; reason: string } | null> {
+  if (!result.needsManualRecovery) return null;
+  const { ctx, pi, deps } = ic;
+  const reason = `Post-merge stash restore failed for milestone ${milestoneId}`;
+  ctx.ui.notify(
+    `${reason}. Resolve the working tree before resuming auto-mode. ${result.message}`,
+    "error",
+  );
+  await deps.stopAuto(ctx, pi, reason);
+  return { action: "break", reason: "postflight-stash-restore-failed" };
+}
+
+async function restorePreflightStashOrStop(
+  ic: IterationContext,
+  preflight: PreflightResult,
+  milestoneId: string,
+): Promise<{ action: "break"; reason: string } | null> {
+  if (!preflight.stashPushed) return null;
+  const { ctx, s, deps } = ic;
+  const result = deps.postflightPopStash(
+    s.originalBasePath || s.basePath,
+    milestoneId,
+    preflight.stashMarker,
+    ctx.ui.notify.bind(ctx.ui),
+  );
+  return stopOnPostflightRecoveryNeeded(ic, result, milestoneId);
 }
 
 async function emitCancelledUnitEnd(
@@ -674,13 +707,13 @@ export async function runPreDispatch(
       return { action: "break", reason: "merge-failed" };
     }
     // #2909: postflight — restore stashed changes after successful merge
-    if (preflightTransition.stashPushed) {
-      deps.postflightPopStash(
-        s.originalBasePath || s.basePath,
+    {
+      const postflightStop = await restorePreflightStashOrStop(
+        ic,
+        preflightTransition,
         s.currentMilestoneId!,
-        preflightTransition.stashMarker,
-        ctx.ui.notify.bind(ctx.ui),
       );
+      if (postflightStop) return postflightStop;
     }
 
     // PR creation (auto_pr) is handled inside mergeMilestoneToMain (#2302)
@@ -788,13 +821,13 @@ export async function runPreDispatch(
           return { action: "break", reason: "merge-failed" };
         }
         // #2909: postflight — restore stashed changes after successful merge
-        if (preflightAllComplete.stashPushed) {
-          deps.postflightPopStash(
-            s.originalBasePath || s.basePath,
+        {
+          const postflightStop = await restorePreflightStashOrStop(
+            ic,
+            preflightAllComplete,
             s.currentMilestoneId,
-            preflightAllComplete.stashMarker,
-            ctx.ui.notify.bind(ctx.ui),
           );
+          if (postflightStop) return postflightStop;
         }
 
         // PR creation (auto_pr) is handled inside mergeMilestoneToMain (#2302)
@@ -917,13 +950,13 @@ export async function runPreDispatch(
         return { action: "break", reason: "merge-failed" };
       }
       // #2909: postflight — restore stashed changes after successful merge
-      if (preflightComplete.stashPushed) {
-        deps.postflightPopStash(
-          s.originalBasePath || s.basePath,
+      {
+        const postflightStop = await restorePreflightStashOrStop(
+          ic,
+          preflightComplete,
           s.currentMilestoneId,
-          preflightComplete.stashMarker,
-          ctx.ui.notify.bind(ctx.ui),
         );
+        if (postflightStop) return postflightStop;
       }
 
       // PR creation (auto_pr) is handled inside mergeMilestoneToMain (#2302)
