@@ -8,7 +8,12 @@
  * @see D001 (module location), D002 (200K fallback), D003 (section-boundary truncation)
  */
 
-import { type TokenProvider, getCharsPerToken } from "./token-counter.js";
+import {
+  type TokenProvider,
+  getCharsPerToken,
+  isAccurateCountingAvailable,
+  countTokensSync,
+} from "./token-counter.js";
 
 // ─── Budget ratio constants ──────────────────────────────────────────────────
 // Percentages of total context window allocated to each budget category.
@@ -101,7 +106,20 @@ export interface MinimalPreferences {
 export function computeBudgets(contextWindow: number, provider?: TokenProvider): BudgetAllocation {
   const effectiveWindow = contextWindow > 0 ? contextWindow : DEFAULT_CONTEXT_WINDOW;
   const charsPerToken = provider ? getCharsPerToken(provider) : CHARS_PER_TOKEN;
-  const totalChars = effectiveWindow * charsPerToken;
+
+  // Prefer the tiktoken encoder for total-char estimation when it has been
+  // warmed (initTokenCounter resolved). countTokensSync(probe) gives an
+  // empirical chars-per-token for a representative ASCII probe, which is more
+  // accurate than the static provider table for English-heavy prompts.
+  let totalChars: number;
+  if (isAccurateCountingAvailable()) {
+    const probe = "the quick brown fox jumps over the lazy dog ".repeat(64);
+    const probeTokens = countTokensSync(probe, provider);
+    const empiricalCharsPerToken = probeTokens > 0 ? probe.length / probeTokens : charsPerToken;
+    totalChars = effectiveWindow * empiricalCharsPerToken;
+  } else {
+    totalChars = effectiveWindow * charsPerToken;
+  }
 
   return {
     summaryBudgetChars: Math.floor(totalChars * SUMMARY_RATIO),

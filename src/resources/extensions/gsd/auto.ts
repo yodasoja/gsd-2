@@ -242,6 +242,13 @@ import {
   type WorktreeResolverDeps,
 } from "./worktree-resolver.js";
 import { reorderForCaching } from "./prompt-ordering.js";
+import { initTokenCounter } from "./token-counter.js";
+
+// Warm the tiktoken encoder at extension startup so context-budget computations
+// can use accurate token counts via countTokensSync without paying the load
+// cost mid-prompt-build. Fire-and-forget — failure falls back to the
+// provider-aware char-ratio estimator already used by getCharsPerToken().
+void initTokenCounter();
 
 // ─── Session State ─────────────────────────────────────────────────────────
 
