@@ -14,6 +14,7 @@ import { isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { gsdRoot } from "./paths.js";
 import { GIT_NO_PROMPT_ENV } from "./git-constants.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
+import { logWarning } from "./workflow-logger.js";
 
 
 import {
@@ -722,16 +723,53 @@ export class GitServiceImpl {
     if (keyFiles.length === 0) return false;
 
     const allExclusions = [...RUNTIME_EXCLUSION_PATHS, ...extraExclusions];
-    const paths = Array.from(new Set(
-      keyFiles
-        .map(file => normalizeRepoRelativePath(this.basePath, file))
-        .filter((file): file is string => file !== null)
-        .filter(file => !isExcludedScopedPath(file, allExclusions)),
-    ));
+    const normalized = keyFiles
+      .map(file => normalizeRepoRelativePath(this.basePath, file))
+      .filter((file): file is string => file !== null)
+      .filter(file => !isExcludedScopedPath(file, allExclusions));
+
+    // Drop entries that don't exist on disk. The LLM occasionally lists files
+    // it intended to write but didn't (or names them with wrong casing/path).
+    // Pre-`b304f738b` `git add -A` swallowed these silently; the scoped
+    // pathspec form passes each path explicitly, so a single bad entry made
+    // the whole commit fail (see #5500). Filter so valid paths still commit.
+    const missing: string[] = [];
+    const existing: string[] = [];
+    for (const path of normalized) {
+      if (existsSync(join(this.basePath, path))) {
+        existing.push(path);
+      } else {
+        missing.push(path);
+      }
+    }
+    if (missing.length > 0) {
+      logWarning(
+        "engine",
+        `scoped stage: dropping ${missing.length} non-existent keyFile(s) from task commit: ${missing.join(", ")}`,
+        { file: "git-service.ts" },
+      );
+    }
+
+    const paths = Array.from(new Set(existing));
     if (paths.length === 0) return false;
 
-    nativeAddPaths(this.basePath, paths);
-    return true;
+    try {
+      nativeAddPaths(this.basePath, paths);
+      return true;
+    } catch (err) {
+      // Defense-in-depth: even after existence filtering, libgit2/git can
+      // still reject paths (gitignore matches, case-only differences on
+      // case-insensitive FS, submodule boundaries). Returning false lets
+      // autoCommit fall through to smartStage so the commit still goes out
+      // — restoring the resilience the unscoped path used to provide.
+      const msg = err instanceof Error ? err.message : String(err);
+      logWarning(
+        "engine",
+        `scoped stage failed (${msg}); falling back to smartStage`,
+        { file: "git-service.ts" },
+      );
+      return false;
+    }
   }
 
   /** Tracks whether runtime file cleanup has run this session. */
