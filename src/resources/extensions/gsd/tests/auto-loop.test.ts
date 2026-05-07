@@ -67,7 +67,7 @@ function makeMockSession(opts?: {
     verbose: false,
     basePath: process.cwd(),
     cmdCtx: {
-      newSession: (options?: { abortSignal?: AbortSignal }) => {
+      newSession: (options?: { abortSignal?: AbortSignal; workspaceRoot?: string }) => {
         opts?.onNewSessionStart?.(session);
         if (opts?.newSessionThrows) {
           return Promise.reject(new Error(opts.newSessionThrows));
@@ -79,7 +79,7 @@ function makeMockSession(opts?: {
             setTimeout(() => {
               // Simulate AgentSession.newSession() checking abortSignal after
               // its internal async work (abort()) completes — this is where the
-              // real code captures process.cwd() and rebuilds the tool runtime.
+              // real code selects a workspace root and rebuilds the tool runtime.
               // If the signal is aborted, the real code discards the session.
               opts?.onSignalCheck?.(options?.abortSignal?.aborted ?? false);
               opts?.onNewSessionSettle?.(session);
@@ -549,10 +549,9 @@ test("runUnit proceeds when isProviderRequestReady throws (defensive) (#4555)", 
   assert.equal(pi.calls.length, 0);
 });
 
-test("late-resolving newSession() after timeout receives aborted signal so tool runtime is not configured with root cwd (#3731)", async () => {
-  // When newSession() times out in runUnit(), auto-mode restores cwd to project
-  // root. If newSession() later resolves, it must NOT use process.cwd() to
-  // configure the tool runtime (which would give it root cwd, not worktree cwd).
+test("late-resolving newSession() after timeout receives aborted signal so tool runtime is not configured with stale workspace root (#3731)", async () => {
+  // When newSession() times out in runUnit(), a late resolution must not
+  // configure the tool runtime against a stale workspace root.
   //
   // The fix: runUnit creates an AbortController, aborts it on timeout, and passes
   // the signal to newSession(). AgentSession.newSession() checks the signal after
@@ -567,8 +566,8 @@ test("late-resolving newSession() after timeout receives aborted signal so tool 
 
     // newSession mock simulates AgentSession.newSession() behavior:
     // after an internal delay (representing await this.abort()), it checks the
-    // abortSignal — that's where the real code would capture process.cwd() and
-    // call _buildRuntime. If aborted, the real code must discard the session.
+    // abortSignal before selecting the workspace root and calling _buildRuntime.
+    // If aborted, the real code must discard the session.
     const s = makeMockSession({
       newSessionDelayMs: 200_000, // longer than NEW_SESSION_TIMEOUT_MS (120s)
       onSignalCheck: (aborted) => {
@@ -601,7 +600,7 @@ test("late-resolving newSession() after timeout receives aborted signal so tool 
       abortedWhenLateSessionSettled,
       true,
       "runUnit must pass an aborted AbortSignal to newSession() when it resolves after the session-creation timeout (#3731). " +
-      "Without this, AgentSession.newSession() captures root process.cwd() and rebuilds the tool runtime with wrong cwd.",
+      "Without this, AgentSession.newSession() can rebuild the tool runtime with a stale workspace root.",
     );
   } finally {
     mock.timers.reset();
