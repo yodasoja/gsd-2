@@ -313,6 +313,8 @@ function passesFilters(memory: Memory, filters: QueryMemoriesFilters): boolean {
   return true;
 }
 
+let ftsWarningEmitted = false;
+
 function keywordSearch(
   adapter: NonNullable<ReturnType<typeof _getAdapter>>,
   rawQuery: string,
@@ -340,14 +342,22 @@ function keywordSearch(
     }
   }
 
-  // LIKE fallback — scans the candidate pool.
+  // LIKE fallback — scans a capped candidate pool.
+  if (!ftsWarningEmitted) {
+    ftsWarningEmitted = true;
+    logWarning('memory-store', 'FTS5 unavailable — using LIKE fallback scan (consider enabling FTS5)');
+  }
+
   const terms = rawQuery
     .toLowerCase()
     .split(/[^a-z0-9_]+/)
     .filter((t) => t.length >= 2);
   if (terms.length === 0) return [];
 
-  const rows = adapter.prepare(`SELECT * FROM memories ${activeClause}`).all();
+  const preScanCap = Math.min(limit * 20, 2000);
+  const rows = adapter
+    .prepare(`SELECT * FROM memories ${activeClause} LIMIT :preScanCap`)
+    .all({ ':preScanCap': preScanCap });
   const scored: Array<{ memory: Memory; score: number }> = [];
   for (const row of rows) {
     const memory = rowToMemory(row);
