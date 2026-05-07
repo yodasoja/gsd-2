@@ -1810,6 +1810,13 @@ export function reconcileWorktreeDb(
       const hasEscalationAwaiting = wtTaskInfo.some((col) => col["name"] === "escalation_awaiting_review");
       const hasEscalationArtifact = wtTaskInfo.some((col) => col["name"] === "escalation_artifact_path");
       const hasEscalationOverride = wtTaskInfo.some((col) => col["name"] === "escalation_override_applied_at");
+      const wtArtifactInfo = adapter.prepare("PRAGMA wt.table_info('artifacts')").all();
+      const hasArtifactContentHash = wtArtifactInfo.some((col) => col["name"] === "content_hash");
+      const wtMemoryInfo = adapter.prepare("PRAGMA wt.table_info('memories')").all();
+      const hasMemoryScope = wtMemoryInfo.some((col) => col["name"] === "scope");
+      const hasMemoryTags = wtMemoryInfo.some((col) => col["name"] === "tags");
+      const hasMemoryStructuredFields = wtMemoryInfo.some((col) => col["name"] === "structured_fields");
+      const hasMemoryLastHitAt = wtMemoryInfo.some((col) => col["name"] === "last_hit_at");
 
       const decConf = adapter.prepare(
         `SELECT m.id FROM decisions m INNER JOIN wt.decisions w ON m.id = w.id WHERE m.decision != w.decision OR m.choice != w.choice OR m.rationale != w.rationale OR ${
@@ -1857,12 +1864,17 @@ export function reconcileWorktreeDb(
           FROM wt.requirements
         `).run());
 
+        // V27: preserve content_hash. If the worktree predates V27 (no column),
+        // fall back to the main DB's existing hash so reconcile doesn't null
+        // out integrity fingerprints on artifacts that were unchanged in wt.
         merged.artifacts = countChanges(adapter.prepare(`
           INSERT OR REPLACE INTO artifacts (
-            path, artifact_type, milestone_id, slice_id, task_id, full_content, imported_at
+            path, artifact_type, milestone_id, slice_id, task_id, full_content, imported_at, content_hash
           )
-          SELECT path, artifact_type, milestone_id, slice_id, task_id, full_content, imported_at
-          FROM wt.artifacts
+          SELECT w.path, w.artifact_type, w.milestone_id, w.slice_id, w.task_id, w.full_content, w.imported_at,
+                 ${hasArtifactContentHash ? "w.content_hash" : "m.content_hash"}
+          FROM wt.artifacts w
+          LEFT JOIN artifacts m ON m.path = w.path
         `).run());
 
         // Merge milestones — worktree may have updated status/planning fields.
@@ -1964,15 +1976,25 @@ export function reconcileWorktreeDb(
           LEFT JOIN tasks m ON m.milestone_id = w.milestone_id AND m.slice_id = w.slice_id AND m.id = w.id
         `).run());
 
-        // Merge memories — keep worktree-learned insights
+        // Merge memories — keep worktree-learned insights.
+        // V18 (scope, tags), V21 (structured_fields), V28 (last_hit_at): for each
+        // column the wt may not yet have (older worktree DB), fall back to the
+        // main DB's existing value via LEFT JOIN so reconcile never silently
+        // resets these fields to defaults on rows that already had them.
         merged.memories = countChanges(adapter.prepare(`
           INSERT OR REPLACE INTO memories (
             seq, id, category, content, confidence, source_unit_type, source_unit_id,
-            created_at, updated_at, superseded_by, hit_count
+            created_at, updated_at, superseded_by, hit_count,
+            scope, tags, structured_fields, last_hit_at
           )
-          SELECT seq, id, category, content, confidence, source_unit_type, source_unit_id,
-                 created_at, updated_at, superseded_by, hit_count
-          FROM wt.memories
+          SELECT w.seq, w.id, w.category, w.content, w.confidence, w.source_unit_type, w.source_unit_id,
+                 w.created_at, w.updated_at, w.superseded_by, w.hit_count,
+                 ${hasMemoryScope ? "w.scope" : "COALESCE(m.scope, 'project')"},
+                 ${hasMemoryTags ? "w.tags" : "COALESCE(m.tags, '[]')"},
+                 ${hasMemoryStructuredFields ? "w.structured_fields" : "m.structured_fields"},
+                 ${hasMemoryLastHitAt ? "w.last_hit_at" : "m.last_hit_at"}
+          FROM wt.memories w
+          LEFT JOIN memories m ON m.id = w.id
         `).run());
 
         // Merge verification evidence — append-only, use INSERT OR IGNORE to avoid duplicates
