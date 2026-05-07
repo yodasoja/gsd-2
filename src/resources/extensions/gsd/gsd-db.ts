@@ -80,6 +80,7 @@ import {
   applyMigrationV23MilestoneQueue,
   applyMigrationV26MilestoneCommitAttributions,
   applyMigrationV27ArtifactHash,
+  applyMigrationV28MemoryLastHitAt,
 } from "./db-migration-steps.js";
 import { isMemoriesFtsAvailableSchema, tryCreateMemoriesFtsSchema } from "./db-memory-fts-schema.js";
 import { createDbOpenState, type DbOpenPhase } from "./db-open-state.js";
@@ -108,7 +109,7 @@ const providerLoader = createSqliteProviderLoader({
   writeStderr: (message: string) => process.stderr.write(message),
 });
 
-export const SCHEMA_VERSION = 27;
+export const SCHEMA_VERSION = 28;
 
 function initSchema(db: DbAdapter, fileBacked: boolean): void {
   if (fileBacked) db.exec("PRAGMA journal_mode=WAL");
@@ -340,6 +341,11 @@ function migrateSchema(db: DbAdapter): void {
     if (currentVersion < 27) {
       applyMigrationV27ArtifactHash(db);
       recordSchemaVersion(db, 27);
+    }
+
+    if (currentVersion < 28) {
+      applyMigrationV28MemoryLastHitAt(db);
+      recordSchemaVersion(db, 28);
     }
 
     db.exec("COMMIT");
@@ -3071,8 +3077,8 @@ export function updateMemoryContentRow(
 export function incrementMemoryHitCount(id: string, updatedAt: string): void {
   if (!currentDb) throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
   currentDb.prepare(
-    "UPDATE memories SET hit_count = hit_count + 1, updated_at = :updated_at WHERE id = :id",
-  ).run({ ":updated_at": updatedAt, ":id": id });
+    "UPDATE memories SET hit_count = hit_count + 1, updated_at = :updated_at, last_hit_at = :last_hit_at WHERE id = :id",
+  ).run({ ":updated_at": updatedAt, ":last_hit_at": updatedAt, ":id": id });
 }
 
 export function supersedeMemoryRow(oldId: string, newId: string, updatedAt: string): void {

@@ -44,6 +44,8 @@ export interface Memory {
    * decisions table (Step 5) with the original scope/decision/choice/etc.
    */
   structured_fields: Record<string, unknown> | null;
+  /** ISO timestamp of the most recent memory_query hit. NULL until first hit. */
+  last_hit_at: string | null;
 }
 
 export type MemoryActionCreate = {
@@ -100,6 +102,20 @@ const CATEGORY_PRIORITY: Record<string, number> = {
   preference: 5,
 };
 
+// ─── Scoring Helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Time-decay factor for memory relevance scoring.
+ * Returns 1.0 for never-hit or recently-hit memories, decaying linearly to
+ * 0.7 for memories not accessed in 90+ days. Floor at 0.7 keeps old-but-valid
+ * knowledge from being fully suppressed.
+ */
+function memoryDecayFactor(lastHitAt: string | null): number {
+  if (!lastHitAt) return 1.0;
+  const daysAgo = (Date.now() - new Date(lastHitAt).getTime()) / 86_400_000;
+  return Math.max(0.7, 1.0 - 0.3 * Math.min(1.0, daysAgo / 90));
+}
+
 // ─── Row Mapping ────────────────────────────────────────────────────────────
 
 function rowToMemory(row: Record<string, unknown>): Memory {
@@ -118,6 +134,7 @@ function rowToMemory(row: Record<string, unknown>): Memory {
     scope: (row['scope'] as string) ?? 'project',
     tags: parseTags(row['tags']),
     structured_fields: parseStructuredFields(row['structured_fields']),
+    last_hit_at: (row['last_hit_at'] as string | null) ?? null,
   };
 }
 
@@ -234,14 +251,18 @@ export function queryMemoriesRanked(opts: QueryMemoriesOptions): RankedMemory[] 
 
   if (keywordHits.length === 0 && semanticHits.length === 0 && !trimmedQuery) {
     // No query at all — fall back to the existing ranked-by-score listing.
-    return getActiveMemoriesRanked(k).map((memory) => ({
-      memory,
-      score: memory.confidence * (1 + memory.hit_count * 0.1),
-      keywordRank: null,
-      semanticRank: null,
-      confidenceBoost: memory.confidence * (1 + memory.hit_count * 0.1),
-      reason: 'ranked' as const,
-    })).filter((hit) => passesFilters(hit.memory, opts));
+    return getActiveMemoriesRanked(k).map((memory) => {
+      const decay = memoryDecayFactor(memory.last_hit_at);
+      const score = memory.confidence * (1 + memory.hit_count * 0.1) * decay;
+      return {
+        memory,
+        score,
+        keywordRank: null,
+        semanticRank: null,
+        confidenceBoost: score,
+        reason: 'ranked' as const,
+      };
+    }).filter((hit) => passesFilters(hit.memory, opts));
   }
 
   // 3) Reciprocal rank fusion — each hit contributes 1/(rrfK + rank).
@@ -275,7 +296,7 @@ export function queryMemoriesRanked(opts: QueryMemoriesOptions): RankedMemory[] 
   const ranked: RankedMemory[] = [];
   for (const entry of fused.values()) {
     if (!passesFilters(entry.memory, opts)) continue;
-    const boost = entry.memory.confidence * (1 + entry.memory.hit_count * 0.1);
+    const boost = entry.memory.confidence * (1 + entry.memory.hit_count * 0.1) * memoryDecayFactor(entry.memory.last_hit_at);
     const reason: RankedMemory['reason'] =
       entry.kwRank != null && entry.semRank != null
         ? 'both'

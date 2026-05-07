@@ -77,7 +77,8 @@ export function createBaseSchemaObjects(db: DbAdapter, hooks: BaseSchemaHooks): 
       hit_count INTEGER NOT NULL DEFAULT 0,
       scope TEXT NOT NULL DEFAULT 'project',
       tags TEXT NOT NULL DEFAULT '[]',
-      structured_fields TEXT DEFAULT NULL
+      structured_fields TEXT DEFAULT NULL,
+      last_hit_at TEXT DEFAULT NULL
     )
   `);
 
