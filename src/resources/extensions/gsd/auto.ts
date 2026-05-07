@@ -2313,7 +2313,7 @@ export async function dispatchHookUnit(
     return false;
   }
 
-  const result = await s.cmdCtx!.newSession();
+  const result = await s.cmdCtx!.newSession({ cwd: s.basePath });
   if (result.cancelled) {
     await stopAuto(ctx, pi);
     return false;

@@ -687,6 +687,8 @@ export async function runPreDispatch(
     );
     try {
       deps.resolver.mergeAndExit(s.currentMilestoneId!, ctx.ui);
+      // Prevent stopAuto() from attempting the same merge again if postflight recovery stops here.
+      s.milestoneMergedInPhases = true;
     } catch (mergeErr) {
       if (mergeErr instanceof MergeConflictError) {
         // Real code conflicts — stop the loop instead of retrying forever (#2330)

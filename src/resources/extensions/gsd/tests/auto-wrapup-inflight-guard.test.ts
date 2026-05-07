@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { autoSession } from "../auto-runtime-state.ts";
+import { dispatchHookUnit } from "../auto.ts";
 import { registerHooks } from "../bootstrap/register-hooks.ts";
 import { clearDiscussionFlowState, getPendingGate } from "../bootstrap/write-gate.ts";
 
@@ -106,6 +107,61 @@ describe("#3512: gsd-auto-wrapup must not interrupt in-flight tool calls", () =>
       !contextSection.includes("triggerTurn: true"),
       "Context budget wrapup must not use hardcoded triggerTurn: true",
     );
+  });
+});
+
+describe("hook dispatch session cwd", () => {
+  test("dispatchHookUnit passes basePath explicitly to newSession", async (t) => {
+    const originalCwd = process.cwd();
+    const basePath = mkdtempSync(join(tmpdir(), "gsd-hook-cwd-"));
+    mkdirSync(join(basePath, ".gsd"), { recursive: true });
+    autoSession.reset();
+    t.after(() => {
+      try {
+        process.chdir(originalCwd);
+      } catch {
+        // best effort cleanup after cwd-sensitive dispatch tests
+      }
+      autoSession.reset();
+      rmSync(basePath, { recursive: true, force: true });
+    });
+
+    let newSessionOptions: unknown;
+    const ctx = {
+      ui: {
+        notify: () => {},
+        setStatus: () => {},
+        setWidget: () => {},
+      },
+      modelRegistry: {
+        getAvailable: () => [],
+      },
+      sessionManager: {
+        getSessionFile: () => join(basePath, "session.jsonl"),
+      },
+      newSession: async (options?: unknown) => {
+        newSessionOptions = options;
+        return { cancelled: false };
+      },
+    };
+    const pi = {
+      sendMessage: () => {},
+      setModel: async () => true,
+    };
+
+    const dispatched = await dispatchHookUnit(
+      ctx as any,
+      pi as any,
+      "review",
+      "execute-task",
+      "M001/S01/T01",
+      "review the completed unit",
+      undefined,
+      basePath,
+    );
+
+    assert.equal(dispatched, true);
+    assert.deepEqual(newSessionOptions, { cwd: basePath });
   });
 });
 
