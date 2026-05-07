@@ -1,9 +1,10 @@
 // gsd-2 / dispatch rule coverage canary test
 //
 // Iterates DISPATCH_RULES in order against representative GSDState stubs and
-// asserts that exactly one rule matches each state, returning the expected
-// unitType (or stop). The goal is a canary: if a future PR adds a new rule
-// in the wrong position and shadows an existing one, this test fails.
+// asserts that the first matching rule has the expected name and unitType
+// (mirroring auto-dispatch's first-match-wins semantics). The goal is a
+// canary: if a future PR adds a new rule in the wrong position and steals
+// a match from an existing one, this test fails.
 
 import test from "node:test";
 import assert from "node:assert/strict";

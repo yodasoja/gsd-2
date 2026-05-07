@@ -376,8 +376,15 @@ function keywordSearch(
   if (terms.length === 0) return [];
 
   const preScanCap = Math.min(limit * 20, 2000);
+  // ORDER BY confidence-weighted hit_count DESC so the cap keeps the most
+  // valuable candidates instead of the oldest-by-rowid (which would silently
+  // exclude recently-stored memories on tables larger than preScanCap).
   const rows = adapter
-    .prepare(`SELECT * FROM memories ${activeClause} LIMIT :preScanCap`)
+    .prepare(
+      `SELECT * FROM memories ${activeClause}
+       ORDER BY (confidence * (1.0 + hit_count * 0.1)) DESC
+       LIMIT :preScanCap`,
+    )
     .all({ ':preScanCap': preScanCap });
   const scored: Array<{ memory: Memory; score: number }> = [];
   for (const row of rows) {

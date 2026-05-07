@@ -37,6 +37,14 @@ const DEFAULT_CONTEXT_WINDOW = 200_000;
 /** Conservative effective context for Claude Code subscription routing (#4676) */
 const CLAUDE_CODE_EFFECTIVE_CONTEXT_WINDOW = 200_000;
 
+/**
+ * Cached empirical chars-per-token from a tiktoken probe. Computed lazily on
+ * first computeBudgets() call after the encoder warms; the cl100k_base encoder
+ * gives a stable ratio for ASCII English so a single probe is sufficient.
+ * NULL means "not yet probed" or "encoder unavailable".
+ */
+let _cachedEmpiricalCharsPerToken: number | null = null;
+
 /** Percentage of context consumed before suggesting a continue-here checkpoint */
 const CONTINUE_THRESHOLD_PERCENT = 70;
 
@@ -108,15 +116,17 @@ export function computeBudgets(contextWindow: number, provider?: TokenProvider):
   const charsPerToken = provider ? getCharsPerToken(provider) : CHARS_PER_TOKEN;
 
   // Prefer the tiktoken encoder for total-char estimation when it has been
-  // warmed (initTokenCounter resolved). countTokensSync(probe) gives an
-  // empirical chars-per-token for a representative ASCII probe, which is more
-  // accurate than the static provider table for English-heavy prompts.
+  // warmed (initTokenCounter resolved). The cl100k_base ratio is stable for
+  // ASCII English, so probe once and cache — computeBudgets is called multiple
+  // times per prompt build and the probe encode is otherwise wasted work.
   let totalChars: number;
   if (isAccurateCountingAvailable()) {
-    const probe = "the quick brown fox jumps over the lazy dog ".repeat(64);
-    const probeTokens = countTokensSync(probe, provider);
-    const empiricalCharsPerToken = probeTokens > 0 ? probe.length / probeTokens : charsPerToken;
-    totalChars = effectiveWindow * empiricalCharsPerToken;
+    if (_cachedEmpiricalCharsPerToken === null) {
+      const probe = "the quick brown fox jumps over the lazy dog ".repeat(64);
+      const probeTokens = countTokensSync(probe, provider);
+      _cachedEmpiricalCharsPerToken = probeTokens > 0 ? probe.length / probeTokens : charsPerToken;
+    }
+    totalChars = effectiveWindow * _cachedEmpiricalCharsPerToken;
   } else {
     totalChars = effectiveWindow * charsPerToken;
   }
