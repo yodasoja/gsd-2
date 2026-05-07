@@ -57,6 +57,7 @@ import { getEligibleSlices } from "../slice-parallel-eligibility.js";
 import { startSliceParallel } from "../slice-parallel-orchestrator.js";
 import { isDbAvailable, getMilestoneSlices } from "../gsd-db.js";
 import type { MinimalModelRegistry } from "../context-budget.js";
+import type { PostflightResult, PreflightResult } from "../clean-root-preflight.js";
 import { ensurePlanV2Graph, isEmptyPlanV2GraphResult, isMissingFinalizedContextResult } from "../uok/plan-v2.js";
 import { resolveUokFlags } from "../uok/flags.js";
 import { UokGateRunner } from "../uok/gate-runner.js";
@@ -207,6 +208,38 @@ async function closeoutAndStop(
     s.currentUnit = null;
   }
   await deps.stopAuto(ctx, pi, reason);
+}
+
+async function stopOnPostflightRecoveryNeeded(
+  ic: IterationContext,
+  result: PostflightResult,
+  milestoneId: string,
+): Promise<{ action: "break"; reason: string } | null> {
+  if (!result.needsManualRecovery) return null;
+  const { ctx, pi, deps } = ic;
+  const reason = `Post-merge stash restore failed for milestone ${milestoneId}`;
+  ctx.ui.notify(
+    `${reason}. Resolve the working tree before resuming auto-mode. ${result.message}`,
+    "error",
+  );
+  await deps.stopAuto(ctx, pi, reason);
+  return { action: "break", reason: "postflight-stash-restore-failed" };
+}
+
+async function restorePreflightStashOrStop(
+  ic: IterationContext,
+  preflight: PreflightResult,
+  milestoneId: string,
+): Promise<{ action: "break"; reason: string } | null> {
+  if (!preflight.stashPushed) return null;
+  const { ctx, s, deps } = ic;
+  const result = deps.postflightPopStash(
+    s.originalBasePath || s.basePath,
+    milestoneId,
+    preflight.stashMarker,
+    ctx.ui.notify.bind(ctx.ui),
+  );
+  return stopOnPostflightRecoveryNeeded(ic, result, milestoneId);
 }
 
 async function emitCancelledUnitEnd(
@@ -654,6 +687,8 @@ export async function runPreDispatch(
     );
     try {
       deps.resolver.mergeAndExit(s.currentMilestoneId!, ctx.ui);
+      // Prevent stopAuto() from attempting the same merge again if postflight recovery stops here.
+      s.milestoneMergedInPhases = true;
     } catch (mergeErr) {
       if (mergeErr instanceof MergeConflictError) {
         // Real code conflicts — stop the loop instead of retrying forever (#2330)
@@ -674,13 +709,13 @@ export async function runPreDispatch(
       return { action: "break", reason: "merge-failed" };
     }
     // #2909: postflight — restore stashed changes after successful merge
-    if (preflightTransition.stashPushed) {
-      deps.postflightPopStash(
-        s.originalBasePath || s.basePath,
+    {
+      const postflightStop = await restorePreflightStashOrStop(
+        ic,
+        preflightTransition,
         s.currentMilestoneId!,
-        preflightTransition.stashMarker,
-        ctx.ui.notify.bind(ctx.ui),
       );
+      if (postflightStop) return postflightStop;
     }
 
     // PR creation (auto_pr) is handled inside mergeMilestoneToMain (#2302)
@@ -788,13 +823,13 @@ export async function runPreDispatch(
           return { action: "break", reason: "merge-failed" };
         }
         // #2909: postflight — restore stashed changes after successful merge
-        if (preflightAllComplete.stashPushed) {
-          deps.postflightPopStash(
-            s.originalBasePath || s.basePath,
+        {
+          const postflightStop = await restorePreflightStashOrStop(
+            ic,
+            preflightAllComplete,
             s.currentMilestoneId,
-            preflightAllComplete.stashMarker,
-            ctx.ui.notify.bind(ctx.ui),
           );
+          if (postflightStop) return postflightStop;
         }
 
         // PR creation (auto_pr) is handled inside mergeMilestoneToMain (#2302)
@@ -917,13 +952,13 @@ export async function runPreDispatch(
         return { action: "break", reason: "merge-failed" };
       }
       // #2909: postflight — restore stashed changes after successful merge
-      if (preflightComplete.stashPushed) {
-        deps.postflightPopStash(
-          s.originalBasePath || s.basePath,
+      {
+        const postflightStop = await restorePreflightStashOrStop(
+          ic,
+          preflightComplete,
           s.currentMilestoneId,
-          preflightComplete.stashMarker,
-          ctx.ui.notify.bind(ctx.ui),
         );
+        if (postflightStop) return postflightStop;
       }
 
       // PR creation (auto_pr) is handled inside mergeMilestoneToMain (#2302)
@@ -1047,6 +1082,65 @@ export async function runDispatch(
   let unitId = dispatchResult.unitId;
   let prompt = dispatchResult.prompt;
   const pauseAfterUatDispatch = dispatchResult.pauseAfterDispatch ?? false;
+
+  // Resolve hooks and prior-slice gating before health/stuck accounting so
+  // those checks run against the final dispatch unit.
+  const preDispatchResult = deps.runPreDispatchHooks(
+    unitType,
+    unitId,
+    prompt,
+    s.basePath,
+  );
+  if (preDispatchResult.firedHooks.length > 0) {
+    ctx.ui.notify(
+      `Pre-dispatch hook${preDispatchResult.firedHooks.length > 1 ? "s" : ""}: ${preDispatchResult.firedHooks.join(", ")}`,
+      "info",
+    );
+    deps.emitJournalEvent({ ts: new Date().toISOString(), flowId: ic.flowId, seq: ic.nextSeq(), eventType: "pre-dispatch-hook", data: { firedHooks: preDispatchResult.firedHooks, action: preDispatchResult.action } });
+  }
+  if (preDispatchResult.action === "skip") {
+    ctx.ui.notify(
+      `Skipping ${unitType} ${unitId} (pre-dispatch hook).`,
+      "info",
+    );
+    await new Promise((r) => setImmediate(r));
+    return { action: "continue" };
+  }
+  if (preDispatchResult.action === "replace") {
+    prompt = preDispatchResult.prompt ?? prompt;
+    if (preDispatchResult.unitType) unitType = preDispatchResult.unitType;
+  } else if (preDispatchResult.prompt) {
+    prompt = preDispatchResult.prompt;
+  }
+
+  const guardBasePath = _resolveDispatchGuardBasePath(s);
+  const priorSliceBlocker = deps.getPriorSliceCompletionBlocker(
+    guardBasePath,
+    deps.getMainBranch(guardBasePath),
+    unitType,
+    unitId,
+  );
+  if (priorSliceBlocker) {
+    await deps.stopAuto(ctx, pi, priorSliceBlocker);
+    debugLog("autoLoop", { phase: "exit", reason: "prior-slice-blocker" });
+    return { action: "break", reason: "prior-slice-blocker" };
+  }
+
+  // Execute-task needs a real writable checkout. The same health check also
+  // exists in runUnitPhase, but the stuck-window detector runs before that
+  // phase. Check here too so repeated derivations of a broken worktree stop
+  // with the actionable worktree error instead of the generic stuck-loop error.
+  if (s.basePath && unitType === "execute-task") {
+    const gitMarker = join(s.basePath, ".git");
+    const hasGit = deps.existsSync(gitMarker);
+    if (!hasGit) {
+      const msg = `Worktree health check failed: ${s.basePath} has no .git — refusing to dispatch ${unitType} ${unitId}`;
+      debugLog("autoLoop", { phase: "dispatch-worktree-health-fail", basePath: s.basePath, hasGit });
+      ctx.ui.notify(msg, "error");
+      await deps.stopAuto(ctx, pi, msg);
+      return { action: "break", reason: "worktree-invalid" };
+    }
+  }
 
   // ── Sliding-window stuck detection with graduated recovery ──
   const derivedKey = `${unitType}/${unitId}`;
@@ -1187,48 +1281,6 @@ export async function runDispatch(
         loopState.stuckRecoveryAttempts = 0;
       }
     }
-  }
-
-  // Pre-dispatch hooks
-  const preDispatchResult = deps.runPreDispatchHooks(
-    unitType,
-    unitId,
-    prompt,
-    s.basePath,
-  );
-  if (preDispatchResult.firedHooks.length > 0) {
-    ctx.ui.notify(
-      `Pre-dispatch hook${preDispatchResult.firedHooks.length > 1 ? "s" : ""}: ${preDispatchResult.firedHooks.join(", ")}`,
-      "info",
-    );
-    deps.emitJournalEvent({ ts: new Date().toISOString(), flowId: ic.flowId, seq: ic.nextSeq(), eventType: "pre-dispatch-hook", data: { firedHooks: preDispatchResult.firedHooks, action: preDispatchResult.action } });
-  }
-  if (preDispatchResult.action === "skip") {
-    ctx.ui.notify(
-      `Skipping ${unitType} ${unitId} (pre-dispatch hook).`,
-      "info",
-    );
-    await new Promise((r) => setImmediate(r));
-    return { action: "continue" };
-  }
-  if (preDispatchResult.action === "replace") {
-    prompt = preDispatchResult.prompt ?? prompt;
-    if (preDispatchResult.unitType) unitType = preDispatchResult.unitType;
-  } else if (preDispatchResult.prompt) {
-    prompt = preDispatchResult.prompt;
-  }
-
-  const guardBasePath = _resolveDispatchGuardBasePath(s);
-  const priorSliceBlocker = deps.getPriorSliceCompletionBlocker(
-    guardBasePath,
-    deps.getMainBranch(guardBasePath),
-    unitType,
-    unitId,
-  );
-  if (priorSliceBlocker) {
-    await deps.stopAuto(ctx, pi, priorSliceBlocker);
-    debugLog("autoLoop", { phase: "exit", reason: "prior-slice-blocker" });
-    return { action: "break", reason: "prior-slice-blocker" };
   }
 
   return {

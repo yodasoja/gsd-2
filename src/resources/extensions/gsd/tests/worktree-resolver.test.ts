@@ -1,3 +1,5 @@
+// Project/App: GSD-2
+// File Purpose: WorktreeResolver unit and regression tests.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, mkdirSync, realpathSync } from "node:fs";
@@ -9,6 +11,17 @@ import {
   type NotifyCtx,
 } from "../worktree-resolver.js";
 import { AutoSession } from "../auto/session.js";
+import {
+  closeDatabase,
+  insertMilestone,
+  openDatabase,
+} from "../gsd-db.js";
+import { registerAutoWorker } from "../db/auto-workers.js";
+import {
+  claimMilestoneLease,
+  getMilestoneLease,
+  releaseMilestoneLease,
+} from "../db/milestone-leases.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -19,11 +32,12 @@ interface CallLog {
 }
 
 function makeSession(
-  overrides?: Partial<{ basePath: string; originalBasePath: string }>,
+  overrides?: Partial<AutoSession>,
 ): AutoSession {
   const s = new AutoSession();
   s.basePath = overrides?.basePath ?? "/project";
   s.originalBasePath = overrides?.originalBasePath ?? "/project";
+  Object.assign(s, overrides);
   return s;
 }
 
@@ -180,6 +194,17 @@ function makeNotifyCtx(): NotifyCtx & {
 
 function findCalls(calls: CallLog[], fn: string): CallLog[] {
   return calls.filter((c) => c.fn === fn);
+}
+
+function makeDbBase(): string {
+  const base = mkdtempSync(join(tmpdir(), "gsd-worktree-resolver-"));
+  mkdirSync(join(base, ".gsd"), { recursive: true });
+  return base;
+}
+
+function cleanupDbBase(base: string): void {
+  try { closeDatabase(); } catch { /* noop */ }
+  try { rmSync(base, { recursive: true, force: true }); } catch { /* noop */ }
 }
 
 // ─── Getter Tests ────────────────────────────────────────────────────────────
@@ -369,6 +394,43 @@ test("enterMilestone does not create double-nested worktree when originalBasePat
     !createdFromPath.includes("/.gsd/worktrees/"),
     `createAutoWorktree must be called with project root, got: "${createdFromPath}"`,
   );
+});
+
+test("enterMilestone reacquires a released same-milestone lease before worktree entry", (t) => {
+  const base = makeDbBase();
+  t.after(() => cleanupDbBase(base));
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  insertMilestone({ id: "M001", title: "Test milestone", status: "active" });
+
+  const workerId = registerAutoWorker({ projectRootRealpath: base });
+  const originalClaim = claimMilestoneLease(workerId, "M001");
+  assert.equal(originalClaim.ok, true);
+  if (!originalClaim.ok) throw new Error("expected test lease claim");
+  assert.equal(releaseMilestoneLease(workerId, "M001", originalClaim.token), true);
+
+  const s = makeSession({
+    basePath: base,
+    originalBasePath: base,
+    workerId,
+    currentMilestoneId: "M001",
+    milestoneLeaseToken: originalClaim.token,
+  });
+  const deps = makeDeps({
+    createAutoWorktree: (basePath: string, milestoneId: string) => join(basePath, ".gsd", "worktrees", milestoneId),
+  });
+  const ctx = makeNotifyCtx();
+  const resolver = new WorktreeResolver(s, deps);
+
+  resolver.enterMilestone("M001", ctx);
+
+  const row = getMilestoneLease("M001");
+  assert.ok(row);
+  assert.equal(row.worker_id, workerId);
+  assert.equal(row.status, "held");
+  assert.equal(row.fencing_token, originalClaim.token + 1);
+  assert.equal(s.milestoneLeaseToken, originalClaim.token + 1);
+  assert.equal(s.basePath, join(base, ".gsd", "worktrees", "M001"));
+  assert.equal(ctx.messages.some((m) => m.level === "error"), false);
 });
 
 // ─── enterMilestone Tests (branch mode) ──────────────────────────────────────

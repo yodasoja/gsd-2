@@ -25,7 +25,7 @@ import { emitWorktreeCreated, emitWorktreeMerged } from "./worktree-telemetry.js
 import { getCollapseCadence, getMilestoneResquash, resquashMilestoneOnMain } from "./slice-cadence.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
 import { resolveWorktreeProjectRoot, normalizeWorktreePathForCompare } from "./worktree-root.js";
-import { claimMilestoneLease, releaseMilestoneLease } from "./db/milestone-leases.js";
+import { claimMilestoneLease, refreshMilestoneLease, releaseMilestoneLease } from "./db/milestone-leases.js";
 
 // ─── Path Comparison Helper ────────────────────────────────────────────────
 /**
@@ -207,23 +207,44 @@ export class WorktreeResolver {
     // milestone (re-entry within the same session).
     if (this.s.workerId) {
       if (this.s.currentMilestoneId === milestoneId && this.s.milestoneLeaseToken !== null) {
-        // Already held — no-op, the heartbeat in loop.ts refreshes TTL.
-      } else {
-        // If we held a different milestone, release it first so other
-        // workers don't have to wait for TTL.
-        if (this.s.currentMilestoneId && this.s.currentMilestoneId !== milestoneId && this.s.milestoneLeaseToken !== null) {
-          try {
-            releaseMilestoneLease(this.s.workerId, this.s.currentMilestoneId, this.s.milestoneLeaseToken);
-          } catch (err) {
-            debugLog("WorktreeResolver", {
-              action: "enterMilestone",
-              milestoneId,
-              releasePriorLeaseError: err instanceof Error ? err.message : String(err),
-            });
-          }
+        const refreshed = refreshMilestoneLease(
+          this.s.workerId,
+          milestoneId,
+          this.s.milestoneLeaseToken,
+        );
+        if (refreshed) {
+          debugLog("WorktreeResolver", {
+            action: "enterMilestone",
+            milestoneId,
+            leaseRefreshed: true,
+            fencingToken: this.s.milestoneLeaseToken,
+          });
+        } else {
+          debugLog("WorktreeResolver", {
+            action: "enterMilestone",
+            milestoneId,
+            staleLeaseToken: this.s.milestoneLeaseToken,
+          });
           this.s.milestoneLeaseToken = null;
         }
+      }
 
+      // If we held a different milestone, release it first so other
+      // workers don't have to wait for TTL.
+      if (this.s.currentMilestoneId && this.s.currentMilestoneId !== milestoneId && this.s.milestoneLeaseToken !== null) {
+        try {
+          releaseMilestoneLease(this.s.workerId, this.s.currentMilestoneId, this.s.milestoneLeaseToken);
+        } catch (err) {
+          debugLog("WorktreeResolver", {
+            action: "enterMilestone",
+            milestoneId,
+            releasePriorLeaseError: err instanceof Error ? err.message : String(err),
+          });
+        }
+        this.s.milestoneLeaseToken = null;
+      }
+
+      if (this.s.milestoneLeaseToken === null) {
         try {
           const claim = claimMilestoneLease(this.s.workerId, milestoneId);
           if (claim.ok) {
