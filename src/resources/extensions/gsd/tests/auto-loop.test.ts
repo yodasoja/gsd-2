@@ -16,6 +16,7 @@ import {
 } from "../auto/resolve.js";
 import { runUnit } from "../auto/run-unit.js";
 import { autoLoop } from "../auto/loop.js";
+import { runDispatch } from "../auto/phases.js";
 import { detectStuck } from "../auto/detect-stuck.js";
 import type { UnitResult, AgentEndEvent } from "../auto/types.js";
 import type { LoopDeps } from "../auto/loop-deps.js";
@@ -2720,6 +2721,64 @@ test("autoLoop stops when worktree has no .git for execute-task (#1833)", async 
   assert.ok(
     healthNotification,
     "should notify about missing .git in worktree",
+  );
+});
+
+test("dispatch health check wins before stuck detection for execute-task without .git", async () => {
+  _resetPendingResolve();
+
+  const ctx = makeMockCtx();
+  const pi = makeMockPi();
+  const notifications: string[] = [];
+  ctx.ui.notify = (msg: string) => { notifications.push(msg); };
+
+  const s = makeLoopSession({ basePath: "/tmp/broken-worktree" });
+  const deps = makeMockDeps({
+    existsSync: (p: string) => !p.endsWith(".git"),
+  });
+  const result = await runDispatch(
+    {
+      ctx,
+      pi,
+      s,
+      deps,
+      prefs: undefined,
+      iteration: 1,
+      flowId: "test-flow",
+      nextSeq: () => 1,
+    },
+    {
+      state: {
+        phase: "executing",
+        activeMilestone: { id: "M001", title: "Test", status: "active" },
+        activeSlice: { id: "S01", title: "Slice 1" },
+        activeTask: { id: "T01" },
+        registry: [{ id: "M001", status: "active" }],
+        blockers: [],
+      } as any,
+      mid: "M001",
+      midTitle: "Test",
+    },
+    {
+      recentUnits: [
+        { key: "execute-task/M001/S01/T01" },
+        { key: "execute-task/M001/S01/T01" },
+      ],
+      stuckRecoveryAttempts: 1,
+      consecutiveFinalizeTimeouts: 0,
+    },
+  );
+
+  assert.equal(result.action, "break");
+  assert.equal(result.reason, "worktree-invalid");
+  assert.ok(deps.callLog.includes("stopAuto"), "should stop through worktree health check");
+  assert.ok(
+    notifications.some((n) => n.includes("Worktree health check failed") && n.includes("no .git")),
+    "should notify about missing .git",
+  );
+  assert.ok(
+    !notifications.some((n) => n.includes("Stuck on execute-task")),
+    "stuck-loop message must not mask the worktree health failure",
   );
 });
 

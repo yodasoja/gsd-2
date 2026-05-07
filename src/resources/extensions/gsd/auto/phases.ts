@@ -1083,6 +1083,22 @@ export async function runDispatch(
   let prompt = dispatchResult.prompt;
   const pauseAfterUatDispatch = dispatchResult.pauseAfterDispatch ?? false;
 
+  // Execute-task needs a real writable checkout. The same health check also
+  // exists in runUnitPhase, but the stuck-window detector runs before that
+  // phase. Check here too so repeated derivations of a broken worktree stop
+  // with the actionable worktree error instead of the generic stuck-loop error.
+  if (s.basePath && unitType === "execute-task") {
+    const gitMarker = join(s.basePath, ".git");
+    const hasGit = deps.existsSync(gitMarker);
+    if (!hasGit) {
+      const msg = `Worktree health check failed: ${s.basePath} has no .git — refusing to dispatch ${unitType} ${unitId}`;
+      debugLog("autoLoop", { phase: "dispatch-worktree-health-fail", basePath: s.basePath, hasGit });
+      ctx.ui.notify(msg, "error");
+      await deps.stopAuto(ctx, pi, msg);
+      return { action: "break", reason: "worktree-invalid" };
+    }
+  }
+
   // ── Sliding-window stuck detection with graduated recovery ──
   const derivedKey = `${unitType}/${unitId}`;
 
