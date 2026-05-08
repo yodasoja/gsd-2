@@ -102,6 +102,7 @@ test("non-Error thrown values are still captured and notified", () => {
   );
 
   assert.equal(result.merged, false);
+  assert.equal(result.error, resolverState.shouldThrow);
   assert.equal(uiState.notifications[1].level, "warning");
   assert.match(uiState.notifications[1].message, /git lock held/);
 });

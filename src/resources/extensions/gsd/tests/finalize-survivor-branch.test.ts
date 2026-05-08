@@ -103,6 +103,7 @@ test("non-Error thrown values are stringified into the user-facing message", () 
   );
 
   assert.equal(result.merged, false);
+  assert.equal(result.error, resolverState.shouldThrow);
   assert.equal(uiState.notifications[1].level, "error");
   assert.match(uiState.notifications[1].message, /git lock contention/);
 });
