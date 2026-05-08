@@ -333,6 +333,97 @@ export function auditOrphanedMilestoneBranches(
   return { recovered, warnings };
 }
 
+/**
+ * Pure decision function for picking which orphan milestone the auto-loop
+ * should resume the merge transition for. Extracted so it can be unit-tested
+ * without spinning up a git repo or a SQLite DB.
+ *
+ * Returns the lexicographically-greatest milestone id (e.g. "M002" beats
+ * "M001") whose branch is unmerged AND has commits ahead of main AND whose
+ * status is `complete`. Lex-ordering matches the project's M00x convention,
+ * which is the most-recently-completed milestone in practice.
+ */
+export function _selectResumableMilestone(
+  branchNames: readonly string[],
+  mergedBranches: ReadonlySet<string>,
+  isComplete: (milestoneId: string) => boolean,
+  commitsAhead: (branch: string) => number,
+): string | null {
+  const candidates: string[] = [];
+  for (const branch of branchNames) {
+    if (!branch.startsWith("milestone/")) continue;
+    const milestoneId = branch.slice("milestone/".length);
+    if (mergedBranches.has(branch)) continue;
+    if (!isComplete(milestoneId)) continue;
+    let ahead = 0;
+    try {
+      ahead = commitsAhead(branch);
+    } catch {
+      continue;
+    }
+    if (ahead <= 0) continue;
+    candidates.push(milestoneId);
+  }
+  if (candidates.length === 0) return null;
+  candidates.sort();
+  return candidates[candidates.length - 1];
+}
+
+/**
+ * Find the most-recent completed milestone whose branch still has unmerged
+ * commits ahead of the integration branch. Used by `bootstrapAutoSession`
+ * to seed `s.currentMilestoneId` so the auto-loop's transition guard at
+ * `phases.ts:730` fires on the first iteration after a process restart —
+ * without this, the in-memory-only `s.currentMilestoneId` is `null` after
+ * restart, the guard short-circuits, and the orphaned milestone branch
+ * never gets merged into main (#5538-followup).
+ *
+ * Returns null when isolation is `none`, the DB is unavailable, or no
+ * orphan candidate exists. All git failures degrade silently — startup
+ * must never block on this defensive lookup.
+ */
+export function findUnmergedCompletedMilestone(
+  basePath: string,
+  isolationMode: "worktree" | "branch" | "none",
+): string | null {
+  if (isolationMode === "none") return null;
+  if (!isDbAvailable()) return null;
+
+  let milestoneBranches: string[];
+  try {
+    milestoneBranches = nativeBranchList(basePath, "milestone/*");
+  } catch {
+    return null;
+  }
+  if (milestoneBranches.length === 0) return null;
+
+  let mainBranch: string;
+  try {
+    mainBranch = nativeDetectMainBranch(basePath);
+  } catch {
+    mainBranch = "main";
+  }
+
+  let mergedBranches: Set<string>;
+  try {
+    mergedBranches = new Set(
+      nativeBranchListMerged(basePath, mainBranch, "milestone/*"),
+    );
+  } catch {
+    mergedBranches = new Set();
+  }
+
+  return _selectResumableMilestone(
+    milestoneBranches,
+    mergedBranches,
+    (milestoneId) => {
+      const row = getMilestone(milestoneId);
+      return !!row && row.status === "complete";
+    },
+    (branch) => nativeCommitCountBetween(basePath, mainBranch, branch),
+  );
+}
+
 export async function bootstrapAutoSession(
   s: AutoSession,
   ctx: ExtensionCommandContext,
@@ -609,6 +700,36 @@ export async function bootstrapAutoSession(
         "bootstrap",
         `orphaned preflight-stash audit failed: ${err instanceof Error ? err.message : String(err)}`,
       );
+    }
+
+    // ── Resumable milestone rederivation (#5538-followup) ──
+    // `s.currentMilestoneId` is in-memory only on AutoSession; a process
+    // restart between `complete-milestone` and `mergeAndExit` leaves the
+    // session with `currentMilestoneId === null`, which causes the
+    // transition guard at phases.ts:730 to short-circuit on the first
+    // iteration. The orphan milestone branch then survives indefinitely.
+    //
+    // Seed `currentMilestoneId` from the most-recent completed-but-unmerged
+    // milestone branch so the next loop iteration triggers the merge. Only
+    // overrides `null` — never touches a session that already has the field
+    // set (paused-resume, in-loop call paths, etc).
+    if (s.currentMilestoneId === null) {
+      try {
+        const resumable = findUnmergedCompletedMilestone(base, getIsolationMode(base));
+        if (resumable) {
+          s.currentMilestoneId = resumable;
+          debugLog("currentMilestoneId-rederive", { milestoneId: resumable });
+          ctx.ui.notify(
+            `Detected unmerged completed milestone ${resumable}. Auto-mode will merge it before advancing.`,
+            "info",
+          );
+        }
+      } catch (err) {
+        logWarning(
+          "bootstrap",
+          `currentMilestoneId rederivation failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
 
     let state = await deriveState(base);
