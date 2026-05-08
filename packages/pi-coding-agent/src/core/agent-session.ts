@@ -1716,6 +1716,7 @@ export class AgentSession {
 		this._steeringMessages = [];
 		this._followUpMessages = [];
 		this._pendingNextTurnMessages = [];
+		this._visibleSkillNames = undefined;
 
 		this.sessionManager.appendThinkingLevelChange(this.thinkingLevel);
 
@@ -2383,6 +2384,7 @@ export class AgentSession {
 		this.settingsManager.reload();
 		resetApiProviders();
 		await this._resourceLoader.reload();
+		this._visibleSkillNames = undefined;
 		this._buildRuntime({
 			activeToolNames: this.getActiveToolNames(),
 			flagValues: previousFlagValues,
@@ -2572,6 +2574,7 @@ export class AgentSession {
 		this._steeringMessages = [];
 		this._followUpMessages = [];
 		this._pendingNextTurnMessages = [];
+		this._visibleSkillNames = undefined;
 
 		// Set new session
 		this.sessionManager.setSessionFile(sessionPath);

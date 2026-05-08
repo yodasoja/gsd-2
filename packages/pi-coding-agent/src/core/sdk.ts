@@ -431,6 +431,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		},
 		filterTools: async (tools) => {
 			const currentModel = agent.state.activeInferenceModel ?? agent.state.model ?? model;
+			if (!currentModel) return tools;
 			const providerFiltered = filterToolsForProviderRequest(tools, currentModel);
 			const runner = extensionRunnerRef.current;
 			if (!runner?.hasHandlers("adjust_tool_set")) return providerFiltered.compatible;

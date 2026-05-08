@@ -20,15 +20,18 @@ function tool(name: string): AgentTool {
 
 test("filterToolsForProviderRequest removes provider-incompatible tools", () => {
 	resetToolCompatibilityRegistry();
-	registerToolCompatibility("image_result_tool", { producesImages: true });
-	registerToolCompatibility("complex_schema_tool", { schemaFeatures: ["patternProperties"] });
+	try {
+		registerToolCompatibility("image_result_tool", { producesImages: true });
+		registerToolCompatibility("complex_schema_tool", { schemaFeatures: ["patternProperties"] });
 
-	const result = filterToolsForProviderRequest(
-		[tool("bash"), tool("image_result_tool"), tool("complex_schema_tool")],
-		{ api: "google-generative-ai" },
-	);
+		const result = filterToolsForProviderRequest(
+			[tool("bash"), tool("image_result_tool"), tool("complex_schema_tool")],
+			{ api: "google-generative-ai" },
+		);
 
-	assert.deepEqual(result.compatible.map((entry) => entry.name), ["bash", "image_result_tool"]);
-	assert.deepEqual(result.filtered.map((entry) => entry.name), ["complex_schema_tool"]);
-	resetToolCompatibilityRegistry();
+		assert.deepEqual(result.compatible.map((entry) => entry.name), ["bash", "image_result_tool"]);
+		assert.deepEqual(result.filtered.map((entry) => entry.name), ["complex_schema_tool"]);
+	} finally {
+		resetToolCompatibilityRegistry();
+	}
 });

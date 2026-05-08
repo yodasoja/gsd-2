@@ -1098,19 +1098,22 @@ async function dispatchWorkflow(
   const workflowPath = process.env.GSD_WORKFLOW_PATH ?? join(gsdHome(), "agent", "GSD-WORKFLOW.md");
   const workflow = readFileSync(workflowPath, "utf-8");
 
-  pi.sendMessage(
-    {
-      customType,
-      content: buildWorkflowDispatchContent({ workflow, workflowPath, task: note }),
-      display: false,
-    },
-    { triggerTurn: true },
-  );
-
-  // Restore full tool set after the message is queued. The LLM turn has
-  // already captured the scoped set — restoring prevents the narrowed
-  // tools from leaking into subsequent dispatches (#3628).
-  restoreGsdWorkflowTools(pi, savedTools);
+  try {
+    pi.sendMessage(
+      {
+        customType,
+        content: buildWorkflowDispatchContent({ workflow, workflowPath, task: note }),
+        display: false,
+      },
+      { triggerTurn: true },
+    );
+  } finally {
+    // Restore full tool set after the message is queued. The LLM turn has
+    // already captured the scoped set — restoring prevents the narrowed
+    // tools from leaking into subsequent dispatches (#3628). The finally
+    // block ensures restoration even if sendMessage throws.
+    restoreGsdWorkflowTools(pi, savedTools);
+  }
 }
 
 function getStructuredQuestionsAvailability(

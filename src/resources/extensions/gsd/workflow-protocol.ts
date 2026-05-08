@@ -16,7 +16,7 @@ export function buildWorkflowProtocolExcerpt(
   const limit = opts.maxChars ?? getWorkflowProtocolExcerptLimit();
   const trimmed = workflow.trim();
   const excerpt = buildPrioritizedWorkflowExcerpt(trimmed, limit);
-  const truncated = trimmed.length > excerpt.length;
+  const truncated = trimmed.length > limit;
   const lines = [
     "## GSD Workflow Protocol Excerpt",
     `Source: \`${workflowPath}\``,
