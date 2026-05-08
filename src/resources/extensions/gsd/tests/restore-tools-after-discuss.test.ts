@@ -33,16 +33,41 @@ describe('restore tools after discuss flow scoping (#3628)', () => {
     )
   })
 
-  it('savedTools captures current tools inside the discuss block', () => {
+  it('savedTools captures current tools before scoping can mutate active state', () => {
     const discussCheck = src.indexOf('if (unitType?.startsWith("discuss-")')
     assert.ok(discussCheck !== -1)
 
-    // Look for savedTools assignment within the discuss block
-    const blockAfter = extractSourceRegion(src, 'if (unitType?.startsWith("discuss-")')
+    const currentToolsDecl = src.indexOf('const currentTools = pi.getActiveTools()')
+    const savedToolsAssign = src.indexOf('savedTools = {', currentToolsDecl)
+    const firstMutation = src.indexOf('pi.setActiveTools(scopedTools)')
     assert.ok(
-      blockAfter.includes('tools: currentTools'),
-      'savedTools must capture currentTools inside the discuss block',
+      currentToolsDecl !== -1 && savedToolsAssign !== -1 && firstMutation !== -1,
+      'guided-flow.ts must capture current tools, save them, and then scope active tools',
     )
+    assert.ok(
+      currentToolsDecl < savedToolsAssign && savedToolsAssign < firstMutation,
+      'savedTools must capture currentTools before any discuss scoping mutation',
+    )
+    assert.ok(
+      src.slice(savedToolsAssign, firstMutation).includes('tools: currentTools'),
+      'savedTools must include currentTools before the first scoping mutation',
+    )
+  })
+
+  it('scoping and workflow read happen inside the restore try block', () => {
+    const savedToolsDecl = src.indexOf('let savedTools')
+    const tryIdx = src.indexOf('try {', savedToolsDecl)
+    const firstMutation = src.indexOf('pi.setActiveTools(scopedTools)')
+    const workflowRead = src.indexOf('readFileSync(workflowPath')
+    const finallyIdx = src.indexOf('} finally {', tryIdx)
+
+    assert.ok(savedToolsDecl !== -1, 'savedTools variable must be declared')
+    assert.ok(tryIdx !== -1, 'restore try block must exist')
+    assert.ok(firstMutation !== -1, 'discuss scoping mutation must exist')
+    assert.ok(workflowRead !== -1, 'workflow file read must exist')
+    assert.ok(finallyIdx !== -1, 'restore finally block must exist')
+    assert.ok(tryIdx < firstMutation && firstMutation < finallyIdx, 'scoping mutation must be inside try/finally')
+    assert.ok(tryIdx < workflowRead && workflowRead < finallyIdx, 'workflow file read must be inside try/finally')
   })
 
   it('savedTools is restored after sendMessage', () => {

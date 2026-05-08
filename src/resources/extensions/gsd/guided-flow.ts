@@ -1071,34 +1071,40 @@ async function dispatchWorkflow(
   // unrelated GSD tools and broad non-GSD tools for this queued turn, then
   // restore so the narrowed surface does not leak into future dispatches.
   let savedTools: ReturnType<typeof scopeGsdWorkflowToolsForDispatch> = null;
-  if (unitType?.startsWith("discuss-") && !isFullGsdToolSurfaceRequested()) {
-    const currentTools = pi.getActiveTools();
-    // Keep all non-GSD tools (builtins, other extensions) and only the
-    // GSD tools on the discuss allowlist.
-    const scopedTools = currentTools.filter(
-      (t) => !t.startsWith("gsd_") || DISCUSS_TOOLS_ALLOWLIST.includes(t),
-    );
-    pi.setActiveTools(scopedTools);
-    const scopedState = scopeGsdWorkflowToolsForDispatch(pi, unitType);
-    savedTools = {
-      tools: currentTools,
-      visibleSkills: scopedState?.visibleSkills,
-      restoreVisibleSkills: scopedState?.restoreVisibleSkills ?? false,
-    };
-    debugLog("discuss-tool-scoping", {
-      unitType,
-      before: currentTools.length,
-      after: pi.getActiveTools().length,
-      removed: currentTools.length - pi.getActiveTools().length,
-    });
-  } else {
-    savedTools = scopeGsdWorkflowToolsForDispatch(pi, unitType);
-  }
-
-  const workflowPath = process.env.GSD_WORKFLOW_PATH ?? join(gsdHome(), "agent", "GSD-WORKFLOW.md");
-  const workflow = readFileSync(workflowPath, "utf-8");
 
   try {
+    const currentTools = pi.getActiveTools();
+    savedTools = {
+      tools: currentTools,
+      visibleSkills: typeof pi.getVisibleSkills === "function" ? pi.getVisibleSkills() : undefined,
+      restoreVisibleSkills: typeof pi.setVisibleSkills === "function",
+    };
+    if (unitType?.startsWith("discuss-") && !isFullGsdToolSurfaceRequested()) {
+      // Keep all non-GSD tools (builtins, other extensions) and only the
+      // GSD tools on the discuss allowlist.
+      const scopedTools = currentTools.filter(
+        (t) => !t.startsWith("gsd_") || DISCUSS_TOOLS_ALLOWLIST.includes(t),
+      );
+      pi.setActiveTools(scopedTools);
+      const scopedState = scopeGsdWorkflowToolsForDispatch(pi, unitType);
+      savedTools = {
+        tools: currentTools,
+        visibleSkills: scopedState?.visibleSkills ?? savedTools.visibleSkills,
+        restoreVisibleSkills: scopedState?.restoreVisibleSkills ?? savedTools.restoreVisibleSkills,
+      };
+      debugLog("discuss-tool-scoping", {
+        unitType,
+        before: currentTools.length,
+        after: pi.getActiveTools().length,
+        removed: currentTools.length - pi.getActiveTools().length,
+      });
+    } else {
+      savedTools = scopeGsdWorkflowToolsForDispatch(pi, unitType) ?? savedTools;
+    }
+
+    const workflowPath = process.env.GSD_WORKFLOW_PATH ?? join(gsdHome(), "agent", "GSD-WORKFLOW.md");
+    const workflow = readFileSync(workflowPath, "utf-8");
+
     pi.sendMessage(
       {
         customType,
