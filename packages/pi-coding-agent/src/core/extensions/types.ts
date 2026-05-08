@@ -1489,6 +1489,20 @@ export interface ExtensionAPI {
 	/** Set the active tools by name. */
 	setActiveTools(toolNames: string[]): void;
 
+	/**
+	 * Get the prompt-only skill catalog filter, if one is active.
+	 * Undefined means all loaded skills remain visible in <available_skills>.
+	 */
+	getVisibleSkills(): string[] | undefined;
+
+	/**
+	 * Set or clear the prompt-only skill catalog filter.
+	 *
+	 * This changes which loaded skills are advertised in <available_skills>;
+	 * it does not unload skills or disable the Skill tool.
+	 */
+	setVisibleSkills(skillNames: string[] | undefined): void;
+
 	/** Get available slash commands in the current session. */
 	getCommands(): SlashCommandInfo[];
 
@@ -1730,6 +1744,8 @@ export interface ExtensionActions {
 	getActiveTools: () => string[];
 	getAllTools: () => ToolInfo[];
 	setActiveTools: (toolNames: string[]) => void;
+	getVisibleSkills: () => string[] | undefined;
+	setVisibleSkills: (skillNames: string[] | undefined) => void;
 	refreshTools: () => void;
 	getCommands: () => SlashCommandInfo[];
 	setModel: (model: Model<any>, options?: { persist?: boolean }) => Promise<boolean>;

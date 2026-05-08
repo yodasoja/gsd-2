@@ -305,6 +305,8 @@ export class AgentSession {
 
 	// Base system prompt (without extension appends) - used to apply fresh appends each turn
 	private _baseSystemPrompt = "";
+	// Optional prompt-only skill catalog filter. Skills remain loaded and invocable by name.
+	private _visibleSkillNames: Set<string> | undefined = undefined;
 
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
@@ -867,6 +869,25 @@ export class AgentSession {
 		this.agent.setSystemPrompt(this._baseSystemPrompt);
 	}
 
+	/**
+	 * Set or clear a prompt-only filter for the <available_skills> catalog.
+	 *
+	 * This does not unload skills or disable the Skill tool. It only controls
+	 * which loaded skills are advertised in the system prompt on rebuild.
+	 */
+	setVisibleSkillsByName(skillNames: string[] | undefined): void {
+		this._visibleSkillNames = skillNames === undefined
+			? undefined
+			: new Set(skillNames.map((name) => name.trim().toLowerCase()).filter(Boolean));
+		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
+		this.agent.setSystemPrompt(this._baseSystemPrompt);
+	}
+
+	/** Get the current prompt-only skill catalog filter, if one is active. */
+	getVisibleSkillNames(): string[] | undefined {
+		return this._visibleSkillNames ? [...this._visibleSkillNames] : undefined;
+	}
+
 	/** Whether compaction or branch summarization is currently running */
 	get isCompacting(): boolean {
 		return this._compactionOrchestrator.isCompacting;
@@ -1045,6 +1066,9 @@ export class AgentSession {
 		return buildSystemPrompt({
 			cwd: this._cwd,
 			skills: loadedSkills,
+			skillFilter: this._visibleSkillNames
+				? (skill) => this._visibleSkillNames!.has(skill.name.trim().toLowerCase())
+				: undefined,
 			contextFiles: loadedContextFiles,
 			customPrompt: loaderSystemPrompt,
 			appendSystemPrompt,
@@ -2189,6 +2213,8 @@ export class AgentSession {
 				getActiveTools: () => this.getActiveToolNames(),
 				getAllTools: () => this.getAllTools(),
 				setActiveTools: (toolNames) => this.setActiveToolsByName(toolNames),
+				getVisibleSkills: () => this.getVisibleSkillNames(),
+				setVisibleSkills: (skillNames) => this.setVisibleSkillsByName(skillNames),
 				refreshTools: () => this._refreshToolRegistry(),
 				getCommands,
 				setModel: async (model, options) => {
