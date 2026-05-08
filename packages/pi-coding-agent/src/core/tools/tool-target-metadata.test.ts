@@ -29,7 +29,7 @@ test("read metadata records resolved path without changing output text", async (
 		assert.deepEqual(result.details?.target?.range, { start: 2, end: 2 });
 		assert.equal(result.content[0]?.type, "text");
 		assert.match(result.content[0]?.text ?? "", /^two/);
-		assert.doesNotMatch(result.content[0]?.text ?? "", new RegExp(filePath));
+		assert.equal((result.content[0]?.text ?? "").includes(filePath), false);
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
 	}

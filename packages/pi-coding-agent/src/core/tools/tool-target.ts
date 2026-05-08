@@ -23,3 +23,24 @@ export interface ToolTargetMetadata {
 export function createToolTarget(target: ToolTargetMetadata): ToolTargetMetadata {
 	return target;
 }
+
+export function createReadFileTarget(
+	inputPath: string,
+	resolvedPath: string,
+	offset?: number,
+	limit?: number,
+): ToolTargetMetadata {
+	return createToolTarget({
+		kind: "file",
+		action: "read",
+		inputPath,
+		resolvedPath,
+		range:
+			offset !== undefined || limit !== undefined
+				? {
+						start: offset ?? 1,
+						end: limit !== undefined ? (offset ?? 1) + Math.max(0, limit - 1) : undefined,
+					}
+				: undefined,
+	});
+}
