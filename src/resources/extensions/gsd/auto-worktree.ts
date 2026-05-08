@@ -78,6 +78,7 @@ import {
   nativeUpdateRef,
   nativeIsAncestor,
   nativeMergeAbort,
+  nativeWorktreeList,
 } from "./native-git-bridge.js";
 import { gsdHome } from "./gsd-home.js";
 import { type MilestoneScope, type GsdWorkspace, createWorkspace } from "./workspace.js";
@@ -1181,6 +1182,28 @@ export function enterBranchModeForMilestone(
  */
 
 /**
+ * True when `branch` is checked out in any worktree listed by
+ * `git worktree list --porcelain`. Used to gate ref updates that would
+ * otherwise leave a concurrent worktree's HEAD inconsistent with its
+ * index/working tree (Codex peer-review of #5538-followup).
+ *
+ * Best-effort: a `nativeWorktreeList` failure returns true so we err on
+ * the side of NOT moving the ref. Better to skip a fast-forward than to
+ * silently corrupt another worktree.
+ */
+export function _isBranchCheckedOutElsewhere(
+  basePath: string,
+  branch: string,
+): boolean {
+  try {
+    const entries = nativeWorktreeList(basePath);
+    return entries.some((entry) => entry.branch === branch);
+  } catch {
+    return true;
+  }
+}
+
+/**
  * Resolve the integration branch using the same 3-tier fallback as the
  * fresh-create path: META.json → git.main_branch preference → detected
  * main branch. Returns null when no usable target exists.
@@ -1238,6 +1261,21 @@ export function fastForwardReusedMilestoneBranchIfSafe(
         milestoneId,
         branch,
         integration: integrationBranch,
+      });
+      return;
+    }
+
+    // Codex peer-review: `nativeUpdateRef` succeeds even when the branch is
+    // currently checked out in another worktree, leaving that worktree's HEAD
+    // inconsistent with its index/work tree. Skip the fast-forward if any
+    // listed worktree has this branch checked out — the merge gate at
+    // milestone-completion will surface stale-base divergence as a conflict
+    // instead of silently corrupting the other worktree's state.
+    if (_isBranchCheckedOutElsewhere(basePath, branch)) {
+      debugLog("createAutoWorktree", {
+        phase: "skip-ff-branch-checked-out-elsewhere",
+        milestoneId,
+        branch,
       });
       return;
     }
