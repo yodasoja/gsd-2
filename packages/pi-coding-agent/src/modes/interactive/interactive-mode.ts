@@ -217,7 +217,7 @@ export function renderExtensionNotifyInChat(
 
 export function renderBlockingErrorBanner(container: Container, message: string | undefined): void {
 	container.clear();
-	if (!message) return;
+	if (message === undefined) return;
 
 	container.addChild(new Spacer(1));
 	container.addChild(new Text(theme.fg("error", `Error: ${message}`), 1, 0));

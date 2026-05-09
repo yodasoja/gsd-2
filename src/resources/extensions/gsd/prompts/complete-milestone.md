@@ -71,7 +71,7 @@ Subagents report only; they do not write user source. Fold any findings into Dec
    - `narrative` (string) — Detailed narrative of what happened during the milestone
    - `verificationPassed` (boolean) — Must be `true`; confirms code-change verification, success criteria, and definition-of-done checks all passed
 
-   **Recommended parameters** (the schema accepts these as optional, but always fill them in — the rendered SUMMARY shows empty sections when omitted):
+   **Recommended parameters** (the schema accepts these as optional, but always fill them in — omitted values render as placeholders such as "Not provided.", "None.", or "(none)"):
    - `successCriteriaResults` (string) — Markdown detailing how each success criterion was met or not met
    - `definitionOfDoneResults` (string) — Markdown detailing how each definition-of-done item was met
    - `requirementOutcomes` (string) — Markdown detailing requirement status transitions with evidence
