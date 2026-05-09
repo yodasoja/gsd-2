@@ -1,3 +1,5 @@
+// Project/App: GSD-2
+// File Purpose: Integration tests for pre-execution check pause wiring.
 /**
  * pre-execution-pause-wiring.test.ts — Integration tests for pre-execution check → pauseAuto wiring.
  *
