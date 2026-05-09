@@ -123,6 +123,13 @@ async function validateSourceWriteWorktreeSafety(
   const { ctx, pi, s, deps } = ic;
   if (!s.basePath) return null;
 
+  // Custom engine workflows (graph-driven, registered via run dirs) define
+  // their own step ids that are not in the GSD UnitContextManifest. Don't
+  // fail closed for those — the custom engine owns its own dispatch
+  // contract. The fail-closed safety check applies only to built-in GSD
+  // units whose Tool Contract is registered in the manifest.
+  if (s.activeEngineId !== null) return null;
+
   const writesSource = unitWritesSource(unitType);
   if (writesSource === null) {
     const msg = `Worktree Safety failed (missing-tool-contract): missing Tool Contract for ${unitType}. Add a UnitContextManifest entry before dispatching this Unit.`;
