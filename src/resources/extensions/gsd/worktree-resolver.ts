@@ -778,7 +778,12 @@ export class WorktreeResolver {
       nextMilestoneId,
     });
     try {
-      this.mergeAndExit(currentMilestoneId, ctx);
+      const mergeResult = this.mergeAndExit(currentMilestoneId, ctx);
+      if (!mergeResult.merged) {
+        throw new UserNotifiedError(
+          `Cannot enter milestone ${nextMilestoneId} because ${currentMilestoneId} was not merged.`,
+        );
+      }
     } catch (err) {
       if (err instanceof UserNotifiedError) throw err;
       // mergeAndExit emits a warning and restores state when it fails during

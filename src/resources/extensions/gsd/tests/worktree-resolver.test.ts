@@ -1150,6 +1150,31 @@ test("mergeAndEnterNext enters next milestone even if merge fails", () => {
   );
 });
 
+test("mergeAndEnterNext halts when mergeAndExit preserves branch without merging", () => {
+  const s = makeSession({
+    basePath: "/project/.gsd/worktrees/M001",
+    originalBasePath: "/project",
+  });
+  const deps = makeDeps({
+    isInAutoWorktree: () => true,
+    getIsolationMode: () => "worktree",
+    shouldUseWorktreeIsolation: () => true,
+    resolveMilestoneFile: () => null,
+  });
+  const ctx = makeNotifyCtx();
+  const resolver = new WorktreeResolver(s, deps);
+
+  assert.throws(
+    () => resolver.mergeAndEnterNext("M001", "M002", ctx),
+    /Cannot enter milestone M002 because M001 was not merged/,
+  );
+  assert.equal(findCalls(deps.calls, "mergeMilestoneToMain").length, 0);
+  assert.equal(findCalls(deps.calls, "createAutoWorktree").length, 0);
+  assert.equal(findCalls(deps.calls, "enterAutoWorktree").length, 0);
+  assert.equal(s.basePath, "/project");
+  assert.ok(ctx.messages.some((m) => m.msg.includes("branch preserved")));
+});
+
 test("mergeAndEnterNext halts after branch-mode user-notified checkout failure", () => {
   const s = makeSession({ basePath: "/project", originalBasePath: "/project" });
   const deps = makeDeps({
