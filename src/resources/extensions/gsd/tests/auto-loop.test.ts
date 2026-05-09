@@ -732,23 +732,6 @@ function makeMockDeps(
     readFileSync: () => "",
     atomicWriteSync: () => {},
     GitServiceImpl: class {} as any,
-    resolver: {
-      get workPath() {
-        return "/tmp/project";
-      },
-      get projectRoot() {
-        return "/tmp/project";
-      },
-      get lockPath() {
-        return "/tmp/project";
-      },
-      enterMilestone: () => {
-        assert.fail("auto-loop should call deps.lifecycle.enterMilestone, not resolver.enterMilestone");
-      },
-      exitMilestone: () => {},
-      mergeAndExit: () => {},
-      mergeAndEnterNext: () => {},
-    } as any,
     lifecycle: {
       enterMilestone: () => ({ ok: true, mode: "worktree", path: "/tmp/project" }),
       exitMilestone: (_mid: string, opts: { merge: boolean }) => ({
@@ -978,25 +961,6 @@ test("autoLoop marks transition merge complete before postflight recovery stop",
       message: "git stash pop stash@{0} failed after merge of milestone M001",
       stashRef: "stash@{0}",
     }),
-    resolver: {
-      get workPath() {
-        return "/tmp/project";
-      },
-      get projectRoot() {
-        return "/tmp/project";
-      },
-      get lockPath() {
-        return "/tmp/project";
-      },
-      enterMilestone: () => {
-        assert.fail("must not enter the next milestone after postflight recovery fails");
-      },
-      exitMilestone: () => {},
-      mergeAndExit: () => {
-        mergeCalls += 1;
-      },
-      mergeAndEnterNext: () => {},
-    } as any,
     lifecycle: {
       enterMilestone: () => {
         assert.fail("must not enter the next milestone after postflight recovery fails");
@@ -1010,7 +974,11 @@ test("autoLoop marks transition merge complete before postflight recovery stop",
       deps.callLog.push("stopAuto");
       stopReason = reason ?? "";
       if (!s.milestoneMergedInPhases) {
-        deps.resolver.mergeAndExit("M001", ctx.ui);
+        deps.lifecycle.exitMilestone(
+          "M001",
+          { merge: true },
+          { notify: ctx.ui.notify.bind(ctx.ui) },
+        );
       }
     },
   });

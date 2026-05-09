@@ -99,10 +99,14 @@ test("bootstrap aborts before starting next milestone when completed orphan merg
         shouldUseWorktreeIsolation: () => true,
         registerSigtermHandler: () => {},
         lockBase: () => base,
-        buildResolver: () => ({
-          mergeAndExit: (milestoneId: string) => {
+        buildLifecycle: () => ({
+          exitMilestone: (milestoneId: string) => {
             mergeCalls.push(milestoneId);
-            throw new Error("synthetic merge failure");
+            return {
+              ok: false,
+              reason: "teardown-failed",
+              cause: new Error("synthetic merge failure"),
+            };
           },
         }) as any,
         buildLifecycle: () => ({
