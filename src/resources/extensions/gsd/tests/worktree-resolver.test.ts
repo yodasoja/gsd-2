@@ -1486,6 +1486,12 @@ test("mergeAndExit keeps worktree cwd before worktree-mode merge work", () => {
     const ctx = makeNotifyCtx();
     const resolver = makeResolver(s,deps);
 
+    assert.equal(
+      process.cwd(),
+      worktreePath,
+      "precondition: cwd is in worktree before merge invocation",
+    );
+
     resolver.mergeAndExit("M001", ctx);
 
     assert.equal(

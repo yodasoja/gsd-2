@@ -1,6 +1,6 @@
 import { describe, test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, readFileSync, readdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -179,8 +179,8 @@ describe("worktree journal events", () => {
       getIsolationMode: () => "worktree",
       mergeMilestoneToMain: () => {
         assert.equal(
-          process.cwd(),
-          worktreePath,
+          realpathSync(process.cwd()),
+          realpathSync(worktreePath),
           "worktree-mode merge must keep the real worktree as cwd",
         );
         return { pushed: false, codeFilesChanged: true };
