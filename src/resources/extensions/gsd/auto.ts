@@ -1016,9 +1016,15 @@ export async function cleanupAfterLoopExit(ctx: ExtensionContext): Promise<void>
     initHealthWidget(ctx);
   }
 
-  // Restore CWD out of worktree back to original project root
+  // ADR-016 phase 2 / B5 (#5623): the stop-path basePath restore is the
+  // same contract as `Lifecycle.restoreToProjectRoot()` — set s.basePath
+  // back to s.originalBasePath, rebuild git service, invalidate caches.
+  // Route through the verb so the file-boundary closure invariant
+  // ("single owner of `s.basePath` mutation") holds at the stop site
+  // too. The chdir stays at the call site since `restoreToProjectRoot`
+  // is a pure session-state mutation.
   if (s.originalBasePath) {
-    s.basePath = s.originalBasePath;
+    buildLifecycle().restoreToProjectRoot();
     try {
       process.chdir(s.basePath);
     } catch (err) {
@@ -1335,10 +1341,10 @@ export async function stopAuto(
       }
     }
 
-    // ── Step 7: Restore basePath and chdir ──
+    // ── Step 7: Restore basePath and chdir (ADR-016 phase 2 / B5, #5623) ──
     try {
       if (s.originalBasePath) {
-        s.basePath = s.originalBasePath;
+        buildLifecycle().restoreToProjectRoot();
         try {
           process.chdir(s.basePath);
         } catch (err) {
