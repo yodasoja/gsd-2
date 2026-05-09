@@ -100,6 +100,14 @@ test("bootstrap aborts before starting next milestone when completed orphan merg
         registerSigtermHandler: () => {},
         lockBase: () => base,
         buildLifecycle: () => ({
+          adoptSessionRoot: (sessionBase: string, originalBase?: string) => {
+            s.basePath = sessionBase;
+            if (originalBase !== undefined) {
+              s.originalBasePath = originalBase;
+            } else if (!s.originalBasePath) {
+              s.originalBasePath = sessionBase;
+            }
+          },
           exitMilestone: (milestoneId: string) => {
             mergeCalls.push(milestoneId);
             return {
