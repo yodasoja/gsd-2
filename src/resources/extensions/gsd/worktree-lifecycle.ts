@@ -1532,6 +1532,76 @@ export class WorktreeLifecycle {
     this.s.basePath = resolvePausedResumeBasePath(base, persistedWorktreePath);
   }
 
+  /**
+   * Adopt an orphan worktree for a bootstrap-time merge (ADR-016 phase 2 / B4,
+   * issue #5622).
+   *
+   * Owns the swap-run-revert protocol that bootstrap previously open-coded:
+   *
+   *   1. Snapshot prior `s.basePath` and `s.originalBasePath`.
+   *   2. Set `s.originalBasePath = base` and
+   *      `s.basePath = getAutoWorktreePath(base, milestoneId) ?? base`.
+   *   3. Invoke the caller-supplied `run` callback under the swap.
+   *   4. On `!result.merged`: revert to `base` and `chdir(base)` so the
+   *      caller can return early without leaving the session in a half-
+   *      swapped state.
+   *   5. On `result.merged && !s.active`: revert to the snapshotted prior
+   *      paths (the orphan merge succeeded but bootstrap chose not to keep
+   *      the session active).
+   *   6. On `result.merged && s.active`: leave the swap in place — the
+   *      loop will continue from the worktree path.
+   *
+   * The callback shape forces every caller through the same revert
+   * protocol; an open-coded swap that forgets to revert on failure was the
+   * original bug pattern this verb is designed to prevent.
+   */
+  adoptOrphanWorktree<T extends { merged: boolean }>(
+    milestoneId: string,
+    base: string,
+    run: () => T,
+  ): T {
+    const priorBasePath = this.s.basePath;
+    const priorOriginalBasePath = this.s.originalBasePath;
+
+    // Swap into the orphan worktree.
+    this.s.originalBasePath = base;
+    this.s.basePath = this.deps.getAutoWorktreePath(base, milestoneId) ?? base;
+
+    const result = run();
+
+    if (!result.merged) {
+      // Failed orphan merge — revert to project root so the caller can
+      // safely return early without leaving the session in an invalid
+      // basePath. Mirror the chdir that bootstrap performed inline.
+      this.s.basePath = base;
+      this.s.originalBasePath = base;
+      try {
+        process.chdir(base);
+      } catch (err) {
+        debugLog("WorktreeLifecycle", {
+          action: "adoptOrphanWorktree",
+          phase: "revert-chdir-failed",
+          base,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      return result;
+    }
+
+    if (!this.s.active) {
+      // Merge succeeded but the session was not (re)activated — restore
+      // the snapshotted paths so the calling context resumes where it
+      // was, with the orphan branch now merged on main.
+      this.s.basePath = priorBasePath || base;
+      this.s.originalBasePath = priorOriginalBasePath || base;
+    }
+    // else: merged && active — leave the swap; the loop continues from
+    // the worktree path. Subsequent milestone enters mutate `s.basePath`
+    // through their own Lifecycle verbs.
+
+    return result;
+  }
+
   /** True if `milestoneId` is the session's currently-active milestone. */
   isInMilestone(milestoneId: string): boolean {
     return this.s.currentMilestoneId === milestoneId;

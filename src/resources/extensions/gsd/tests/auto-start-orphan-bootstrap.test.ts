@@ -117,6 +117,16 @@ test("bootstrap aborts before starting next milestone when completed orphan merg
             };
           },
           enterMilestone: () => ({ ok: true, mode: "none", path: base }),
+          // ADR-016 phase 2 / B4 (#5622): the orphan-merge dance now goes
+          // through `adoptOrphanWorktree`. The mock invokes the callback
+          // and returns its result without exercising the swap-revert
+          // protocol — this test only cares about the merge call being
+          // recorded and the bootstrap returning `false` on failure.
+          adoptOrphanWorktree: <T extends { merged: boolean }>(
+            _mid: string,
+            _base: string,
+            run: () => T,
+          ): T => run(),
         }) as any,
       },
       {

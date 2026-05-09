@@ -546,3 +546,103 @@ test("resumeFromPausedSession does not chdir, rebuild git service, or invalidate
   assert.equal(deps.calls.filter((c) => c.fn === "GitServiceImpl").length, 0);
   assert.equal(deps.calls.filter((c) => c.fn === "invalidateAllCaches").length, 0);
 });
+
+// ─── adoptOrphanWorktree (ADR-016 phase 2 / B4, issue #5622) ──────────────────
+
+test("adoptOrphanWorktree swaps to worktree path and reverts to base on !merged", () => {
+  const s = makeSession();
+  s.basePath = "/old";
+  s.originalBasePath = "/old";
+  s.active = true;
+  const deps = makeDeps({
+    getAutoWorktreePath: () => "/project/.gsd/worktrees/M001",
+  });
+  const lifecycle = new WorktreeLifecycle(s, deps);
+
+  let basePathInsideCallback = "";
+  const result = lifecycle.adoptOrphanWorktree("M001", "/project", () => {
+    basePathInsideCallback = s.basePath;
+    return { merged: false as const, reason: "synthetic" };
+  });
+
+  // Inside callback: swap was applied
+  assert.equal(basePathInsideCallback, "/project/.gsd/worktrees/M001");
+  // After failed merge: reverted to base
+  assert.equal(s.basePath, "/project");
+  assert.equal(s.originalBasePath, "/project");
+  assert.equal(result.merged, false);
+});
+
+test("adoptOrphanWorktree holds the swap on merged && active", () => {
+  const s = makeSession();
+  s.basePath = "/old";
+  s.originalBasePath = "/old";
+  s.active = true;
+  const deps = makeDeps({
+    getAutoWorktreePath: () => "/project/.gsd/worktrees/M001",
+  });
+  const lifecycle = new WorktreeLifecycle(s, deps);
+
+  lifecycle.adoptOrphanWorktree("M001", "/project", () => ({
+    merged: true as const,
+  }));
+
+  // Merged && active — swap held
+  assert.equal(s.basePath, "/project/.gsd/worktrees/M001");
+  assert.equal(s.originalBasePath, "/project");
+});
+
+test("adoptOrphanWorktree restores prior paths on merged && !active", () => {
+  const s = makeSession();
+  s.basePath = "/prior";
+  s.originalBasePath = "/prior-original";
+  s.active = false;
+  const deps = makeDeps({
+    getAutoWorktreePath: () => "/project/.gsd/worktrees/M001",
+  });
+  const lifecycle = new WorktreeLifecycle(s, deps);
+
+  lifecycle.adoptOrphanWorktree("M001", "/project", () => ({
+    merged: true as const,
+  }));
+
+  // Merged but session inactive — restore the snapshotted prior paths
+  assert.equal(s.basePath, "/prior");
+  assert.equal(s.originalBasePath, "/prior-original");
+});
+
+test("adoptOrphanWorktree falls back to base when getAutoWorktreePath returns null", () => {
+  const s = makeSession();
+  s.basePath = "/old";
+  s.active = true;
+  const deps = makeDeps({
+    getAutoWorktreePath: () => null,
+  });
+  const lifecycle = new WorktreeLifecycle(s, deps);
+
+  let basePathInsideCallback = "";
+  lifecycle.adoptOrphanWorktree("M001", "/project", () => {
+    basePathInsideCallback = s.basePath;
+    return { merged: true as const };
+  });
+
+  // Inside callback: basePath is project root (no worktree available)
+  assert.equal(basePathInsideCallback, "/project");
+});
+
+test("adoptOrphanWorktree forwards the callback's return value", () => {
+  const s = makeSession();
+  s.active = true;
+  const lifecycle = new WorktreeLifecycle(
+    s,
+    makeDeps({ getAutoWorktreePath: () => null }),
+  );
+
+  const result = lifecycle.adoptOrphanWorktree("M001", "/project", () => ({
+    merged: true as const,
+    customField: "preserved",
+  }));
+
+  assert.equal(result.merged, true);
+  assert.equal(result.customField, "preserved");
+});

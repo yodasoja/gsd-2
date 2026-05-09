@@ -904,29 +904,24 @@ export async function bootstrapAutoSession(
     {
       const orphan = findUnmergedCompletedMilestone(base, getIsolationMode(base));
       if (orphan && orphan !== state.activeMilestone?.id) {
-        const priorBasePath = s.basePath;
-        const priorOriginalBasePath = s.originalBasePath;
-        s.originalBasePath = base;
-        s.basePath = getAutoWorktreePath(base, orphan) ?? base;
-        const result = _mergeOrphanCompletedMilestone(buildLifecycle(), orphan, ctx.ui);
+        // ADR-016 phase 2 / B4 (#5622): the swap-run-revert protocol for
+        // the orphan-merge dance is owned by `adoptOrphanWorktree`. The
+        // verb snapshots prior `s.basePath` / `s.originalBasePath`, swaps
+        // into the orphan worktree, runs the merge callback under the
+        // swap, and reverts (or holds the swap) based on the result.
+        // Callers can no longer forget the revert step on failure — the
+        // pattern that originally motivated this verb.
+        const lifecycle = buildLifecycle();
+        const result = lifecycle.adoptOrphanWorktree(orphan, base, () =>
+          _mergeOrphanCompletedMilestone(lifecycle, orphan, ctx.ui),
+        );
         if (!result.merged) {
-          s.basePath = base;
-          s.originalBasePath = base;
-          try {
-            process.chdir(base);
-          } catch (err) {
-            logWarning("bootstrap", `could not restore cwd after orphan merge failure: ${err instanceof Error ? err.message : String(err)}`);
-          }
+          // Verb already restored basePath/originalBasePath to `base` and
+          // chdir'd there. Return early.
           return releaseLockAndReturn();
         }
-        if (!s.active) {
-          s.basePath = priorBasePath || base;
-          s.originalBasePath = priorOriginalBasePath || base;
-        }
-        if (result.merged) {
-          invalidateAllCaches();
-          state = await deriveState(base);
-        }
+        invalidateAllCaches();
+        state = await deriveState(base);
       }
     }
 
