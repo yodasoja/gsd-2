@@ -1593,14 +1593,23 @@ function buildResolver(): WorktreeResolver {
  * entry/exit verbs. Phase 1 (issue #5585) ships only `enterMilestone`; the
  * remaining verbs migrate from `WorktreeResolver` in subsequent slices.
  *
- * `WorktreeLifecycleDeps` is structurally a subset of `WorktreeResolverDeps`,
- * so we can reuse `buildResolverDeps()` directly.
  */
+function buildLifecycleDeps(): WorktreeLifecycleDeps {
+  const deps = buildResolverDeps();
+  return {
+    enterAutoWorktree: deps.enterAutoWorktree,
+    createAutoWorktree: deps.createAutoWorktree,
+    enterBranchModeForMilestone: deps.enterBranchModeForMilestone,
+    getAutoWorktreePath: deps.getAutoWorktreePath,
+    getIsolationMode: deps.getIsolationMode,
+    invalidateAllCaches: deps.invalidateAllCaches,
+    GitServiceImpl: deps.GitServiceImpl,
+    loadEffectiveGSDPreferences: deps.loadEffectiveGSDPreferences,
+  };
+}
+
 function buildLifecycle(): WorktreeLifecycle {
-  return new WorktreeLifecycle(
-    s,
-    buildResolverDeps() as unknown as WorktreeLifecycleDeps,
-  );
+  return new WorktreeLifecycle(s, buildLifecycleDeps());
 }
 
 /**
@@ -2154,9 +2163,17 @@ export async function startAuto(
       !detectWorktreeName(s.basePath) &&
       !detectWorktreeName(s.originalBasePath)
     ) {
-      buildLifecycle().enterMilestone(s.currentMilestoneId, {
+      const enterResult = buildLifecycle().enterMilestone(s.currentMilestoneId, {
         notify: ctx.ui.notify.bind(ctx.ui),
       });
+      if (!enterResult.ok && enterResult.reason === "lease-conflict") {
+        ctx.ui.notify(
+          `Cannot resume milestone ${s.currentMilestoneId}: lease is held by another worker.`,
+          "error",
+        );
+        await stopAuto(ctx, pi, "lease-conflict during resume");
+        return;
+      }
       // s.basePath may have been updated to a worktree path by enterMilestone.
       rebuildScope(s.basePath, s.currentMilestoneId);
     }

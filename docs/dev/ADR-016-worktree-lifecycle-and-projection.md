@@ -44,8 +44,8 @@ interface WorktreeLifecycle {
 }
 
 type EnterResult =
-  | { ok: true; mode: "worktree" | "branch"; path: string }
-  | { ok: false; reason: "isolation-degraded" | "lease-conflict" | "creation-failed"; cause?: unknown };
+  | { ok: true; mode: "worktree" | "branch" | "none"; path: string }
+  | { ok: false; reason: "isolation-degraded" | "lease-conflict" | "creation-failed" | "invalid-milestone-id"; cause?: unknown };
 
 type ExitResult =
   | { ok: true; merged: boolean; codeFilesChanged: boolean }

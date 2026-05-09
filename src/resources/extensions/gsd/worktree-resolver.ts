@@ -25,7 +25,7 @@ import { emitWorktreeMerged } from "./worktree-telemetry.js";
 import { getCollapseCadence, getMilestoneResquash, resquashMilestoneOnMain } from "./slice-cadence.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
 import { resolveWorktreeProjectRoot, normalizeWorktreePathForCompare } from "./worktree-root.js";
-import { _enterMilestoneCore } from "./worktree-lifecycle.js";
+import { _enterMilestoneCore, type EnterResult } from "./worktree-lifecycle.js";
 
 // ─── Path Comparison Helper ────────────────────────────────────────────────
 /**
@@ -745,7 +745,7 @@ export class WorktreeResolver {
     currentMilestoneId: string,
     nextMilestoneId: string,
     ctx: NotifyCtx,
-  ): void {
+  ): EnterResult {
     debugLog("WorktreeResolver", {
       action: "mergeAndEnterNext",
       currentMilestoneId,
@@ -762,6 +762,6 @@ export class WorktreeResolver {
       // the current one unmerged.
       if (this.s.basePath !== this.projectRoot) throw err;
     }
-    _enterMilestoneCore(this.s, this.deps, nextMilestoneId, ctx);
+    return _enterMilestoneCore(this.s, this.deps, nextMilestoneId, ctx);
   }
 }

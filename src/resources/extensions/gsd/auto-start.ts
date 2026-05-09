@@ -1118,9 +1118,16 @@ export async function bootstrapAutoSession(
       !detectWorktreeName(base) &&
       !isUnderGsdWorktrees(base)
     ) {
-      buildLifecycle().enterMilestone(s.currentMilestoneId, {
+      const enterResult = buildLifecycle().enterMilestone(s.currentMilestoneId, {
         notify: ctx.ui.notify.bind(ctx.ui),
       });
+      if (!enterResult.ok && enterResult.reason === "lease-conflict") {
+        ctx.ui.notify(
+          `Cannot enter milestone ${s.currentMilestoneId}: lease is held by another worker.`,
+          "error",
+        );
+        return releaseLockAndReturn();
+      }
       if (s.basePath !== base) {
         // Successfully entered worktree — re-register SIGTERM handler at original base
         registerSigtermHandler(s.originalBasePath);

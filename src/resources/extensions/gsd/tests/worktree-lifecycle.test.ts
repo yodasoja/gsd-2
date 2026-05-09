@@ -2,12 +2,18 @@
 // File Purpose: Worktree Lifecycle Module — typed-result contract tests for enterMilestone (ADR-016).
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   WorktreeLifecycle,
   type WorktreeLifecycleDeps,
   type NotifyCtx,
 } from "../worktree-lifecycle.js";
 import { AutoSession } from "../auto/session.js";
+import { openDatabase, closeDatabase, insertMilestone } from "../gsd-db.js";
+import { registerAutoWorker } from "../db/auto-workers.js";
+import { claimMilestoneLease } from "../db/milestone-leases.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -90,6 +96,17 @@ function makeCtx(): NotifyCtx & {
       messages.push({ msg, level });
     },
   };
+}
+
+function makeDbBase(): string {
+  const base = mkdtempSync(join(tmpdir(), "gsd-lifecycle-"));
+  mkdirSync(join(base, ".gsd"), { recursive: true });
+  return base;
+}
+
+function cleanupDbBase(base: string): void {
+  try { closeDatabase(); } catch { /* noop */ }
+  try { rmSync(base, { recursive: true, force: true }); } catch { /* noop */ }
 }
 
 // ─── enterMilestone — typed-result contract ──────────────────────────────────
@@ -217,12 +234,71 @@ test("enterMilestone enters existing worktree when path resolves", () => {
   assert.equal(deps.calls.filter((c) => c.fn === "createAutoWorktree").length, 0);
 });
 
-test("enterMilestone throws on milestoneId with path traversal", () => {
+test("enterMilestone returns ok:false reason:lease-conflict when another worker holds the lease", (t) => {
+  const base = makeDbBase();
+  t.after(() => cleanupDbBase(base));
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  insertMilestone({ id: "M001", title: "Test", status: "active" });
+  const holder = registerAutoWorker({ projectRootRealpath: base });
+  const contender = registerAutoWorker({ projectRootRealpath: base });
+  const claim = claimMilestoneLease(holder, "M001");
+  assert.equal(claim.ok, true);
+
+  const s = makeSession({ basePath: base, originalBasePath: base, workerId: contender });
+  const deps = makeDeps();
+  const ctx = makeCtx();
+  const lifecycle = new WorktreeLifecycle(s, deps);
+
+  const result = lifecycle.enterMilestone("M001", ctx);
+
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.reason, "lease-conflict");
+  }
+  assert.equal(s.isolationDegraded, false);
+  assert.equal(deps.calls.filter((c) => c.fn === "createAutoWorktree").length, 0);
+  assert.equal(deps.calls.filter((c) => c.fn === "enterAutoWorktree").length, 0);
+});
+
+test("enterMilestone is idempotent when already in the milestone worktree", () => {
+  const s = makeSession({
+    basePath: "/project/.gsd/worktrees/M001",
+    originalBasePath: "/project",
+    currentMilestoneId: "M001",
+  });
+  const deps = makeDeps();
+  const ctx = makeCtx();
+  const lifecycle = new WorktreeLifecycle(s, deps);
+
+  const result = lifecycle.enterMilestone("M001", ctx);
+
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.mode, "worktree");
+    assert.equal(result.path, "/project/.gsd/worktrees/M001");
+  }
+  assert.equal(s.basePath, "/project/.gsd/worktrees/M001");
+  assert.equal(deps.calls.filter((c) => c.fn === "createAutoWorktree").length, 0);
+  assert.equal(deps.calls.filter((c) => c.fn === "enterAutoWorktree").length, 0);
+});
+
+test("enterMilestone returns ok:false reason:invalid-milestone-id on path traversal", () => {
   const s = makeSession();
   const deps = makeDeps();
   const ctx = makeCtx();
   const lifecycle = new WorktreeLifecycle(s, deps);
 
-  assert.throws(() => lifecycle.enterMilestone("../escape", ctx), /Invalid milestoneId/);
-  assert.throws(() => lifecycle.enterMilestone("a/b", ctx), /Invalid milestoneId/);
+  const traversal = lifecycle.enterMilestone("../escape", ctx);
+  assert.equal(traversal.ok, false);
+  if (!traversal.ok) {
+    assert.equal(traversal.reason, "invalid-milestone-id");
+    assert.ok(traversal.cause instanceof Error);
+  }
+
+  const separator = lifecycle.enterMilestone("a/b", ctx);
+  assert.equal(separator.ok, false);
+  if (!separator.ok) {
+    assert.equal(separator.reason, "invalid-milestone-id");
+    assert.ok(separator.cause instanceof Error);
+  }
 });

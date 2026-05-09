@@ -45,6 +45,9 @@ export interface NotifyCtx {
  * Structurally a subset of `WorktreeResolverDeps`. `WorktreeResolver` can pass
  * its own deps where these are expected — TypeScript's structural typing
  * handles the narrowing.
+ *
+ * TODO(#5586): collapse this to the ADR target dep set after the resolver
+ * recursion retires; shrinking it now would force a parallel migration.
  */
 export interface WorktreeLifecycleDeps {
   enterAutoWorktree: (basePath: string, milestoneId: string) => string;
@@ -73,12 +76,13 @@ export type EnterResult =
 
 // ─── Validation ──────────────────────────────────────────────────────────
 
-function validateMilestoneId(milestoneId: string): void {
+function validateMilestoneId(milestoneId: string): Error | null {
   if (/[\/\\]|\.\./.test(milestoneId)) {
-    throw new Error(
+    return new Error(
       `Invalid milestoneId: ${milestoneId} — contains path separators or traversal`,
     );
   }
+  return null;
 }
 
 // ─── Implementation core ─────────────────────────────────────────────────
@@ -104,7 +108,19 @@ export function _enterMilestoneCore(
   milestoneId: string,
   ctx: NotifyCtx,
 ): EnterResult {
-  validateMilestoneId(milestoneId);
+  const validationError = validateMilestoneId(milestoneId);
+  if (validationError) {
+    debugLog("WorktreeLifecycle", {
+      action: "enterMilestone",
+      milestoneId,
+      rejected: "invalid-milestone-id",
+    });
+    return {
+      ok: false,
+      reason: "invalid-milestone-id",
+      cause: validationError,
+    };
+  }
 
   if (s.isolationDegraded) {
     debugLog("WorktreeLifecycle", {
@@ -243,6 +259,21 @@ export function _enterMilestoneCore(
     basePath,
   });
 
+  if (
+    mode === "worktree" &&
+    s.currentMilestoneId === milestoneId &&
+    s.basePath !== basePath
+  ) {
+    debugLog("WorktreeLifecycle", {
+      action: "enterMilestone",
+      milestoneId,
+      mode: "worktree",
+      result: "already-entered",
+      wtPath: s.basePath,
+    });
+    return { ok: true, mode: "worktree", path: s.basePath };
+  }
+
   // ── Branch mode: create/checkout milestone branch, stay in project root ──
   if (mode === "branch") {
     try {
@@ -379,10 +410,16 @@ function rebuildGitService(
  * without round-tripping through callers.
  */
 export class WorktreeLifecycle {
+  private readonly s: AutoSession;
+  private readonly deps: WorktreeLifecycleDeps;
+
   constructor(
-    private readonly s: AutoSession,
-    private readonly deps: WorktreeLifecycleDeps,
-  ) {}
+    s: AutoSession,
+    deps: WorktreeLifecycleDeps,
+  ) {
+    this.s = s;
+    this.deps = deps;
+  }
 
   /**
    * Enter or create the auto-worktree for `milestoneId`. Idempotent if
