@@ -118,6 +118,10 @@ test("enterMilestone returns ok:true mode:worktree on successful create", () => 
     assert.equal(result.path, "/project/.gsd/worktrees/M001");
   }
   assert.equal(s.basePath, "/project/.gsd/worktrees/M001");
+  assert.equal(
+    deps.calls.filter((c) => c.fn === "invalidateAllCaches").length,
+    1,
+  );
 });
 
 test("enterMilestone returns ok:true mode:branch on successful branch fallback", () => {
@@ -318,6 +322,7 @@ test("exitMilestone delegates merge:true to Resolver.mergeAndExit and returns ok
   const fakeResolver = {
     mergeAndExit: (mid: string) => {
       calledMid = mid;
+      return { merged: false, codeFilesChanged: true };
     },
   };
   const lifecycle = new WorktreeLifecycle(s, deps, () => fakeResolver as any);
@@ -326,8 +331,8 @@ test("exitMilestone delegates merge:true to Resolver.mergeAndExit and returns ok
 
   assert.equal(result.ok, true);
   if (result.ok) {
-    assert.equal(result.merged, true);
-    assert.equal(result.codeFilesChanged, false);
+    assert.equal(result.merged, false);
+    assert.equal(result.codeFilesChanged, true);
   }
   assert.equal(calledMid, "M001");
 });

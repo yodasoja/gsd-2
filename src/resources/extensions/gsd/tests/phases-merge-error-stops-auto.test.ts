@@ -79,12 +79,6 @@ const ic = {
       calls.push("postflight");
       return { ok: true, needsManualRecovery: false };
     },
-    resolver: {
-      mergeAndExit() {
-        calls.push("merge");
-        throw new Error("remote rejected push");
-      },
-    },
     lifecycle: {
       exitMilestone() {
         calls.push("merge");

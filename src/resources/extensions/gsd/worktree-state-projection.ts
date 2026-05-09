@@ -41,7 +41,9 @@ import type { MilestoneScope } from "./workspace.js";
  */
 export class WorktreeStateProjection {
   /**
-   * Project state from the project root onto the auto-worktree for `scope`.
+   * Project state from the project root onto the auto-worktree for the scope
+   * pair. `worktreeScope` may be omitted only for project-only/same-path
+   * callers where the helper intentionally fast-paths to a no-op.
    * Called by Lifecycle's enter path after a successful create/enter, before
    * any Unit dispatches.
    *
@@ -55,12 +57,17 @@ export class WorktreeStateProjection {
    * typed `MilestoneScope`-only Interface without re-implementing the bug-
    * hardened rules mid-flight. The body extraction joins #5590.
    */
-  projectRootToWorktree(scope: MilestoneScope): void {
-    syncProjectRootToWorktreeByScope(scope, scope);
+  projectRootToWorktree(
+    rootScope: MilestoneScope,
+    worktreeScope: MilestoneScope = rootScope,
+  ): void {
+    syncProjectRootToWorktreeByScope(rootScope, worktreeScope);
   }
 
   /**
-   * Project state from the auto-worktree back onto the project root for `scope`.
+   * Project state from the auto-worktree back onto the project root for the
+   * scope pair. `rootScope` may be omitted only for project-only/same-path
+   * callers where the helper intentionally fast-paths to a no-op.
    * Called by the post-unit pipeline between Units, and by Lifecycle's exit
    * path before merge.
    *
@@ -73,7 +80,10 @@ export class WorktreeStateProjection {
    * non-fatal-on-failure contract mid-flight. The body extraction joins
    * the legacy helper retirement in #5590.
    */
-  projectWorktreeToRoot(scope: MilestoneScope): void {
-    syncStateToProjectRootByScope(scope, scope);
+  projectWorktreeToRoot(
+    worktreeScope: MilestoneScope,
+    rootScope: MilestoneScope = worktreeScope,
+  ): void {
+    syncStateToProjectRootByScope(worktreeScope, rootScope);
   }
 }
