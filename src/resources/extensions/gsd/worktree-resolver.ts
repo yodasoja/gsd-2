@@ -115,11 +115,6 @@ export interface WorktreeResolverDeps {
   ) => void;
 }
 
-export interface MergeAndExitResult {
-  merged: boolean;
-  codeFilesChanged: boolean;
-}
-
 // ─── Notify Context ────────────────────────────────────────────────────────
 
 export interface NotifyCtx {
