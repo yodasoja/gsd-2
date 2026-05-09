@@ -822,11 +822,6 @@ export async function runPreDispatch(
         deps.captureIntegrationBranch(s.basePath, mid);
       }
       const enterResult = deps.lifecycle.enterMilestone(mid, ctx.ui);
-<<<<<<< HEAD
-      if (!enterResult.ok && enterResult.reason === "lease-conflict") {
-        await deps.pauseAuto(ctx, pi);
-        return { action: "break", reason: "milestone-lease-conflict" };
-=======
       if (!enterResult.ok) {
         ctx.ui.notify(
           `Milestone transition stopped: failed to enter ${mid} (${enterResult.reason}).`,
@@ -836,7 +831,6 @@ export async function runPreDispatch(
           await deps.pauseAuto(ctx, pi);
         }
         return { action: "break", reason: "milestone-enter-failed" };
->>>>>>> 80a025a19 (Apply babysitter fixes for PR #5602)
       }
     } else {
       // mid is undefined — no milestone to capture integration branch for

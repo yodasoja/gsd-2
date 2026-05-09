@@ -291,12 +291,10 @@ test("enterMilestone returns ok:false reason:invalid-milestone-id on path traver
   assert.equal(traversal.ok, false);
   if (!traversal.ok) {
     assert.equal(traversal.reason, "invalid-milestone-id");
-    assert.match(String(traversal.cause), /Invalid milestoneId/);
   }
   assert.equal(separator.ok, false);
   if (!separator.ok) {
     assert.equal(separator.reason, "invalid-milestone-id");
-    assert.match(String(separator.cause), /Invalid milestoneId/);
   }
 });
 

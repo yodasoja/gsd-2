@@ -11,19 +11,9 @@
  *     verdict overwrite #2821, completed-units forward-sync, WAL/SHM
  *     cleanup #2478, .gsd symlink edge case #2184)
  *
- * The public Interface now exposes all three ADR-016 verbs:
- * `projectRootToWorktree`, `projectWorktreeToRoot`, and
- * `finalizeProjectionForMerge`.
- *
- * Issue #5588 ships this as a delegating wrapper around the existing
- * `syncProjectRootToWorktree*` helpers in `auto-worktree.ts`. The full body
- * extraction (with its identity-key check, additive milestone copy, ASSESSMENT
- * verdict force-overwrite, completed-units forward-sync, WAL/SHM cleanup,
- * .gsd symlink edge case) joins the legacy helper retirement in #5590.
- *
- * Lifecycle does not yet hook this Module into `enterMilestone`; that wiring
- * lands when the broader caller migration completes alongside the Projection
- * Module's full Interface.
+ * The public Interface now exposes all three ADR-016 verbs
+ * (`projectRootToWorktree`, `projectWorktreeToRoot`, and
+ * `finalizeProjectionForMerge`) — completed in #5589, #5590, and this PR.
  */
 
 import {

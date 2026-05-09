@@ -98,6 +98,7 @@ function validateMilestoneId(milestoneId: string): void {
   }
 }
 
+
 // ─── Implementation core ─────────────────────────────────────────────────
 
 /**
@@ -469,14 +470,10 @@ export class WorktreeLifecycle {
    * The delegating shape preserves caller migration without rewriting
    * merge-conflict handling mid-flight.
    *
-<<<<<<< HEAD
-   * Merge metadata is returned by `WorktreeResolver` while delegation is in
-   * place; #5587 will keep this contract when the merge logic moves into
-   * the Module.
-=======
-   * `codeFilesChanged` is delegated from `WorktreeResolver.mergeAndExit`
-   * while the merge implementation remains there.
->>>>>>> 80a025a19 (Apply babysitter fixes for PR #5602)
+   * `codeFilesChanged` reflects the actual value returned by
+   * `WorktreeResolver.mergeAndExit`. When `#5587` moves the merge logic
+   * into this Module directly, the delegation layer is removed but the
+   * contract is unchanged.
    */
   exitMilestone(
     milestoneId: string,
@@ -491,19 +488,11 @@ export class WorktreeLifecycle {
     const resolver = this.resolverFactory();
     if (opts.merge) {
       try {
-<<<<<<< HEAD
-        const result = resolver.mergeAndExit(milestoneId, ctx);
-        return {
-          ok: true,
-          merged: result.merged,
-          codeFilesChanged: result.codeFilesChanged,
-=======
         const mergeResult = resolver.mergeAndExit(milestoneId, ctx);
         return {
           ok: true,
           merged: mergeResult?.merged ?? true,
           codeFilesChanged: mergeResult?.codeFilesChanged ?? false,
->>>>>>> 80a025a19 (Apply babysitter fixes for PR #5602)
         };
       } catch (err) {
         if (err instanceof MergeConflictError) {
