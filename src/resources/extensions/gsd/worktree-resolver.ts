@@ -25,16 +25,8 @@ import { emitWorktreeMerged } from "./worktree-telemetry.js";
 import { getCollapseCadence, getMilestoneResquash, resquashMilestoneOnMain } from "./slice-cadence.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
 import { resolveWorktreeProjectRoot, normalizeWorktreePathForCompare } from "./worktree-root.js";
-import {
-  _enterMilestoneCore,
-  type EnterResult,
-  type WorktreeLifecycleDeps,
-} from "./worktree-lifecycle.js";
-
-export interface MergeAndExitResult {
-  merged: boolean;
-  codeFilesChanged: boolean;
-}
+import { _enterMilestoneCore, type WorktreeLifecycleDeps } from "./worktree-lifecycle.js";
+import { WorktreeStateProjection } from "./worktree-state-projection.js";
 
 // ─── Path Comparison Helper ────────────────────────────────────────────────
 /**
@@ -788,30 +780,13 @@ export class WorktreeResolver {
       // the current one unmerged.
       if (this.s.basePath !== this.projectRoot) throw err;
     }
+    // Lifecycle's _enterMilestoneCore now requires a worktreeProjection dep
+    // (ADR-016 / slice 7 / step C). Augment the resolver's deps in place
+    // until WorktreeResolver retires in step E.
     const lifecycleDeps: WorktreeLifecycleDeps = {
-      enterAutoWorktree: this.deps.enterAutoWorktree,
-      createAutoWorktree: this.deps.createAutoWorktree,
-      enterBranchModeForMilestone: this.deps.enterBranchModeForMilestone,
-      getAutoWorktreePath: this.deps.getAutoWorktreePath,
-      getIsolationMode: this.deps.getIsolationMode,
-      invalidateAllCaches: this.deps.invalidateAllCaches,
-      GitServiceImpl: this.deps.GitServiceImpl,
-      loadEffectiveGSDPreferences: this.deps.loadEffectiveGSDPreferences,
+      ...(this.deps as unknown as WorktreeLifecycleDeps),
+      worktreeProjection: new WorktreeStateProjection(),
     };
-    const enterResult = _enterMilestoneCore(
-      this.s,
-      lifecycleDeps,
-      nextMilestoneId,
-      ctx,
-    );
-    if (!enterResult.ok) {
-      this.restoreToProjectRoot();
-      throw enterResult.cause instanceof Error
-        ? enterResult.cause
-        : new Error(
-            `Failed to enter milestone ${nextMilestoneId}: ${enterResult.reason}`,
-          );
-    }
-    return enterResult;
+    _enterMilestoneCore(this.s, lifecycleDeps, nextMilestoneId, ctx);
   }
 }

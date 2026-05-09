@@ -31,6 +31,8 @@ import {
 } from "./db/milestone-leases.js";
 import { MergeConflictError } from "./git-service.js";
 import type { WorktreeResolver } from "./worktree-resolver.js";
+import type { WorktreeStateProjection } from "./worktree-state-projection.js";
+import { createWorkspace, scopeMilestone } from "./workspace.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -62,6 +64,11 @@ export interface WorktreeLifecycleDeps {
   loadEffectiveGSDPreferences: () =>
     | { preferences?: { git?: Record<string, unknown> } }
     | undefined;
+  /**
+   * State Projection Module called by Lifecycle on enter/exit transitions.
+   * Per ADR-016 the dependency direction is one-way: Lifecycle → Projection.
+   */
+  worktreeProjection: WorktreeStateProjection;
 }
 
 export type EnterResult =
@@ -343,6 +350,25 @@ export function _enterMilestoneCore(
     s.basePath = wtPath;
     rebuildGitService(s, deps);
     deps.invalidateAllCaches();
+
+    // Per ADR-016: Lifecycle calls Projection on entry, before any Unit
+    // dispatches. Build a temporary scope from the new basePath; callers may
+    // later set s.scope via their own rebuildScope hook (the two are
+    // independent — this scope is only used to drive the projection rules).
+    try {
+      const enterScope = scopeMilestone(createWorkspace(wtPath), milestoneId);
+      deps.worktreeProjection.projectRootToWorktree(enterScope);
+    } catch (projErr) {
+      // Non-fatal: projection failures must not block worktree entry.
+      // The pre-dispatch path in auto/phases.ts performs the same projection
+      // on every iteration, so a transient failure here self-heals on the
+      // next loop pass.
+      debugLog("WorktreeLifecycle", {
+        action: "enterMilestone",
+        phase: "projection-on-enter",
+        error: projErr instanceof Error ? projErr.message : String(projErr),
+      });
+    }
 
     debugLog("WorktreeLifecycle", {
       action: "enterMilestone",

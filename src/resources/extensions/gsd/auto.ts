@@ -1594,9 +1594,9 @@ function buildResolver(): WorktreeResolver {
  * Build a WorktreeLifecycle Module wrapping the current session.
  *
  * Per ADR-016, the Lifecycle Module is the typed-Interface owner of milestone
- * entry/exit verbs. Phase 1 (issue #5585) ships only `enterMilestone`; the
- * remaining verbs migrate from `WorktreeResolver` in subsequent slices.
- *
+ * entry/exit verbs and calls Projection on lifecycle transitions. The deps
+ * shape is intentionally narrower than `WorktreeResolverDeps`: only the
+ * fields Lifecycle actually needs.
  */
 function buildLifecycleDeps(): WorktreeLifecycleDeps {
   const deps = buildResolverDeps();
@@ -1613,11 +1613,16 @@ function buildLifecycleDeps(): WorktreeLifecycleDeps {
 }
 
 function buildLifecycle(): WorktreeLifecycle {
-  return new WorktreeLifecycle(
-    s,
-    buildLifecycleDeps(),
-    () => buildResolver(),
-  );
+  // Reuse buildResolverDeps so the (broader) type quirks in GitServiceImpl
+  // and loadEffectiveGSDPreferences are absorbed by the same `as unknown as`
+  // cast that already exists upstream. Augment with the projection module
+  // ADR-016 mandates as a Lifecycle dep.
+  const baseDeps = buildResolverDeps() as unknown as WorktreeLifecycleDeps;
+  const lifecycleDeps: WorktreeLifecycleDeps = {
+    ...baseDeps,
+    worktreeProjection: new WorktreeStateProjection(),
+  };
+  return new WorktreeLifecycle(s, lifecycleDeps, () => buildResolver());
 }
 
 /**
