@@ -2843,6 +2843,7 @@ test("dispatch Worktree Safety stops unknown unit types with missing Tool Contra
     canonicalProjectRoot: projectRoot,
   });
   const deps = makeMockDeps({
+    getIsolationMode: () => "worktree",
     resolveDispatch: async () => {
       deps.callLog.push("resolveDispatch");
       return {
