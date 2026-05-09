@@ -25,7 +25,16 @@ import { emitWorktreeMerged } from "./worktree-telemetry.js";
 import { getCollapseCadence, getMilestoneResquash, resquashMilestoneOnMain } from "./slice-cadence.js";
 import { loadEffectiveGSDPreferences } from "./preferences.js";
 import { resolveWorktreeProjectRoot, normalizeWorktreePathForCompare } from "./worktree-root.js";
-import { _enterMilestoneCore, type EnterResult } from "./worktree-lifecycle.js";
+import {
+  _enterMilestoneCore,
+  type EnterResult,
+  type WorktreeLifecycleDeps,
+} from "./worktree-lifecycle.js";
+
+export interface MergeAndExitResult {
+  merged: boolean;
+  codeFilesChanged: boolean;
+}
 
 // ─── Path Comparison Helper ────────────────────────────────────────────────
 /**
@@ -104,11 +113,6 @@ export interface WorktreeResolverDeps {
     basePath: string,
     mid: string,
   ) => void;
-}
-
-export interface MergeAndExitResult {
-  merged: boolean;
-  codeFilesChanged: boolean;
 }
 
 // ─── Notify Context ────────────────────────────────────────────────────────
@@ -465,7 +469,10 @@ export class WorktreeResolver {
 
   /** Worktree-mode merge: read roadmap, merge, teardown, reset paths.
    *  Returns merge metadata when a squash-merge actually ran. */
-  private _mergeWorktreeMode(milestoneId: string, ctx: NotifyCtx): MergeAndExitResult {
+  private _mergeWorktreeMode(
+    milestoneId: string,
+    ctx: NotifyCtx,
+  ): MergeAndExitResult {
     const originalBase = this.s.originalBasePath;
     if (!originalBase) {
       debugLog("WorktreeResolver", {
@@ -638,7 +645,10 @@ export class WorktreeResolver {
 
   /** Branch-mode merge: check current branch, merge if on milestone branch.
    *  Returns merge metadata when a merge actually ran. */
-  private _mergeBranchMode(milestoneId: string, ctx: NotifyCtx): MergeAndExitResult {
+  private _mergeBranchMode(
+    milestoneId: string,
+    ctx: NotifyCtx,
+  ): MergeAndExitResult {
     try {
       const currentBranch = this.deps.getCurrentBranch(this.s.basePath);
       const milestoneBranch = this.deps.autoWorktreeBranch(milestoneId);
@@ -763,7 +773,12 @@ export class WorktreeResolver {
       nextMilestoneId,
     });
     try {
-      this.mergeAndExit(currentMilestoneId, ctx);
+      const mergeResult = this.mergeAndExit(currentMilestoneId, ctx);
+      if (!mergeResult.merged) {
+        throw new UserNotifiedError(
+          `Cannot enter milestone ${nextMilestoneId} because ${currentMilestoneId} was not merged.`,
+        );
+      }
     } catch (err) {
       if (err instanceof UserNotifiedError) throw err;
       // mergeAndExit emits a warning and restores state when it fails during
@@ -773,6 +788,30 @@ export class WorktreeResolver {
       // the current one unmerged.
       if (this.s.basePath !== this.projectRoot) throw err;
     }
-    return _enterMilestoneCore(this.s, this.deps, nextMilestoneId, ctx);
+    const lifecycleDeps: WorktreeLifecycleDeps = {
+      enterAutoWorktree: this.deps.enterAutoWorktree,
+      createAutoWorktree: this.deps.createAutoWorktree,
+      enterBranchModeForMilestone: this.deps.enterBranchModeForMilestone,
+      getAutoWorktreePath: this.deps.getAutoWorktreePath,
+      getIsolationMode: this.deps.getIsolationMode,
+      invalidateAllCaches: this.deps.invalidateAllCaches,
+      GitServiceImpl: this.deps.GitServiceImpl,
+      loadEffectiveGSDPreferences: this.deps.loadEffectiveGSDPreferences,
+    };
+    const enterResult = _enterMilestoneCore(
+      this.s,
+      lifecycleDeps,
+      nextMilestoneId,
+      ctx,
+    );
+    if (!enterResult.ok) {
+      this.restoreToProjectRoot();
+      throw enterResult.cause instanceof Error
+        ? enterResult.cause
+        : new Error(
+            `Failed to enter milestone ${nextMilestoneId}: ${enterResult.reason}`,
+          );
+    }
+    return enterResult;
   }
 }

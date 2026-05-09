@@ -1122,6 +1122,7 @@ export async function bootstrapAutoSession(
         notify: ctx.ui.notify.bind(ctx.ui),
       });
       if (!enterResult.ok) {
+        s.active = false;
         if (enterResult.reason === "lease-conflict") {
           ctx.ui.notify(
             `Cannot enter milestone ${s.currentMilestoneId}: lease is held by another worker.`,
@@ -1135,6 +1136,11 @@ export async function bootstrapAutoSession(
         } else if (enterResult.reason === "invalid-milestone-id") {
           ctx.ui.notify(
             `Cannot enter milestone ${s.currentMilestoneId}: milestone id is invalid.`,
+            "error",
+          );
+        } else {
+          ctx.ui.notify(
+            `Auto-mode bootstrap stopped: failed to enter milestone ${s.currentMilestoneId} (${enterResult.reason}).`,
             "error",
           );
         }

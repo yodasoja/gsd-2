@@ -86,6 +86,19 @@ function isValidMilestoneId(milestoneId: string): boolean {
   return !/[\/\\]|\.\./.test(milestoneId);
 }
 
+function invalidMilestoneIdError(milestoneId: string): Error {
+  return new Error(
+    `Invalid milestoneId: ${milestoneId} — contains path separators or traversal`,
+  );
+}
+
+function validateMilestoneId(milestoneId: string): void {
+  if (!isValidMilestoneId(milestoneId)) {
+    throw invalidMilestoneIdError(milestoneId);
+  }
+}
+
+
 // ─── Implementation core ─────────────────────────────────────────────────
 
 /**
@@ -118,9 +131,7 @@ export function _enterMilestoneCore(
     return {
       ok: false,
       reason: "invalid-milestone-id",
-      cause: new Error(
-        `Invalid milestoneId: ${milestoneId} — contains path separators or traversal`,
-      ),
+      cause: invalidMilestoneIdError(milestoneId),
     };
   }
 
@@ -459,9 +470,10 @@ export class WorktreeLifecycle {
    * The delegating shape preserves caller migration without rewriting
    * merge-conflict handling mid-flight.
    *
-   * Merge metadata is returned by `WorktreeResolver` while delegation is in
-   * place; #5587 will keep this contract when the merge logic moves into
-   * the Module.
+   * `codeFilesChanged` reflects the actual value returned by
+   * `WorktreeResolver.mergeAndExit`. When `#5587` moves the merge logic
+   * into this Module directly, the delegation layer is removed but the
+   * contract is unchanged.
    */
   exitMilestone(
     milestoneId: string,
@@ -476,11 +488,11 @@ export class WorktreeLifecycle {
     const resolver = this.resolverFactory();
     if (opts.merge) {
       try {
-        const result = resolver.mergeAndExit(milestoneId, ctx);
+        const mergeResult = resolver.mergeAndExit(milestoneId, ctx);
         return {
           ok: true,
-          merged: result.merged,
-          codeFilesChanged: result.codeFilesChanged,
+          merged: mergeResult?.merged ?? true,
+          codeFilesChanged: mergeResult?.codeFilesChanged ?? false,
         };
       } catch (err) {
         if (err instanceof MergeConflictError) {
@@ -525,6 +537,7 @@ export class WorktreeLifecycle {
     );
     try {
       this.deps.enterBranchModeForMilestone(basePath, milestoneId);
+      rebuildGitService(this.s, this.deps);
       this.deps.invalidateAllCaches();
       this.s.isolationDegraded = true;
       ctx.notify(

@@ -11,24 +11,15 @@
  *     verdict overwrite #2821, completed-units forward-sync, WAL/SHM
  *     cleanup #2478, .gsd symlink edge case #2184)
  *
- * Phase 1 shipped `projectRootToWorktree`; this slice also introduces
- * `projectWorktreeToRoot` as a delegating wrapper. `finalizeProjectionForMerge`
- * remains for a subsequent slice (#5590).
- *
- * Issue #5588 ships this as a delegating wrapper around the existing
- * `syncProjectRootToWorktree*` helpers in `auto-worktree.ts`. The full body
- * extraction (with its identity-key check, additive milestone copy, ASSESSMENT
- * verdict force-overwrite, completed-units forward-sync, WAL/SHM cleanup,
- * .gsd symlink edge case) joins the legacy helper retirement in #5590.
- *
- * Lifecycle does not yet hook this Module into `enterMilestone`; that wiring
- * lands when the broader caller migration completes alongside the Projection
- * Module's full Interface.
+ * The public Interface now exposes all three ADR-016 verbs
+ * (`projectRootToWorktree`, `projectWorktreeToRoot`, and
+ * `finalizeProjectionForMerge`) — completed in #5589, #5590, and this PR.
  */
 
 import {
   syncProjectRootToWorktreeByScope,
   syncStateToProjectRootByScope,
+  syncWorktreeStateBack,
 } from "./auto-worktree.js";
 import type { MilestoneScope } from "./workspace.js";
 
@@ -85,5 +76,29 @@ export class WorktreeStateProjection {
     rootScope: MilestoneScope = worktreeScope,
   ): void {
     syncStateToProjectRootByScope(worktreeScope, rootScope);
+  }
+
+  /**
+   * Final projection from the auto-worktree to the project root before
+   * teardown. Called by Lifecycle's exit path after a successful merge,
+   * before the worktree directory is removed.
+   *
+   * Owns the rules: final state capture (completion metadata, ASSESSMENT
+   * verdicts, completed-units finalization) — the post-merge superset of
+   * `projectWorktreeToRoot`'s ongoing-sync rules.
+   *
+   * Issue #5590 delegates to `syncWorktreeStateBack` to ship the typed
+   * `MilestoneScope`-only Interface. The body extraction and retirement
+   * of the legacy path-based variants are a follow-up cleanup.
+   *
+   * Returns `{ synced }` describing which file classes were captured —
+   * mirrors the existing helper's contract for callers that want
+   * post-merge telemetry on what crossed the boundary.
+   */
+  finalizeProjectionForMerge(scope: MilestoneScope): { synced: string[] } {
+    const projectRoot = scope.workspace.projectRoot;
+    const worktreePath =
+      scope.workspace.worktreeRoot ?? scope.workspace.projectRoot;
+    return syncWorktreeStateBack(projectRoot, worktreePath, scope.milestoneId);
   }
 }

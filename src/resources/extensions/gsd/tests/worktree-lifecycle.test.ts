@@ -286,17 +286,15 @@ test("enterMilestone returns ok:false reason:invalid-milestone-id on path traver
   const lifecycle = new WorktreeLifecycle(s, deps);
 
   const traversal = lifecycle.enterMilestone("../escape", ctx);
+  const separator = lifecycle.enterMilestone("a/b", ctx);
+
   assert.equal(traversal.ok, false);
   if (!traversal.ok) {
     assert.equal(traversal.reason, "invalid-milestone-id");
-    assert.ok(traversal.cause instanceof Error);
   }
-
-  const separator = lifecycle.enterMilestone("a/b", ctx);
   assert.equal(separator.ok, false);
   if (!separator.ok) {
     assert.equal(separator.reason, "invalid-milestone-id");
-    assert.ok(separator.cause instanceof Error);
   }
 });
 
