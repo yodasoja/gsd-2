@@ -131,10 +131,13 @@ function walk(dir: string, out: string[]): void {
   }
 }
 
-function canonicalAllowlistPath(rel: string): string {
+const CANONICAL_ALLOWLIST_PATHS: Record<string, string> = {
   // dist-test can contain this compatibility copy alongside src/provider-migrations.ts.
-  if (rel === "src/providers/provider-migrations.ts") return "src/provider-migrations.ts";
-  return rel;
+  "src/providers/provider-migrations.ts": "src/provider-migrations.ts",
+};
+
+function canonicalAllowlistPath(rel: string): string {
+  return CANONICAL_ALLOWLIST_PATHS[rel] ?? rel;
 }
 
 function collectHits(): string[] {

@@ -29,6 +29,11 @@ let tempDir: string;
 let dbPath: string;
 let originalCwd: string;
 
+function resetAllCaches(): void {
+  invalidateAllCaches();
+  _clearGsdRootCache();
+}
+
 /**
  * Create a minimal mock ExtensionContext.
  */
@@ -114,8 +119,8 @@ function setupTestEnvironment(): void {
   // Change cwd so loadEffectiveGSDPreferences finds our PREFERENCES.md
   process.chdir(tempDir);
   
-  // Clear gsdRoot cache so it finds the new .gsd directory
-  _clearGsdRootCache();
+  // Clear caches so it finds the new .gsd directory and preferences.
+  resetAllCaches();
   
   // Initialize DB
   dbPath = join(gsdDir, "gsd.db");
@@ -138,6 +143,7 @@ function cleanupTestEnvironment(): void {
   } catch {
     // Ignore close errors
   }
+  resetAllCaches();
   try {
     rmSync(tempDir, { recursive: true, force: true });
   } catch {
@@ -160,8 +166,7 @@ ${yamlLines.join("\n")}
 `;
   writeFileSync(join(tempDir, ".gsd", "PREFERENCES.md"), prefsContent);
   // Invalidate caches so the new preferences file is found
-  invalidateAllCaches();
-  _clearGsdRootCache();
+  resetAllCaches();
 }
 
 /**
@@ -489,6 +494,12 @@ describe("Pre-execution checks → pauseAuto wiring", () => {
   });
 
   test("files present in s.basePath (worktree) but absent from canonicalProjectRoot do not block", async () => {
+    writePreferences({
+      enhanced_verification: true,
+      enhanced_verification_pre: true,
+      enhanced_verification_strict: false,
+    });
+
     // Regression: pre-exec checks used canonicalProjectRoot (project root), so
     // files that a prior slice created in the worktree were falsely flagged as
     // missing because they hadn't merged to main yet. Fix: use s.basePath.
