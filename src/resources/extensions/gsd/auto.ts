@@ -1561,20 +1561,6 @@ export async function pauseAuto(
  * deps bag is intentionally focused — Lifecycle does not see the wider auto-
  * mode dependency graph.
  */
-function buildLifecycleDeps(): WorktreeLifecycleDeps {
-  const deps = buildResolverDeps();
-  return {
-    enterAutoWorktree: deps.enterAutoWorktree,
-    createAutoWorktree: deps.createAutoWorktree,
-    enterBranchModeForMilestone: deps.enterBranchModeForMilestone,
-    getAutoWorktreePath: deps.getAutoWorktreePath,
-    getIsolationMode: deps.getIsolationMode,
-    invalidateAllCaches: deps.invalidateAllCaches,
-    GitServiceImpl: deps.GitServiceImpl,
-    loadEffectiveGSDPreferences: deps.loadEffectiveGSDPreferences,
-  };
-}
-
 function buildLifecycle(): WorktreeLifecycle {
   const lifecycleDeps = {
     enterAutoWorktree,
