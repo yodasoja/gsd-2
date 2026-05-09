@@ -29,6 +29,7 @@
 import {
   syncProjectRootToWorktreeByScope,
   syncStateToProjectRootByScope,
+  syncWorktreeStateBack,
 } from "./auto-worktree.js";
 import type { MilestoneScope } from "./workspace.js";
 
@@ -85,5 +86,29 @@ export class WorktreeStateProjection {
     rootScope: MilestoneScope = worktreeScope,
   ): void {
     syncStateToProjectRootByScope(worktreeScope, rootScope);
+  }
+
+  /**
+   * Final projection from the auto-worktree to the project root before
+   * teardown. Called by Lifecycle's exit path after a successful merge,
+   * before the worktree directory is removed.
+   *
+   * Owns the rules: final state capture (completion metadata, ASSESSMENT
+   * verdicts, completed-units finalization) — the post-merge superset of
+   * `projectWorktreeToRoot`'s ongoing-sync rules.
+   *
+   * Issue #5590 delegates to `syncWorktreeStateBack` to ship the typed
+   * `MilestoneScope`-only Interface. The body extraction and retirement
+   * of the legacy path-based variants are a follow-up cleanup.
+   *
+   * Returns `{ synced }` describing which file classes were captured —
+   * mirrors the existing helper's contract for callers that want
+   * post-merge telemetry on what crossed the boundary.
+   */
+  finalizeProjectionForMerge(scope: MilestoneScope): { synced: string[] } {
+    const projectRoot = scope.workspace.projectRoot;
+    const worktreePath =
+      scope.workspace.worktreeRoot ?? scope.workspace.projectRoot;
+    return syncWorktreeStateBack(projectRoot, worktreePath, scope.milestoneId);
   }
 }
