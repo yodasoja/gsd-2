@@ -1313,6 +1313,19 @@ export async function stopAuto(
       }
     }
 
+    const completionMilestoneId = options.completionWidget?.milestoneId ?? s.currentMilestoneId;
+    let completedSlices: number | null = null;
+    let totalSlices: number | null = null;
+    if (completionMilestoneId && isDbAvailable()) {
+      try {
+        const slices = getMilestoneSlices(completionMilestoneId);
+        completedSlices = slices.filter(slice => isClosedStatus(slice.status)).length;
+        totalSlices = slices.length;
+      } catch (err) {
+        logWarning("dashboard", `completion slice stats lookup failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
     // ── Step 6: DB cleanup ──
     if (isDbAvailable()) {
       try {
@@ -1344,12 +1357,12 @@ export async function stopAuto(
     // mergeAndExit restores process.cwd(), but AgentSession has already captured
     // its own cwd for tools and system prompt; refresh it before returning to the
     // user so follow-up commands do not target a removed milestone worktree.
-    if (!preserveCompletionSurface && s.originalBasePath && ctx && s.cmdCtx) {
-      const result = await rerootCommandSession(s.cmdCtx, s.basePath);
+    if (s.originalBasePath && ctx && s.cmdCtx) {
+      const result = await rerootCommandSession(s.cmdCtx, s.originalBasePath);
       if (result.status === "cancelled") {
-        logWarning("engine", "post-stop session re-root was cancelled", { file: "auto.ts", basePath: s.basePath });
+        logWarning("engine", "post-stop session re-root was cancelled", { file: "auto.ts", basePath: s.originalBasePath });
       } else if (result.status === "failed") {
-        logWarning("engine", `post-stop session re-root failed: ${result.error ?? "unknown"}`, { file: "auto.ts", basePath: s.basePath });
+        logWarning("engine", `post-stop session re-root failed: ${result.error ?? "unknown"}`, { file: "auto.ts", basePath: s.originalBasePath });
       }
     }
 
@@ -1392,19 +1405,8 @@ export async function stopAuto(
         logWarning("dashboard", `completion stats lookup failed: ${err instanceof Error ? err.message : String(err)}`);
       }
       const contextUsage = s.cmdCtx?.getContextUsage?.();
-      const milestoneId = options.completionWidget.milestoneId ?? s.currentMilestoneId;
+      const milestoneId = completionMilestoneId;
       const rollup = loadMilestoneCompletionRollup(s.originalBasePath || s.basePath, milestoneId);
-      let completedSlices: number | null = null;
-      let totalSlices: number | null = null;
-      if (milestoneId && isDbAvailable()) {
-        try {
-          const slices = getMilestoneSlices(milestoneId);
-          completedSlices = slices.filter(slice => isClosedStatus(slice.status)).length;
-          totalSlices = slices.length;
-        } catch (err) {
-          logWarning("dashboard", `completion slice stats lookup failed: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      }
       setCompletionProgressWidget(ctx, {
         milestoneId,
         milestoneTitle: options.completionWidget.milestoneTitle ?? rollup.milestoneTitle,

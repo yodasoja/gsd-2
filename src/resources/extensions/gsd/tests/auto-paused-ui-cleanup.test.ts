@@ -8,6 +8,7 @@ import { join } from "node:path";
 
 import { cleanupAfterLoopExit, rerootCommandSession, stopAuto } from "../auto.ts";
 import { autoSession } from "../auto-runtime-state.ts";
+import { closeDatabase, insertMilestone, insertSlice, openDatabase } from "../gsd-db.ts";
 
 test("cleanupAfterLoopExit preserves paused auto badge after provider pause", async () => {
   const base = mkdtempSync(join(tmpdir(), "gsd-paused-cleanup-"));
@@ -84,11 +85,11 @@ test("rerootCommandSession refreshes command workspace to project root", async (
   assert.deepEqual(calls, ["/project/root"]);
 });
 
-test("stopAuto completion closeout preserves final widget and skips fresh session", async () => {
+test("stopAuto completion closeout reroots session and preserves final widget", async () => {
   const base = mkdtempSync(join(tmpdir(), "gsd-completion-stop-"));
   const previousCwd = process.cwd();
   const widgetCalls: Array<[string, unknown]> = [];
-  let newSessionCalls = 0;
+  const newSessionWorkspaces: string[] = [];
   const milestoneDir = join(base, ".gsd", "milestones", "M003");
   mkdirSync(milestoneDir, { recursive: true });
   writeFileSync(join(milestoneDir, "M003-SUMMARY.md"), [
@@ -131,15 +132,22 @@ test("stopAuto completion closeout preserves final widget and skips fresh sessio
   ].join("\n"), "utf-8");
 
   autoSession.reset();
+  openDatabase(join(base, "gsd-test.db"));
+  insertMilestone({ id: "M003", title: "Budget tracking", status: "complete" });
+  insertSlice({ id: "S01", milestoneId: "M003", title: "Complete slice", status: "complete", sequence: 1 });
+  insertSlice({ id: "S02", milestoneId: "M003", title: "Done slice", status: "done", sequence: 2 });
+  insertSlice({ id: "S03", milestoneId: "M003", title: "Pending slice", status: "active", sequence: 3 });
+
   autoSession.active = true;
   autoSession.paused = false;
-  autoSession.basePath = base;
+  autoSession.basePath = join(base, ".gsd", "worktrees", "M003");
   autoSession.originalBasePath = base;
   autoSession.currentMilestoneId = "M003";
   autoSession.autoStartTime = Date.now() - 60_000;
   autoSession.cmdCtx = {
-    newSession: async () => {
-      newSessionCalls++;
+    newSession: async ({ workspaceRoot }: { workspaceRoot: string }) => {
+      newSessionWorkspaces.push(workspaceRoot);
+      widgetCalls.push(["gsd-progress", undefined]);
       return { cancelled: false };
     },
     sessionManager: {
@@ -181,17 +189,14 @@ test("stopAuto completion closeout preserves final widget and skips fresh sessio
       },
     );
 
-    assert.equal(newSessionCalls, 0, "completion stop must not open a fresh command session");
-    assert.equal(
-      widgetCalls.some(([key, value]) => key === "gsd-progress" && value === undefined),
-      false,
-      "completion stop must not clear the final progress widget",
-    );
+    assert.deepEqual(newSessionWorkspaces, [base], "completion stop must reroot command session to original project root");
     assert.ok(
       widgetCalls.some(([key, value]) => key === "gsd-progress" && typeof value === "function"),
       "completion stop must install a final progress widget",
     );
-    const factory = widgetCalls.find(([key, value]) => key === "gsd-progress" && typeof value === "function")?.[1] as any;
+    const lastProgressWidget = widgetCalls.filter(([key]) => key === "gsd-progress").at(-1);
+    assert.equal(typeof lastProgressWidget?.[1], "function", "completion stop must leave the final progress widget installed after reroot");
+    const factory = lastProgressWidget?.[1] as any;
     const component = factory(
       { requestRender() {} },
       { fg: (_color: string, text: string) => text, bold: (text: string) => text },
@@ -203,8 +208,10 @@ test("stopAuto completion closeout preserves final widget and skips fresh sessio
     assert.match(output, /Verification/);
     assert.match(output, /Files: src\/resources\/extensions\/gsd\/auto-dashboard\.ts/);
     assert.match(output, /Lessons: Milestone endings need report output/);
+    assert.match(output, /2\/3 slices/);
     assert.doesNotMatch(output, /COMPLETE-MILESTONE/);
   } finally {
+    try { closeDatabase(); } catch { /* noop */ }
     autoSession.reset();
     process.chdir(previousCwd);
     rmSync(base, { recursive: true, force: true });
