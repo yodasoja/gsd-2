@@ -302,8 +302,8 @@ Agent lifecycle events carry optional correlation metadata when the current prov
 
 | Field | Type | Events | Description |
 |-------|------|--------|-------------|
-| `sessionId` | `string` | `agent_start`, `agent_end`, `stop`, `turn_start`, `turn_end`, `message_start`, `message_update`, `message_end` | Current session identifier. Treat as optional for compatibility with older emitters and synthetic events. |
-| `turnId` | `string` | `agent_start`, `agent_end`, `stop`, `turn_start`, `turn_end`, `message_start`, `message_update`, `message_end` | Correlates events emitted for the same agent turn. Treat as optional. |
+| `sessionId` | `string` | `agent_start`, `agent_end`, `stop`, `turn_start`, `turn_end`, `message_start`, `message_update`, `message_end`, `tool_execution_start`, `tool_execution_update`, `tool_execution_end` | Current session identifier. Treat as optional for compatibility with older emitters and synthetic events. |
+| `turnId` | `string` | `agent_start`, `agent_end`, `stop`, `turn_start`, `turn_end`, `message_start`, `message_update`, `message_end`, `tool_execution_start`, `tool_execution_update`, `tool_execution_end` | Correlates events emitted for the same agent turn. Treat as optional. |
 | `abortOrigin` | `"session-transition" \| "user" \| "timeout" \| "unknown"` | `agent_end`, `stop` | Present when the agent loop ended because an abort was observed. |
 
 `abortOrigin` lets consumers distinguish user-visible cancellation from internal control flow:
@@ -366,9 +366,9 @@ Agent lifecycle events carry optional correlation metadata when the current prov
 |-------|------|-------------|-------------|
 | `tool_call` | `ToolCallEvent` | `ToolCallEventResult` | Before a tool executes. Return `{ block: true, reason? }` to block. |
 | `tool_result` | `ToolResultEvent` | `ToolResultEventResult` | After a tool executes. Can modify `content`, `details`, or `isError`. |
-| `tool_execution_start` | `ToolExecutionStartEvent` | — | Tool started executing |
-| `tool_execution_update` | `ToolExecutionUpdateEvent` | — | Tool streaming/partial output |
-| `tool_execution_end` | `ToolExecutionEndEvent` | — | Tool finished executing |
+| `tool_execution_start` | `ToolExecutionStartEvent` | — | Tool started executing. May include `sessionId` and `turnId`. |
+| `tool_execution_update` | `ToolExecutionUpdateEvent` | — | Tool streaming/partial output. May include `sessionId` and `turnId`. |
+| `tool_execution_end` | `ToolExecutionEndEvent` | — | Tool finished executing. May include `sessionId` and `turnId`. |
 
 `ToolCallEvent` is a discriminated union by `toolName`. Use `isToolCallEventType()` and `isToolResultEventType()` type guards for narrowing:
 
