@@ -158,7 +158,7 @@ function makeDeps(overrides?: Partial<LegacyTestDeps>): LegacyTestDeps & { calls
     } as unknown as LegacyTestDeps["GitServiceImpl"],
     loadEffectiveGSDPreferences: () => ({ preferences: { git: {} } }),
     invalidateAllCaches: () => { calls.push({ fn: "invalidateAllCaches", args: [] }); },
-    captureIntegrationBranch: (_basePath: string, _mid: string) => {},
+    captureIntegrationBranch: (_basePath: string, _mid: string | undefined) => {},
     enterBranchModeForMilestone: (_basePath: string, _milestoneId: string) => {},
     worktreeProjection: new WorktreeStateProjection(),
     ...overrides,

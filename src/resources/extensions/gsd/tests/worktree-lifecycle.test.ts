@@ -10,6 +10,7 @@ import {
   type WorktreeLifecycleDeps,
   type NotifyCtx,
 } from "../worktree-lifecycle.js";
+import { WorktreeStateProjection } from "../worktree-state-projection.js";
 import { AutoSession } from "../auto/session.js";
 import { openDatabase, closeDatabase, insertMilestone } from "../gsd-db.js";
 import { registerAutoWorker } from "../db/auto-workers.js";
@@ -74,6 +75,18 @@ function makeDeps(
       calls.push({ fn: "loadEffectiveGSDPreferences", args: [] });
       return { preferences: { git: {} } };
     },
+    // Slice 7 widened WorktreeLifecycleDeps with merge/exit-side fields.
+    // These tests focus on enter; merge-side helpers are no-op stubs.
+    worktreeProjection: new WorktreeStateProjection(),
+    isInAutoWorktree: () => false,
+    autoCommitCurrentBranch: () => {},
+    autoWorktreeBranch: (mid: string) => `milestone/${mid}`,
+    teardownAutoWorktree: () => {},
+    mergeMilestoneToMain: () => ({ pushed: false, codeFilesChanged: true }),
+    getCurrentBranch: () => "main",
+    checkoutBranch: () => {},
+    resolveMilestoneFile: () => null,
+    readFileSync: () => "",
     ...overrides,
   };
   return deps;

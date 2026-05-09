@@ -23,6 +23,7 @@ import { runDispatch } from "../auto/phases.js";
 import { detectStuck } from "../auto/detect-stuck.js";
 import type { UnitResult, AgentEndEvent } from "../auto/types.js";
 import type { LoopDeps } from "../auto/loop-deps.js";
+import { WorktreeStateProjection } from "../worktree-state-projection.js";
 import { ModelPolicyDispatchBlockedError } from "../auto-model-selection.js";
 import type { SessionLockStatus } from "../session-lock.js";
 
@@ -668,7 +669,6 @@ function makeMockDeps(
       preferences: { uok: { plan_v2: { enabled: false } } },
     }),
     preDispatchHealthGate: async () => ({ proceed: true, fixesApplied: [] }),
-    syncProjectRootToWorktree: () => {},
     checkResourcesStale: () => null,
     validateSessionLock: () => ({ valid: true } as SessionLockStatus),
     updateSessionLock: () => {
@@ -740,6 +740,7 @@ function makeMockDeps(
         codeFilesChanged: false,
       }),
     } as any,
+    worktreeProjection: new WorktreeStateProjection(),
     postUnitPreVerification: async () => {
       callLog.push("postUnitPreVerification");
       return "continue" as const;
