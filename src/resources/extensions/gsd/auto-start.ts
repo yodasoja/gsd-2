@@ -1121,11 +1121,23 @@ export async function bootstrapAutoSession(
       const enterResult = buildLifecycle().enterMilestone(s.currentMilestoneId, {
         notify: ctx.ui.notify.bind(ctx.ui),
       });
-      if (!enterResult.ok && enterResult.reason === "lease-conflict") {
-        ctx.ui.notify(
-          `Cannot enter milestone ${s.currentMilestoneId}: lease is held by another worker.`,
-          "error",
-        );
+      if (!enterResult.ok) {
+        if (enterResult.reason === "lease-conflict") {
+          ctx.ui.notify(
+            `Cannot enter milestone ${s.currentMilestoneId}: lease is held by another worker.`,
+            "error",
+          );
+        } else if (enterResult.reason === "creation-failed") {
+          ctx.ui.notify(
+            `Cannot enter milestone ${s.currentMilestoneId}: worktree/branch creation failed. Isolation is degraded.`,
+            "error",
+          );
+        } else if (enterResult.reason === "invalid-milestone-id") {
+          ctx.ui.notify(
+            `Cannot enter milestone ${s.currentMilestoneId}: milestone id is invalid.`,
+            "error",
+          );
+        }
         return releaseLockAndReturn();
       }
       if (s.basePath !== base) {

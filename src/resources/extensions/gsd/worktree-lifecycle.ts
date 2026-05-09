@@ -76,13 +76,8 @@ export type EnterResult =
 
 // ─── Validation ──────────────────────────────────────────────────────────
 
-function validateMilestoneId(milestoneId: string): Error | null {
-  if (/[\/\\]|\.\./.test(milestoneId)) {
-    return new Error(
-      `Invalid milestoneId: ${milestoneId} — contains path separators or traversal`,
-    );
-  }
-  return null;
+function isValidMilestoneId(milestoneId: string): boolean {
+  return !/[\/\\]|\.\./.test(milestoneId);
 }
 
 // ─── Implementation core ─────────────────────────────────────────────────
@@ -108,8 +103,7 @@ export function _enterMilestoneCore(
   milestoneId: string,
   ctx: NotifyCtx,
 ): EnterResult {
-  const validationError = validateMilestoneId(milestoneId);
-  if (validationError) {
+  if (!isValidMilestoneId(milestoneId)) {
     debugLog("WorktreeLifecycle", {
       action: "enterMilestone",
       milestoneId,
@@ -118,7 +112,9 @@ export function _enterMilestoneCore(
     return {
       ok: false,
       reason: "invalid-milestone-id",
-      cause: validationError,
+      cause: new Error(
+        `Invalid milestoneId: ${milestoneId} — contains path separators or traversal`,
+      ),
     };
   }
 
