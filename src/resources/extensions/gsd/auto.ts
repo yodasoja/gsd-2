@@ -1313,10 +1313,12 @@ export async function stopAuto(
       }
     }
 
+    // Pre-compute completion widget slice counts while the DB is still open.
+    // Step 8 runs after closeDatabase(), so DB-backed slice lookups must happen here.
     const completionMilestoneId = options.completionWidget?.milestoneId ?? s.currentMilestoneId;
     let completedSlices: number | null = null;
     let totalSlices: number | null = null;
-    if (completionMilestoneId && isDbAvailable()) {
+    if (preserveCompletionSurface && options.completionWidget && completionMilestoneId && isDbAvailable()) {
       try {
         const slices = getMilestoneSlices(completionMilestoneId);
         completedSlices = slices.filter(slice => isClosedStatus(slice.status)).length;
