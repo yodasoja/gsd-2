@@ -242,7 +242,8 @@ import { createAutoOrchestrator } from "./auto/orchestrator.js";
 import type { AutoOrchestrationModule, AutoOrchestratorDeps } from "./auto/contracts.js";
 import { reconcileBeforeDispatch } from "./state-reconciliation.js";
 import { compileUnitToolContract } from "./tool-contract.js";
-import { prepareUnitRoot } from "./worktree-safety.js";
+import { createWorktreeSafetyModule } from "./worktree-safety.js";
+import { resolveManifest } from "./unit-context-manifest.js";
 import { classifyFailure } from "./recovery-classification.js";
 // Slice-level parallelism (#2340)
 import { getEligibleSlices } from "./slice-parallel-eligibility.js";
@@ -1693,9 +1694,34 @@ export function createWiredAutoOrchestrationModule(
     },
     worktree: {
       async prepareForUnit(unitType, unitId) {
-        const result = prepareUnitRoot(unitType, unitId, { basePath: dispatchBasePath });
-        if (!result.ok) return { ok: false, reason: result.detail };
-        return { ok: true, reason: result.reason };
+        const manifest = resolveManifest(unitType);
+        if (!manifest) {
+          return {
+            ok: false,
+            reason: `No Unit manifest is registered for ${unitType}`,
+          };
+        }
+        const writeScope =
+          manifest.tools.mode === "all" || manifest.tools.mode === "docs"
+            ? "source-writing"
+            : "planning-only";
+        const safety = createWorktreeSafetyModule();
+        const snapshot = await deriveState(dispatchBasePath);
+        const milestoneId = snapshot.activeMilestone?.id ?? null;
+        const expectedBranch = milestoneId ? autoWorktreeBranch(milestoneId) : null;
+        const result = safety.validateUnitRoot({
+          unitType,
+          unitId,
+          writeScope,
+          projectRoot: runtimeBasePath,
+          unitRoot: dispatchBasePath,
+          milestoneId,
+          expectedBranch,
+        });
+        if (!result.ok) {
+          return { ok: false, reason: `${result.kind}: ${result.reason}` };
+        }
+        return { ok: true, reason: result.kind };
       },
       async syncAfterUnit() {},
       async cleanupOnStop() {},
