@@ -2,6 +2,7 @@
 // File Purpose: ADR-017 drift handler registry. Single source of truth for
 // the catalog. Tests can override per-call via ReconciliationDeps.registry.
 
+import { completionTimestampHandler } from "./drift/completion.js";
 import { mergeStateHandler } from "./drift/merge-state.js";
 import { unregisteredMilestoneHandler } from "./drift/project-md.js";
 import { roadmapDivergenceHandler } from "./drift/roadmap.js";
@@ -22,4 +23,5 @@ export const DRIFT_REGISTRY: ReadonlyArray<DriftHandler<any>> = [
   staleWorkerHandler,
   unregisteredMilestoneHandler,
   roadmapDivergenceHandler,
+  completionTimestampHandler,
 ];

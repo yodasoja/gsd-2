@@ -7,8 +7,6 @@ import type { GSDState } from "../types.js";
 /**
  * Discriminated union over drift kinds the State Reconciliation Module
  * recognizes. Each variant carries the identifiers its matching repair needs.
- *
- * Subsequent ADR-017 issues add variants: missing-completion-timestamp.
  */
 export type DriftRecord =
   | { kind: "stale-sketch-flag"; mid: string; sid: string }
@@ -16,7 +14,12 @@ export type DriftRecord =
   | { kind: "stale-render"; renderPath: string; reason: string }
   | { kind: "stale-worker"; lockPath: string; pid: number }
   | { kind: "unregistered-milestone"; milestoneId: string }
-  | { kind: "roadmap-divergence"; milestoneId: string; sliceId?: string };
+  | { kind: "roadmap-divergence"; milestoneId: string; sliceId?: string }
+  | {
+      kind: "missing-completion-timestamp";
+      entity: "task" | "slice" | "milestone";
+      ids: string[];
+    };
 
 /**
  * Context threaded to detector and repair functions. Keeps handlers from

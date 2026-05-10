@@ -1,10 +1,10 @@
 // Project/App: GSD-2
 // File Purpose: ADR-017 contract tests for drift-driven State Reconciliation.
 // Covers sketch-flag (#5700), merge-state (#5701), stale-render (#5702),
-// stale-worker (#5703), unregistered-milestone (#5704), and roadmap-
-// divergence (#5705) drift end-to-end, plus the repair-throw and
-// persistent-drift error paths and Recovery Classification mapping for
-// ReconciliationFailedError.
+// stale-worker (#5703), unregistered-milestone (#5704), roadmap-divergence
+// (#5705), and missing-completion-timestamp (#5706) drift end-to-end, plus
+// the repair-throw and persistent-drift error paths and Recovery
+// Classification mapping for ReconciliationFailedError.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -22,7 +22,10 @@ import {
   insertTask,
   getMilestone,
   getSlice,
+  getSliceTasks,
   setSliceSummaryMd,
+  updateSliceStatus,
+  updateTaskStatus,
 } from "../gsd-db.ts";
 import { clearParseCache } from "../files.ts";
 import { clearPathCache } from "../paths.ts";
@@ -754,6 +757,87 @@ test("ADR-017 (#5705): in-sync ROADMAP and DB → no roadmap-divergence drift", 
     false,
     "no roadmap-divergence drift should be reported when DB matches markdown",
   );
+});
+
+// ─── #5706: missing-completion-timestamp drift ──────────────────────────────
+
+test("ADR-017 (#5706): task with SUMMARY but null completed_at → backfilled", async (t) => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-adr017-completion-task-"));
+  const tasksDir = join(base, ".gsd", "milestones", "M001", "slices", "S01", "tasks");
+  mkdirSync(tasksDir, { recursive: true });
+  t.after(() => {
+    try { closeDatabase(); } catch { /* noop */ }
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  insertMilestone({ id: "M001", title: "Test", status: "active" });
+  insertSlice({ id: "S01", milestoneId: "M001", title: "Slice", status: "pending", risk: "low", depends: [], demo: "", sequence: 1 });
+  insertTask({ id: "T01", sliceId: "S01", milestoneId: "M001", title: "Task", status: "pending" });
+
+  // Move T01 to complete WITHOUT setting completed_at (simulating drift after
+  // an external recovery path or a partial state migration).
+  updateTaskStatus("M001", "S01", "T01", "complete", undefined);
+  // SUMMARY.md attests to completion on disk.
+  writeFileSync(join(tasksDir, "T01-SUMMARY.md"), "# T01 Summary\n");
+
+  const taskBefore = getSliceTasks("M001", "S01").find((t) => t.id === "T01");
+  assert.equal(taskBefore?.status, "complete");
+  assert.equal(taskBefore?.completed_at, null, "pre: completed_at is null");
+
+  const result = await reconcileBeforeDispatch(base, {
+    invalidateStateCache: () => {},
+    deriveState: async () => makeState({ activeMilestone: { id: "M001", title: "Test" } }),
+  });
+
+  assert.equal(result.ok, true);
+  const taskAfter = getSliceTasks("M001", "S01").find((t) => t.id === "T01");
+  assert.ok(taskAfter?.completed_at, "post: completed_at populated");
+  assert.equal(typeof taskAfter?.completed_at, "string");
+  const drift = result.repaired.find((d) => d.kind === "missing-completion-timestamp");
+  assert.ok(drift, "drift recorded");
+  if (drift?.kind === "missing-completion-timestamp") {
+    assert.equal(drift.entity, "task");
+    assert.deepEqual(drift.ids, ["M001/S01/T01"]);
+  }
+});
+
+test("ADR-017 (#5706): repair is idempotent — re-running preserves the timestamp", async (t) => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-adr017-completion-idempotent-"));
+  const sliceDir = join(base, ".gsd", "milestones", "M001", "slices", "S01");
+  mkdirSync(sliceDir, { recursive: true });
+  t.after(() => {
+    try { closeDatabase(); } catch { /* noop */ }
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  insertMilestone({ id: "M001", title: "Test", status: "active" });
+  insertSlice({ id: "S01", milestoneId: "M001", title: "Slice", status: "pending", risk: "low", depends: [], demo: "", sequence: 1 });
+  updateSliceStatus("M001", "S01", "complete", undefined);
+  writeFileSync(join(sliceDir, "S01-SUMMARY.md"), "# S01 Summary\n");
+
+  const firstResult = await reconcileBeforeDispatch(base, {
+    invalidateStateCache: () => {},
+    deriveState: async () => makeState({ activeMilestone: { id: "M001", title: "Test" } }),
+  });
+  assert.equal(firstResult.ok, true);
+  const tsAfterFirst = getSlice("M001", "S01")?.completed_at;
+  assert.ok(tsAfterFirst, "first pass: completed_at populated");
+
+  // Second pass — drift is already cleared, no record should appear, and
+  // the existing timestamp is untouched.
+  const secondResult = await reconcileBeforeDispatch(base, {
+    invalidateStateCache: () => {},
+    deriveState: async () => makeState({ activeMilestone: { id: "M001", title: "Test" } }),
+  });
+  assert.equal(secondResult.ok, true);
+  assert.equal(
+    secondResult.repaired.some((d) => d.kind === "missing-completion-timestamp"),
+    false,
+    "second pass: no drift detected after first repair",
+  );
+  assert.equal(getSlice("M001", "S01")?.completed_at, tsAfterFirst, "timestamp unchanged");
 });
 
 // ─── Lifecycle and classification ────────────────────────────────────────────
