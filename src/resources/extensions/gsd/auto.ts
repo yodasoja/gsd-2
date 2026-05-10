@@ -1024,7 +1024,11 @@ export async function cleanupAfterLoopExit(ctx: ExtensionContext): Promise<void>
   // too. The chdir stays at the call site since `restoreToProjectRoot`
   // is a pure session-state mutation.
   if (s.originalBasePath) {
-    buildLifecycle().restoreToProjectRoot();
+    try {
+      buildLifecycle().restoreToProjectRoot();
+    } catch (err) {
+      logWarning("engine", `basePath restore failed: ${err instanceof Error ? err.message : String(err)}`, { file: "auto.ts" });
+    }
     try {
       process.chdir(s.basePath);
     } catch (err) {

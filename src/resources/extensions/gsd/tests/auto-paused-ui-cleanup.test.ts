@@ -2,13 +2,14 @@
 // File Purpose: Behavior tests for auto-loop cleanup after paused provider exits.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { cleanupAfterLoopExit, rerootCommandSession, stopAuto } from "../auto.ts";
 import { autoSession } from "../auto-runtime-state.ts";
 import { closeDatabase, insertMilestone, insertSlice, openDatabase } from "../gsd-db.ts";
+import { WorktreeLifecycle } from "../worktree-lifecycle.ts";
 
 test("cleanupAfterLoopExit preserves paused auto badge after provider pause", async () => {
   const base = mkdtempSync(join(tmpdir(), "gsd-paused-cleanup-"));
@@ -69,6 +70,74 @@ test("cleanupAfterLoopExit clears status and widget when auto is not paused", as
   }
 });
 
+test("cleanupAfterLoopExit restores project root through lifecycle and preserves chdir", async (t) => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-cleanup-lifecycle-"));
+  const worktree = join(base, ".gsd", "worktrees", "M001");
+  const previousCwd = process.cwd();
+  let restoreCalls = 0;
+  const originalRestore = WorktreeLifecycle.prototype.restoreToProjectRoot;
+  t.mock.method(WorktreeLifecycle.prototype, "restoreToProjectRoot", function (this: WorktreeLifecycle) {
+    restoreCalls += 1;
+    return originalRestore.call(this);
+  });
+
+  mkdirSync(worktree, { recursive: true });
+  autoSession.reset();
+  autoSession.active = true;
+  autoSession.basePath = worktree;
+  autoSession.originalBasePath = base;
+
+  try {
+    await cleanupAfterLoopExit({
+      ui: {
+        setStatus: () => {},
+        setWidget: () => {},
+        notify: () => {},
+      },
+    } as any);
+
+    assert.equal(restoreCalls, 1);
+    assert.equal(autoSession.basePath, base);
+    assert.equal(realpathSync(process.cwd()), realpathSync(base));
+  } finally {
+    autoSession.reset();
+    process.chdir(previousCwd);
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("cleanupAfterLoopExit still attempts chdir when lifecycle restore throws", async (t) => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-cleanup-restore-throw-"));
+  const worktree = join(base, ".gsd", "worktrees", "M001");
+  const previousCwd = process.cwd();
+  t.mock.method(WorktreeLifecycle.prototype, "restoreToProjectRoot", () => {
+    throw new Error("restore failed");
+  });
+
+  mkdirSync(worktree, { recursive: true });
+  autoSession.reset();
+  autoSession.active = true;
+  autoSession.basePath = worktree;
+  autoSession.originalBasePath = base;
+
+  try {
+    await cleanupAfterLoopExit({
+      ui: {
+        setStatus: () => {},
+        setWidget: () => {},
+        notify: () => {},
+      },
+    } as any);
+
+    assert.equal(autoSession.basePath, worktree);
+    assert.equal(realpathSync(process.cwd()), realpathSync(worktree));
+  } finally {
+    autoSession.reset();
+    process.chdir(previousCwd);
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test("rerootCommandSession refreshes command workspace to project root", async () => {
   const calls: string[] = [];
   const result = await rerootCommandSession(
@@ -85,11 +154,17 @@ test("rerootCommandSession refreshes command workspace to project root", async (
   assert.deepEqual(calls, ["/project/root"]);
 });
 
-test("stopAuto completion closeout reroots session and preserves final widget", async () => {
+test("stopAuto completion closeout reroots session, restores cwd, and preserves final widget", async (t) => {
   const base = mkdtempSync(join(tmpdir(), "gsd-completion-stop-"));
   const previousCwd = process.cwd();
   const widgetCalls: Array<[string, unknown]> = [];
   const newSessionWorkspaces: string[] = [];
+  let restoreCalls = 0;
+  const originalRestore = WorktreeLifecycle.prototype.restoreToProjectRoot;
+  t.mock.method(WorktreeLifecycle.prototype, "restoreToProjectRoot", function (this: WorktreeLifecycle) {
+    restoreCalls += 1;
+    return originalRestore.call(this);
+  });
   const milestoneDir = join(base, ".gsd", "milestones", "M003");
   mkdirSync(milestoneDir, { recursive: true });
   writeFileSync(join(milestoneDir, "M003-SUMMARY.md"), [
@@ -190,6 +265,8 @@ test("stopAuto completion closeout reroots session and preserves final widget", 
     );
 
     assert.deepEqual(newSessionWorkspaces, [base], "completion stop must reroot command session to original project root");
+    assert.equal(restoreCalls, 1, "completion stop must restore project root through lifecycle");
+    assert.equal(realpathSync(process.cwd()), realpathSync(base), "completion stop must chdir back to project root");
     assert.ok(
       widgetCalls.some(([key, value]) => key === "gsd-progress" && typeof value === "function"),
       "completion stop must install a final progress widget",
