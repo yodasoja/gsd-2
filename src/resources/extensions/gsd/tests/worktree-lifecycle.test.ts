@@ -26,6 +26,10 @@ interface CallLog {
   args: unknown[];
 }
 
+// ADR-016 phase 2 / C2 retired the worktree-manager fields from
+// WorktreeLifecycleDeps. Tests still pass them via the structural-typing
+// escape hatch (Lifecycle ignores extras) and stub them out as no-ops in
+// makeDeps so existing fixtures keep type-checking.
 type LegacyTestDeps = WorktreeLifecycleDeps & {
   getAutoWorktreePath?: (
     basePath: string,
@@ -38,6 +42,9 @@ type LegacyTestDeps = WorktreeLifecycleDeps & {
     milestoneId: string,
     opts?: { preserveBranch?: boolean },
   ) => void;
+  enterAutoWorktree?: (basePath: string, milestoneId: string) => string;
+  createAutoWorktree?: (basePath: string, milestoneId: string) => string;
+  enterBranchModeForMilestone?: (basePath: string, milestoneId: string) => void;
   autoCommitCurrentBranch?: (
     basePath: string,
     reasonOrUnitType: string,

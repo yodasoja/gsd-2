@@ -256,6 +256,20 @@ type WorktreeLifecyclePrimitiveOverrides = {
     basePath: string,
     milestoneId: string,
   ) => string | null;
+  // ADR-016 phase 2 / C2-inlined worktree-manager primitives. Tests still
+  // stub these via the structural-typing escape hatch on `WorktreeLifecycleDeps`,
+  // so the call sites below check for an override first and fall back to the
+  // imported direct primitive.
+  isInAutoWorktree?: (basePath: string) => boolean;
+  autoWorktreeBranch?: (milestoneId: string) => string;
+  teardownAutoWorktree?: (
+    basePath: string,
+    milestoneId: string,
+    opts?: { preserveBranch?: boolean },
+  ) => void;
+  createAutoWorktree?: (basePath: string, milestoneId: string) => string;
+  enterAutoWorktree?: (basePath: string, milestoneId: string) => string;
+  enterBranchModeForMilestone?: (basePath: string, milestoneId: string) => void;
 };
 
 function primitiveOverrides(
@@ -304,6 +318,70 @@ function autoCommitLifecycleBranch(
     unitType,
     unitId,
   ) ?? autoCommitCurrentBranch(basePath, unitType, unitId);
+}
+
+// ADR-016 phase 2 / C2-inlined worktree-manager primitives — helpers that
+// honour the structural-typing override pattern so legacy test fixtures keep
+// working without rewriting them onto real-git fixtures.
+function lifecycleIsInAutoWorktree(
+  deps: WorktreeLifecycleDeps,
+  basePath: string,
+): boolean {
+  return primitiveOverrides(deps).isInAutoWorktree?.(basePath) ??
+    isInAutoWorktree(basePath);
+}
+
+function lifecycleAutoWorktreeBranch(
+  deps: WorktreeLifecycleDeps,
+  milestoneId: string,
+): string {
+  return primitiveOverrides(deps).autoWorktreeBranch?.(milestoneId) ??
+    autoWorktreeBranch(milestoneId);
+}
+
+function lifecycleTeardownAutoWorktree(
+  deps: WorktreeLifecycleDeps,
+  basePath: string,
+  milestoneId: string,
+  opts?: { preserveBranch?: boolean },
+): void {
+  const override = primitiveOverrides(deps).teardownAutoWorktree;
+  if (override) {
+    override(basePath, milestoneId, opts);
+    return;
+  }
+  teardownAutoWorktree(basePath, milestoneId, opts);
+}
+
+function lifecycleCreateAutoWorktree(
+  deps: WorktreeLifecycleDeps,
+  basePath: string,
+  milestoneId: string,
+): string {
+  return primitiveOverrides(deps).createAutoWorktree?.(basePath, milestoneId) ??
+    createAutoWorktree(basePath, milestoneId);
+}
+
+function lifecycleEnterAutoWorktree(
+  deps: WorktreeLifecycleDeps,
+  basePath: string,
+  milestoneId: string,
+): string {
+  return primitiveOverrides(deps).enterAutoWorktree?.(basePath, milestoneId) ??
+    enterAutoWorktree(basePath, milestoneId);
+}
+
+function lifecycleEnterBranchMode(
+  deps: WorktreeLifecycleDeps,
+  basePath: string,
+  milestoneId: string,
+): void {
+  const override = primitiveOverrides(deps).enterBranchModeForMilestone;
+  if (override) {
+    override(basePath, milestoneId);
+    return;
+  }
+  enterBranchModeForMilestone(basePath, milestoneId);
 }
 
 /**
@@ -508,7 +586,7 @@ export function _enterMilestoneCore(
   // ── Branch mode: create/checkout milestone branch, stay in project root ──
   if (mode === "branch") {
     try {
-      enterBranchModeForMilestone(basePath, milestoneId);
+      lifecycleEnterBranchMode(deps, basePath, milestoneId);
       // basePath does not change — no worktree, no chdir.
       // Rebuild GitService so the new HEAD is reflected, then flush any
       // path-keyed caches that may have been populated before the checkout.
@@ -549,13 +627,17 @@ export function _enterMilestoneCore(
 
   // ── Worktree mode ────────────────────────────────────────────────────────
   try {
-    const existingPath = getAutoWorktreePath(basePath, milestoneId);
+    const existingPath =
+      (primitiveOverrides(deps).getAutoWorktreePath ?? getAutoWorktreePath)(
+        basePath,
+        milestoneId,
+      );
     let wtPath: string;
 
     if (existingPath) {
-      wtPath = enterAutoWorktree(basePath, milestoneId);
+      wtPath = lifecycleEnterAutoWorktree(deps, basePath, milestoneId);
     } else {
-      wtPath = createAutoWorktree(basePath, milestoneId);
+      wtPath = lifecycleCreateAutoWorktree(deps, basePath, milestoneId);
     }
 
     s.basePath = wtPath;
@@ -756,7 +838,7 @@ function _mergeWorktreeModeImpl(
     if (!roadmapPath) {
       // No roadmap at either location — teardown but PRESERVE the branch
       // so commits are not orphaned (#1573).
-      teardownAutoWorktree(originalBasePath, milestoneId, {
+      lifecycleTeardownAutoWorktree(deps, originalBasePath, milestoneId, {
         preserveBranch: true,
       });
       notify(
@@ -784,7 +866,7 @@ function _mergeWorktreeModeImpl(
     // teardown here to ensure the worktree is properly cleaned up.
     // Idempotent — if already removed, teardownAutoWorktree no-ops.
     try {
-      teardownAutoWorktree(originalBasePath, milestoneId);
+      lifecycleTeardownAutoWorktree(deps, originalBasePath, milestoneId);
     } catch {
       // Best-effort — primary cleanup in mergeMilestoneToMain may have
       // already removed the worktree.
@@ -881,7 +963,7 @@ function _mergeBranchModeImpl(
   const { worktreeBasePath, milestoneId, notify } = mctx;
   try {
     const currentBranch = currentLifecycleBranch(deps, worktreeBasePath);
-    const milestoneBranch = autoWorktreeBranch(milestoneId);
+    const milestoneBranch = lifecycleAutoWorktreeBranch(deps, milestoneId);
 
     if (currentBranch !== milestoneBranch) {
       // #5538-followup: previous behaviour was to silently `return false`
@@ -1070,7 +1152,7 @@ export function mergeMilestoneStandalone(
   // regardless of the current isolation config. This prevents data loss
   // when the default isolation mode changes between versions.
   const inWorktree =
-    isInAutoWorktree(worktreeBasePath) && Boolean(originalBasePath);
+    lifecycleIsInAutoWorktree(deps, worktreeBasePath) && Boolean(originalBasePath);
 
   if (mode === "none" && !inWorktree) {
     debugLog("WorktreeLifecycle", {
@@ -1268,7 +1350,7 @@ export class WorktreeLifecycle {
     opts: { preserveBranch?: boolean },
   ): void {
     validateMilestoneId(milestoneId);
-    if (!isInAutoWorktree(this.s.basePath)) {
+    if (!lifecycleIsInAutoWorktree(this.deps, this.s.basePath)) {
       debugLog("WorktreeLifecycle", {
         action: "exitMilestone",
         milestoneId,
@@ -1294,7 +1376,7 @@ export class WorktreeLifecycle {
         error: err instanceof Error ? err.message : String(err),
       });
       ctx.notify(
-        `Auto-commit before exiting ${milestoneId} failed: ${err instanceof Error ? err.message : String(err)}. Branch ${autoWorktreeBranch(milestoneId)} is preserved for recovery.`,
+        `Auto-commit before exiting ${milestoneId} failed: ${err instanceof Error ? err.message : String(err)}. Branch ${lifecycleAutoWorktreeBranch(this.deps, milestoneId)} is preserved for recovery.`,
         "warning",
       );
     }
@@ -1311,7 +1393,7 @@ export class WorktreeLifecycle {
           error: err instanceof Error ? err.message : String(err),
         });
         ctx.notify(
-          `Could not leave milestone worktree before cleanup: ${err instanceof Error ? err.message : String(err)}. Branch ${autoWorktreeBranch(milestoneId)} is preserved for recovery.`,
+          `Could not leave milestone worktree before cleanup: ${err instanceof Error ? err.message : String(err)}. Branch ${lifecycleAutoWorktreeBranch(this.deps, milestoneId)} is preserved for recovery.`,
           "warning",
         );
       }
@@ -1319,7 +1401,7 @@ export class WorktreeLifecycle {
 
     let teardownFailed = false;
     try {
-      teardownAutoWorktree(this.s.originalBasePath, milestoneId, {
+      lifecycleTeardownAutoWorktree(this.deps, this.s.originalBasePath, milestoneId, {
         preserveBranch: opts.preserveBranch ?? false,
       });
     } catch (err) {
@@ -1331,7 +1413,7 @@ export class WorktreeLifecycle {
         error: err instanceof Error ? err.message : String(err),
       });
       ctx.notify(
-        `Worktree cleanup failed for ${milestoneId}: ${err instanceof Error ? err.message : String(err)}. Branch ${autoWorktreeBranch(milestoneId)} is preserved for recovery.`,
+        `Worktree cleanup failed for ${milestoneId}: ${err instanceof Error ? err.message : String(err)}. Branch ${lifecycleAutoWorktreeBranch(this.deps, milestoneId)} is preserved for recovery.`,
         "warning",
       );
     }
@@ -1519,7 +1601,7 @@ export class WorktreeLifecycle {
       this.s.originalBasePath,
     );
     try {
-      enterBranchModeForMilestone(basePath, milestoneId);
+      lifecycleEnterBranchMode(this.deps, basePath, milestoneId);
       rebuildGitService(this.s, this.deps);
       this.deps.invalidateAllCaches();
       this.s.isolationDegraded = true;
