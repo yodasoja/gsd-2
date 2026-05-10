@@ -11,7 +11,7 @@ import { execFileSync } from "node:child_process";
  * C1+C2+C3 inlined the worktree-manager + cache + preferences primitives —
  * tests can no longer stub them via deps.
  */
-function initGitRepoIn(base: string, isolation: "worktree" | "branch"): void {
+function initGitRepoIn(base: string, isolation: "worktree" | "branch" | "none"): void {
   const git = (args: string[]): void => {
     execFileSync("git", args, { cwd: base, stdio: "pipe" });
   };
@@ -202,9 +202,9 @@ describe("worktree journal events", () => {
   });
 
   test("enterMilestone emits worktree-skip when isolation disabled", () => {
+    initGitRepoIn(tmp, "none");
     const s = makeSession({ basePath: tmp, originalBasePath: tmp });
-    const deps = makeDeps({ shouldUseWorktreeIsolation: () => false, getIsolationMode: () => "none" });
-    new WorktreeLifecycle(s, deps).enterMilestone("M001", makeNotifyCtx());
+    new WorktreeLifecycle(s, makeDeps()).enterMilestone("M001", makeNotifyCtx());
 
     const entries = readJournalEntries(tmp);
     const skip = entries.find(e => e.eventType === "worktree-skip");
@@ -252,7 +252,7 @@ describe("worktree journal events", () => {
     assert.equal(start!.data?.mode, "worktree");
   });
 
-  test("exitMilestone returns real codeFilesChanged from merge", () => {
+  test("exitMilestone propagates codeFilesChanged from merge result", () => {
     initGitRepoIn(tmp, "worktree");
     execFileSync("git", ["checkout", "-b", "milestone/M001"], { cwd: tmp, stdio: "pipe" });
     execFileSync("git", ["checkout", "main"], { cwd: tmp, stdio: "pipe" });
