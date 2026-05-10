@@ -1,13 +1,13 @@
 // Project/App: GSD-2
 // File Purpose: ADR-017 contract tests for drift-driven State Reconciliation.
-// Covers sketch-flag drift (#5700) and merge-state drift (#5701) end-to-end,
-// plus the repair-throw and persistent-drift error paths, and Recovery
-// Classification mapping for ReconciliationFailedError.
+// Covers sketch-flag (#5700), merge-state (#5701), and stale-render (#5702)
+// drift end-to-end, plus the repair-throw and persistent-drift error paths,
+// and Recovery Classification mapping for ReconciliationFailedError.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -17,8 +17,14 @@ import {
   closeDatabase,
   insertMilestone,
   insertSlice,
+  insertTask,
   getSlice,
+  setSliceSummaryMd,
 } from "../gsd-db.ts";
+import { clearParseCache } from "../files.ts";
+import { clearPathCache } from "../paths.ts";
+import { detectStaleRenders } from "../markdown-renderer.ts";
+import { invalidateStateCache } from "../state.ts";
 import {
   reconcileBeforeDispatch,
   ReconciliationFailedError,
@@ -327,6 +333,133 @@ test("ADR-017 (#5701): no merge state → detector returns no drift", async (t) 
     false,
     "no merge drift should be reported when the repo is clean",
   );
+});
+
+// ─── #5702: stale-render drift ───────────────────────────────────────────────
+
+function clearRendererCaches(): void {
+  clearParseCache();
+  clearPathCache();
+  invalidateStateCache();
+}
+
+function makeStalePlanContent(sliceId: string, tasks: Array<{ id: string; title: string; done: boolean }>): string {
+  const lines: string[] = [];
+  lines.push(`# ${sliceId}: Test Slice`);
+  lines.push("");
+  lines.push("**Goal:** Test slice goal");
+  lines.push("**Demo:** Test demo");
+  lines.push("");
+  lines.push("## Must-Haves");
+  lines.push("");
+  lines.push("- Everything works");
+  lines.push("");
+  lines.push("## Tasks");
+  lines.push("");
+  for (const t of tasks) {
+    const checkbox = t.done ? "[x]" : "[ ]";
+    lines.push(`- ${checkbox} **${t.id}: ${t.title}** \`est:1h\``);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+function makeStaleRoadmapContent(slices: Array<{ id: string; title: string; done: boolean }>): string {
+  const lines: string[] = [];
+  lines.push("# M001 Roadmap");
+  lines.push("");
+  lines.push("**Vision:** Test milestone");
+  lines.push("");
+  lines.push("## Slices");
+  lines.push("");
+  for (const s of slices) {
+    const checkbox = s.done ? "[x]" : "[ ]";
+    lines.push(`- ${checkbox} **${s.id}: ${s.title}** \`risk:medium\` \`depends:[]\``);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+test("ADR-017 (#5702): stale-render drift detected and repaired end-to-end", async (t) => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-adr017-render-"));
+  const sliceDir = join(base, ".gsd", "milestones", "M001", "slices", "S01");
+  mkdirSync(join(sliceDir, "tasks"), { recursive: true });
+  t.after(() => {
+    try { closeDatabase(); } catch { /* noop */ }
+    rmTreeQuiet(base);
+  });
+
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  clearRendererCaches();
+  insertMilestone({ id: "M001", title: "Test", status: "active" });
+  insertSlice({ id: "S01", milestoneId: "M001", title: "Slice", status: "pending" });
+  insertTask({ id: "T01", sliceId: "S01", milestoneId: "M001", title: "First task", status: "done" });
+  insertTask({ id: "T02", sliceId: "S01", milestoneId: "M001", title: "Second task", status: "done" });
+
+  // Plan with both tasks unchecked — DB says done, file disagrees.
+  const planPath = join(sliceDir, "S01-PLAN.md");
+  writeFileSync(planPath, makeStalePlanContent("S01", [
+    { id: "T01", title: "First task", done: false },
+    { id: "T02", title: "Second task", done: false },
+  ]));
+  clearRendererCaches();
+
+  const result = await reconcileBeforeDispatch(base, {
+    invalidateStateCache: () => {},
+    deriveState: async () => makeState(),
+  });
+
+  assert.equal(result.ok, true);
+  const renderRepaired = result.repaired.find((d) => d.kind === "stale-render");
+  assert.ok(renderRepaired, "repaired list should include the stale-render drift");
+
+  const repairedContent = readFileSync(planPath, "utf-8");
+  assert.match(repairedContent, /\[x\][^\n]*T01:/, "T01 checkbox should be checked after repair");
+  assert.match(repairedContent, /\[x\][^\n]*T02:/, "T02 checkbox should be checked after repair");
+});
+
+test("ADR-017 (#5702): stale-render detector reason strings match repair contract", (t) => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-adr017-render-reasons-"));
+  const sliceDir = join(base, ".gsd", "milestones", "M001", "slices", "S01");
+  mkdirSync(join(sliceDir, "tasks"), { recursive: true });
+  t.after(() => {
+    try { closeDatabase(); } catch { /* noop */ }
+    rmTreeQuiet(base);
+  });
+
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  clearRendererCaches();
+  insertMilestone({ id: "M001", title: "Test", status: "active" });
+  insertSlice({ id: "S01", milestoneId: "M001", title: "Slice", status: "complete" });
+  insertTask({
+    id: "T01",
+    sliceId: "S01",
+    milestoneId: "M001",
+    title: "First task",
+    status: "done",
+    fullSummaryMd: "# T01 Summary\n",
+  });
+  setSliceSummaryMd("M001", "S01", "# S01 Summary\n", "# S01 UAT\n");
+
+  writeFileSync(
+    join(base, ".gsd", "milestones", "M001", "M001-ROADMAP.md"),
+    makeStaleRoadmapContent([{ id: "S01", title: "Slice", done: false }]),
+  );
+  writeFileSync(
+    join(sliceDir, "S01-PLAN.md"),
+    makeStalePlanContent("S01", [{ id: "T01", title: "First task", done: false }]),
+  );
+  clearRendererCaches();
+
+  const reasons = detectStaleRenders(base).map((entry) => entry.reason).sort();
+
+  assert.deepEqual(reasons, [
+    "S01 is closed in DB but unchecked in roadmap",
+    "S01 is complete with UAT in DB but UAT.md missing on disk",
+    "S01 is complete with summary in DB but SUMMARY.md missing on disk",
+    "T01 is complete with summary in DB but SUMMARY.md missing on disk",
+    "T01 is done in DB but unchecked in plan",
+  ].sort());
 });
 
 // ─── Lifecycle and classification ────────────────────────────────────────────
