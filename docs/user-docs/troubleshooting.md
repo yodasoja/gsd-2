@@ -34,6 +34,17 @@ It checks:
 
 **Fix:** Check the task plan for clarity. If the plan is ambiguous, refine it manually, then `/gsd auto` to resume.
 
+### Auto mode pauses after a timeout or finalize failure
+
+**Symptoms:** Auto mode reports a unit hard timeout, a finalize timeout, or a post-unit closeout failure.
+
+**What to inspect:**
+- `.gsd/runtime/<unit-type>/<unit-id>.json` shows the latest runtime phase, timeout timestamp, recovery attempts, and progress marker. Timeout recovery uses progress kinds such as `idle-recovery-retry`, `hard-recovery-retry`, `finalize-pre-timeout`, `finalize-post-timeout`, and `finalize-success`.
+- `.gsd/journal/` shows the ordered loop events. Look for `unit-end`, then `post-unit-finalize-start`, `post-unit-finalize-end`, and `iteration-end`.
+- `post-unit-finalize-end.status` tells you whether closeout completed, retried, stopped, or failed. `iteration-end.status` and `iteration-end.reason` show the final loop outcome that caused auto mode to continue, retry, pause, or stop.
+
+**Fix:** If the runtime record shows fresh recovery progress, resume with `/gsd auto`; the failsafe defers cancellation while recovery is actively producing durable output. If the journal shows a stopped finalize reason such as a git closeout failure or repeated finalize timeout, resolve that underlying issue first, then resume.
+
 ### Wrong files in worktree
 
 **Symptoms:** Planning artifacts or code appear in the wrong directory.

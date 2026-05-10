@@ -358,7 +358,7 @@ The database is authoritative for milestones, slices, tasks, requirements, decis
 
 7. **Stuck and artifact detection** — A sliding-window detector identifies repeated dispatch patterns (including multi-unit cycles). Missing expected artifacts use a separate bounded path: GSD retries artifact verification up to 3 times with failure context, then pauses auto mode with the missing artifact error instead of looping indefinitely.
 
-8. **Timeout supervision** — Soft timeout warns the LLM to wrap up. Idle watchdog detects stalls. Hard timeout pauses auto mode. Recovery steering nudges the LLM to finish durable output before giving up.
+8. **Timeout supervision** — Soft timeout warns the LLM to wrap up. Idle watchdog detects stalls. Hard timeout starts recovery and only pauses auto mode if durable progress cannot be made. Runtime progress is recorded under `.gsd/runtime/`, and journal events close out unit, finalize, and iteration phases for later forensics.
 
 9. **Cost tracking** — Every unit's token usage and cost is captured, broken down by phase, slice, and model. The dashboard shows running totals and projections. Budget ceilings can pause auto mode before overspending.
 
@@ -750,7 +750,7 @@ The best practice for working in teams is to ensure unique milestone names acros
 .gsd/metrics.json
 # Raw JSONL session dumps — crash recovery forensics, auto-pruned
 .gsd/activity/
-# Unit execution records — dispatch phase, timeouts, and recovery tracking
+# Unit execution records — dispatch phase, timeout recovery progress, and finalize tracking
 .gsd/runtime/
 # Git worktree working copies
 .gsd/worktrees/
@@ -758,7 +758,7 @@ The best practice for working in teams is to ensure unique milestone names acros
 .gsd/parallel/
 # SQLite database and WAL sidecars — authoritative runtime state, local only
 .gsd/gsd.db*
-# Daily-rotated event journal — structured event log for forensics
+# Daily-rotated event journal — structured unit/finalize/iteration event log for forensics
 .gsd/journal/
 # Doctor run history — diagnostic check results
 .gsd/doctor-history.jsonl

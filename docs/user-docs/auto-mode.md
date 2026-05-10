@@ -187,6 +187,7 @@ Artifact verification retries are capped at 3 attempts. If the expected artifact
 - **Unit traces** — last 10 unit executions with error details and execution times
 - **Metrics analysis** — cost, token counts, and execution time breakdowns
 - **Doctor integration** — includes structural health issues from `/gsd doctor`
+- **Journal correlation** — uses `.gsd/journal/` events such as `unit-start`, `unit-end`, `post-unit-finalize-start`, `post-unit-finalize-end`, and `iteration-end` to show where the loop stopped
 - **LLM-guided investigation** — an agent session with full tool access to investigate root causes
 
 ```
@@ -203,9 +204,15 @@ Three timeout tiers prevent runaway sessions:
 |---------|---------|----------|
 | Soft | 20 min | Warns the LLM to wrap up |
 | Idle | 10 min | Detects stalls, intervenes |
-| Hard | 30 min | Pauses auto mode |
+| Hard | 30 min | Starts timeout recovery; pauses auto mode only if recovery cannot make durable progress |
 
-Recovery steering nudges the LLM to finish durable output before timing out. Configure in preferences:
+Recovery steering nudges the LLM to finish durable output before timing out. When idle or hard timeout recovery is actively writing durable progress, the unit failsafe records fresh runtime progress in `.gsd/runtime/` and defers its final cancellation check for another short recheck window. This prevents auto mode from pausing while a recovered unit is finalizing, but future-dated or stale runtime timestamps are ignored so clock skew cannot keep the unit alive forever.
+
+For operator forensics, timeout recovery updates the unit runtime record with fields such as `phase`, `timeoutAt`, `lastProgressAt`, `lastProgressKind`, `recoveryAttempts`, and `lastRecoveryReason`. Finalize timeouts are recorded with `lastProgressKind` values like `finalize-pre-timeout` or `finalize-post-timeout`; successful finalization records `finalize-success`.
+
+The journal also closes every iteration explicitly. After a unit ends, auto mode emits `post-unit-finalize-start` before closeout and `post-unit-finalize-end` with a `status`, `action`, and optional `reason`. Every loop iteration then emits `iteration-end` with the final status and, when available, the failure class, unit type, unit id, and reason. Use these events to distinguish "agent never returned" from "agent returned but finalize/closeout stopped the loop."
+
+Configure in preferences:
 
 ```yaml
 auto_supervisor:

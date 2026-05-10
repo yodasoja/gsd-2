@@ -16,7 +16,7 @@ import { canonicalToolName, clearDiscussionFlowState, isDepthConfirmationAnswer,
 import { resolveManifest } from "../unit-context-manifest.js";
 import { isBlockedStateFile, isBashWriteToStateFile, BLOCKED_WRITE_ERROR } from "../write-intercept.js";
 import { loadFile, saveFile, formatContinue } from "../files.js";
-import { getAutoRuntimeSnapshot, isAutoActive, isAutoPaused, markToolEnd, markToolStart, recordToolInvocationError } from "../auto-runtime-state.js";
+import { clearToolInvocationError, getAutoRuntimeSnapshot, isAutoActive, isAutoPaused, markToolEnd, markToolStart, recordToolInvocationError } from "../auto-runtime-state.js";
 
 import { checkToolCallLoop, resetToolCallLoopGuard } from "./tool-call-loop-guard.js";
 import { saveActivityLog } from "../activity-log.js";
@@ -892,6 +892,8 @@ export function registerHooks(
       // Let recordToolInvocationError classify the failure so non-gsd_ harness
       // errors and deterministic policy rejections are handled consistently.
       recordToolInvocationError(event.toolName, errorText);
+    } else if (isAutoActive()) {
+      clearToolInvocationError();
     }
     const toolName = canonicalToolName(event.toolName);
     if (toolName !== "ask_user_questions") return;
@@ -1009,6 +1011,8 @@ export function registerHooks(
       // Let recordToolInvocationError classify the failure so non-gsd_ harness
       // errors and deterministic policy rejections are handled consistently.
       recordToolInvocationError(event.toolName, errorText);
+    } else if (isAutoActive()) {
+      clearToolInvocationError();
     }
     // Safety harness: record tool execution results for evidence cross-referencing
     if (isAutoActive()) {
