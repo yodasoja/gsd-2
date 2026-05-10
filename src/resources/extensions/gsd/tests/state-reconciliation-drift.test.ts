@@ -1,9 +1,10 @@
 // Project/App: GSD-2
 // File Purpose: ADR-017 contract tests for drift-driven State Reconciliation.
 // Covers sketch-flag (#5700), merge-state (#5701), stale-render (#5702),
-// stale-worker (#5703), and unregistered-milestone (#5704) drift end-to-end,
-// plus the repair-throw and persistent-drift error paths and Recovery
-// Classification mapping for ReconciliationFailedError.
+// stale-worker (#5703), unregistered-milestone (#5704), and roadmap-
+// divergence (#5705) drift end-to-end, plus the repair-throw and
+// persistent-drift error paths and Recovery Classification mapping for
+// ReconciliationFailedError.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -617,6 +618,93 @@ test("ADR-017 (#5704): registered milestone (DB row present) → no drift", asyn
     result.repaired.some((d) => d.kind === "unregistered-milestone"),
     false,
     "no drift should be reported when the milestone is already in the DB",
+  );
+});
+
+// ─── #5705: roadmap-divergence drift ─────────────────────────────────────────
+
+test("ADR-017 (#5705): roadmap-divergence drift detected and DB depends synced", async (t) => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-adr017-roadmap-"));
+  const milestoneDir = join(base, ".gsd", "milestones", "M001");
+  mkdirSync(milestoneDir, { recursive: true });
+  // ROADMAP.md declares S02 depends on [S01]
+  writeFileSync(
+    join(milestoneDir, "M001-ROADMAP.md"),
+    [
+      "# M001: Test",
+      "",
+      "**Vision:** Verify roadmap-divergence drift",
+      "",
+      "## Slices",
+      "",
+      "- [ ] **S01: Foundation** `risk:medium` `depends:[]`",
+      "- [ ] **S02: Feature** `risk:medium` `depends:[S01]`",
+      "",
+    ].join("\n"),
+  );
+  t.after(() => {
+    try { closeDatabase(); } catch { /* noop */ }
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  insertMilestone({ id: "M001", title: "Test", status: "active" });
+  // Seed DB with S02 depending on []  — diverges from ROADMAP.md
+  insertSlice({ id: "S01", milestoneId: "M001", title: "Foundation", status: "pending", risk: "medium", depends: [], demo: "", sequence: 1 });
+  insertSlice({ id: "S02", milestoneId: "M001", title: "Feature", status: "pending", risk: "medium", depends: [], demo: "", sequence: 2 });
+
+  assert.deepEqual(getSlice("M001", "S02")?.depends, [], "pre: DB has S02.depends = []");
+
+  const result = await reconcileBeforeDispatch(base, {
+    invalidateStateCache: () => {},
+    deriveState: async () => makeState(),
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(getSlice("M001", "S02")?.depends, ["S01"], "post: DB depends matches ROADMAP.md");
+  const roadmapRepaired = result.repaired.find((d) => d.kind === "roadmap-divergence");
+  assert.ok(roadmapRepaired, "repaired list should include the roadmap-divergence drift");
+  if (roadmapRepaired?.kind === "roadmap-divergence") {
+    assert.equal(roadmapRepaired.milestoneId, "M001");
+  }
+});
+
+test("ADR-017 (#5705): in-sync ROADMAP and DB → no roadmap-divergence drift", async (t) => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-adr017-roadmap-clean-"));
+  const milestoneDir = join(base, ".gsd", "milestones", "M001");
+  mkdirSync(milestoneDir, { recursive: true });
+  writeFileSync(
+    join(milestoneDir, "M001-ROADMAP.md"),
+    [
+      "# M001: Test",
+      "",
+      "**Vision:** Already in sync",
+      "",
+      "## Slices",
+      "",
+      "- [ ] **S01: Foundation** `risk:low` `depends:[]`",
+      "",
+    ].join("\n"),
+  );
+  t.after(() => {
+    try { closeDatabase(); } catch { /* noop */ }
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  insertMilestone({ id: "M001", title: "Test", status: "active" });
+  insertSlice({ id: "S01", milestoneId: "M001", title: "Foundation", status: "pending", risk: "low", depends: [], demo: "", sequence: 1 });
+
+  const result = await reconcileBeforeDispatch(base, {
+    invalidateStateCache: () => {},
+    deriveState: async () => makeState(),
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(
+    result.repaired.some((d) => d.kind === "roadmap-divergence"),
+    false,
+    "no roadmap-divergence drift should be reported when DB matches markdown",
   );
 });
 
