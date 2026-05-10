@@ -669,6 +669,51 @@ test("ADR-017 (#5705): roadmap-divergence drift detected and DB depends synced",
   }
 });
 
+test("ADR-017 (#5705): ROADMAP declares slice missing from DB → slice inserted and drift reported", async (t) => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-adr017-roadmap-newslice-"));
+  const milestoneDir = join(base, ".gsd", "milestones", "M001");
+  mkdirSync(milestoneDir, { recursive: true });
+  // ROADMAP.md declares S01 and S02; DB will only have S01.
+  writeFileSync(
+    join(milestoneDir, "M001-ROADMAP.md"),
+    [
+      "# M001: Test",
+      "",
+      "**Vision:** Verify new-slice insertion via roadmap-divergence repair",
+      "",
+      "## Slices",
+      "",
+      "- [ ] **S01: Foundation** `risk:medium` `depends:[]`",
+      "- [ ] **S02: Feature** `risk:medium` `depends:[S01]`",
+      "",
+    ].join("\n"),
+  );
+  t.after(() => {
+    try { closeDatabase(); } catch { /* noop */ }
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  insertMilestone({ id: "M001", title: "Test", status: "active" });
+  // Only insert S01 — S02 is intentionally absent from the DB.
+  insertSlice({ id: "S01", milestoneId: "M001", title: "Foundation", status: "pending", risk: "medium", depends: [], demo: "", sequence: 1 });
+
+  assert.equal(getSlice("M001", "S02"), null, "pre: S02 has no DB row");
+
+  const result = await reconcileBeforeDispatch(base, {
+    invalidateStateCache: () => {},
+    deriveState: async () => makeState(),
+  });
+
+  assert.equal(result.ok, true);
+  assert.ok(getSlice("M001", "S02"), "post: S02 inserted into DB after repair");
+  const roadmapRepaired = result.repaired.find((d) => d.kind === "roadmap-divergence");
+  assert.ok(roadmapRepaired, "repaired list should include the roadmap-divergence drift");
+  if (roadmapRepaired?.kind === "roadmap-divergence") {
+    assert.equal(roadmapRepaired.milestoneId, "M001");
+  }
+});
+
 test("ADR-017 (#5705): in-sync ROADMAP and DB → no roadmap-divergence drift", async (t) => {
   const base = mkdtempSync(join(tmpdir(), "gsd-adr017-roadmap-clean-"));
   const milestoneDir = join(base, ".gsd", "milestones", "M001");
