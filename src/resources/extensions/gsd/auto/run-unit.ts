@@ -44,6 +44,7 @@ export function shouldDeferUnitFailsafeTimeout(
   if (runtime.startedAt !== opts.currentUnitStartedAt) return false;
   if (runtime.lastProgressAt <= 0) return false;
   const progressAgeMs = opts.nowMs - runtime.lastProgressAt;
+  if (progressAgeMs < 0) return false;
   if (progressAgeMs > opts.freshProgressMs) return false;
   if (runtime.phase === "recovered") return true;
   if (runtime.lastProgressKind.includes("recovery")) return true;

@@ -502,6 +502,7 @@ export async function autoLoop(
         });
         if (engineState.isComplete) {
           finishTurn("completed");
+          emitIterationEnd({ status: "completed", reason: "custom-engine-complete" });
           await deps.stopAuto(ctx, pi, "Workflow complete");
           break;
         }
@@ -519,16 +520,23 @@ export async function autoLoop(
         });
         if (dispatchFlow.action === "break") {
           finishTurn("stopped", "manual-attention", "custom-engine-dispatch-stop");
+          finishIncompleteIteration({
+            status: "stopped",
+            reason: "custom-engine-dispatch-stop",
+            failureClass: "manual-attention",
+          });
           break;
         }
         if (dispatchFlow.action === "continue") {
           finishTurn("skipped");
+          emitIterationEnd({ status: "skipped", reason: "custom-engine-dispatch-skip" });
           continue;
         }
 
         // dispatch.action === "dispatch"
         if (dispatch.action !== "dispatch") {
           finishTurn("skipped");
+          emitIterationEnd({ status: "skipped", reason: "custom-engine-dispatch-mismatch" });
           continue;
         }
         const step = dispatch.step;
@@ -557,6 +565,13 @@ export async function autoLoop(
         });
         if (guardsResult.action === "break") {
           finishTurn("stopped", "manual-attention", "guard-break");
+          finishIncompleteIteration({
+            status: "stopped",
+            reason: "guard-break",
+            unitType: iterData.unitType,
+            unitId: iterData.unitId,
+            failureClass: "manual-attention",
+          });
           break;
         }
 

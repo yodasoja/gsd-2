@@ -420,6 +420,10 @@ describe("Custom engine loop integration", () => {
 
     assert.deepEqual(turnResults, [{ status: "completed", failureClass: "none", error: undefined }]);
     assert.ok(
+      deps.callLog.includes("journal:iteration-end"),
+      `complete workflow should emit iteration-end; log=${deps.callLog.join(",")}`,
+    );
+    assert.ok(
       deps.callLog.indexOf("turnResult:completed") < deps.callLog.indexOf("stopAuto:Workflow complete"),
       `turn should finalize before stopAuto; log=${deps.callLog.join(",")}`,
     );
@@ -471,6 +475,10 @@ describe("Custom engine loop integration", () => {
     assert.equal(turnResults[0].status, "stopped");
     assert.equal(turnResults[0].failureClass, "manual-attention");
     assert.match(turnResults[0].error ?? "", /custom-engine-dispatch-stop/);
+    assert.ok(
+      deps.callLog.includes("journal:iteration-end"),
+      `blocked workflow should emit iteration-end; log=${deps.callLog.join(",")}`,
+    );
     assert.equal(s.currentTraceId, null);
     assert.equal(s.currentTurnId, null);
     assert.equal(pi.calls.length, 0, "blocked workflow should not dispatch a custom step");
