@@ -131,6 +131,7 @@ test("cleanupAfterLoopExit keeps cleanup best-effort when lifecycle restore thro
       },
     } as any);
 
+    assert.equal(restoreCalls, 1);
     assert.equal(autoSession.basePath, base);
     assert.equal(realpathSync(process.cwd()), realpathSync(base));
   } finally {

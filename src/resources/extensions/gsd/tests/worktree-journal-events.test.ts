@@ -36,18 +36,18 @@ import {
 import { WorktreeStateProjection } from "../worktree-state-projection.js";
 import { type TaskCommitContext } from "../worktree.js";
 
-// Test-local: LegacyTestDeps had three fields Lifecycle does not need
-// (shouldUseWorktreeIsolation, syncWorktreeStateBack, captureIntegrationBranch).
-// Permit them in test fixtures so existing override patterns keep working —
-// Lifecycle ignores the extras via structural typing.
+// ADR-016 phase 2 / C-track retired all worktree-manager + cache + prefs
+// fields from `WorktreeLifecycleDeps`. Tests still pass them as overrides
+// via the structural-typing escape hatch — listed here as optional so
+// fixtures can stub or omit them.
 type LegacyTestDeps = WorktreeLifecycleDeps & {
-  enterAutoWorktree: (basePath: string, milestoneId: string) => string;
-  createAutoWorktree: (basePath: string, milestoneId: string) => string;
-  enterBranchModeForMilestone: (basePath: string, milestoneId: string) => void;
-  getAutoWorktreePath: (basePath: string, milestoneId: string) => string | null;
-  isInAutoWorktree: (basePath: string) => boolean;
-  autoWorktreeBranch: (milestoneId: string) => string;
-  teardownAutoWorktree: (
+  enterAutoWorktree?: (basePath: string, milestoneId: string) => string;
+  createAutoWorktree?: (basePath: string, milestoneId: string) => string;
+  enterBranchModeForMilestone?: (basePath: string, milestoneId: string) => void;
+  getAutoWorktreePath?: (basePath: string, milestoneId: string) => string | null;
+  isInAutoWorktree?: (basePath: string) => boolean;
+  autoWorktreeBranch?: (milestoneId: string) => string;
+  teardownAutoWorktree?: (
     basePath: string,
     milestoneId: string,
     opts?: { preserveBranch?: boolean },
@@ -98,37 +98,14 @@ function makeSession(
 function makeDeps(
   overrides?: Partial<LegacyTestDeps>,
 ): LegacyTestDeps {
+  // ADR-016 phase 2 / C-track retired the worktree-manager + cache + prefs
+  // primitives from `WorktreeLifecycleDeps`. Tests in this file drive
+  // Lifecycle against real git fixtures (initGitRepoIn) — do NOT stub the
+  // C-track primitives here, or the override pattern will pre-empt the
+  // real `getAutoWorktreePath` / `createAutoWorktree` / etc. and the
+  // success/existing/failure branches won't fire as expected.
   const deps: LegacyTestDeps = {
-    isInAutoWorktree: () => false,
-    shouldUseWorktreeIsolation: () => true,
-    getIsolationMode: () => "worktree",
     mergeMilestoneToMain: () => ({ pushed: false, codeFilesChanged: true }),
-    syncWorktreeStateBack: () => ({ synced: [] }),
-    teardownAutoWorktree: () => {},
-    createAutoWorktree: (_basePath: string, milestoneId: string) =>
-      `/project/.gsd/worktrees/${milestoneId}`,
-    enterAutoWorktree: (_basePath: string, milestoneId: string) =>
-      `/project/.gsd/worktrees/${milestoneId}`,
-    getAutoWorktreePath: () => null,
-    autoCommitCurrentBranch: (
-      _basePath: string,
-      _unitType: string,
-      _unitId: string,
-      _taskContext?: TaskCommitContext,
-    ) => null,
-    getCurrentBranch: () => "main",
-    checkoutBranch: () => {},
-    autoWorktreeBranch: (milestoneId: string) => `milestone/${milestoneId}`,
-    resolveMilestoneFile: (_basePath: string, milestoneId: string) =>
-      `/project/.gsd/milestones/${milestoneId}/${milestoneId}-ROADMAP.md`,
-    readFileSync: () => "# Roadmap\n- [x] S01: Slice one\n",
-    GitServiceImpl: class {
-      constructor() {}
-    } as unknown as LegacyTestDeps["GitServiceImpl"],
-    loadEffectiveGSDPreferences: () => ({ preferences: { git: {} } }),
-    invalidateAllCaches: () => {},
-    captureIntegrationBranch: () => {},
-    enterBranchModeForMilestone: () => {},
     worktreeProjection: new WorktreeStateProjection(),
     // ADR-016 phase 2 / C4 (#5627): GitServiceImpl constructor → factory.
     gitServiceFactory: () => ({}) as unknown as ReturnType<

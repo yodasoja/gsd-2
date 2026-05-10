@@ -54,16 +54,6 @@ type LegacyTestDeps = WorktreeLifecycleDeps & {
   getCurrentBranch?: (basePath: string) => string;
   checkoutBranch?: (basePath: string, branch: string) => void;
   readFileSync?: (path: string, encoding: BufferEncoding) => string;
-  // Legacy retired fields: Lifecycle no longer reads these post-C2/C3, but
-  // tests still write them to track call counts. Listed here so structural
-  // typing accepts them on the deps bag.
-  isInAutoWorktree?: (basePath: string) => boolean;
-  autoWorktreeBranch?: (mid: string) => string;
-  teardownAutoWorktree?: (
-    basePath: string,
-    milestoneId: string,
-    opts?: { preserveBranch?: boolean },
-  ) => void;
   getIsolationMode?: (basePath?: string) => "worktree" | "branch" | "none";
   invalidateAllCaches?: () => void;
   loadEffectiveGSDPreferences?: () =>
@@ -74,10 +64,6 @@ type LegacyTestDeps = WorktreeLifecycleDeps & {
     basePath: string,
     milestoneId: string,
     fileType: string,
-  ) => string | null;
-  getAutoWorktreePath?: (
-    basePath: string,
-    milestoneId: string,
   ) => string | null;
 };
 
@@ -555,25 +541,22 @@ test("restoreToProjectRoot restores basePath to originalBasePath and rebuilds gi
   );
 });
 
-test("restoreToProjectRoot loads git preferences from restored session base path", () => {
+test("restoreToProjectRoot rebuilds git service via gitServiceFactory at the restored base path", () => {
+  // ADR-016 phase 2 / C4 (#5627): the gitConfig load + GitServiceImpl
+  // construction now live behind the `gitServiceFactory` seam. Lifecycle
+  // is no longer responsible for either; the test asserts only that the
+  // factory is invoked with the restored basePath.
   const s = makeSession();
   s.originalBasePath = "/project";
   s.basePath = "/project/.gsd/worktrees/M001";
-  const preferenceBasePaths: Array<string | undefined> = [];
-  const deps = makeDeps({
-    loadEffectiveGSDPreferences: (basePath?: string) => {
-      preferenceBasePaths.push(basePath);
-      return { preferences: { git: { main_branch: "trunk" } } };
-    },
-  });
+  const deps = makeDeps();
   const lifecycle = new WorktreeLifecycle(s, deps);
 
   lifecycle.restoreToProjectRoot();
 
-  assert.deepEqual(preferenceBasePaths, ["/project"]);
   assert.deepEqual(
-    deps.calls.find((c) => c.fn === "GitServiceImpl")?.args,
-    ["/project", { main_branch: "trunk" }],
+    deps.calls.find((c) => c.fn === "gitServiceFactory")?.args,
+    ["/project"],
   );
 });
 
