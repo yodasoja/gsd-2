@@ -8,6 +8,7 @@ import type { AssistantMessage } from "@gsd/pi-ai";
 
 import { initTheme } from "../../theme/theme.js";
 import { AssistantMessageComponent } from "../assistant-message.js";
+import { formatTimestamp } from "../timestamp.js";
 
 initTheme("dark", false);
 
@@ -35,5 +36,21 @@ describe("AssistantMessageComponent recommended rail design", () => {
 		assert.match(joined, /update the renderer/);
 		assert.doesNotMatch(joined, /^┃/m, "assistant rail should be slightly indented from the left edge");
 		assert.doesNotMatch(joined, /^╭/m, "assistant messages should not use rounded card borders");
+	});
+
+	test("renders metadata for a zero timestamp", () => {
+		const message = {
+			id: "m1",
+			role: "assistant",
+			provider: "test",
+			model: "gpt-test",
+			timestamp: 0,
+			content: [{ type: "text", text: "Finished." }],
+		} as unknown as AssistantMessage;
+
+		const component = new AssistantMessageComponent(message, true);
+		const joined = component.render(80).map((line) => stripAnsi(line)).join("\n");
+
+		assert.match(joined, new RegExp(formatTimestamp(0)));
 	});
 });

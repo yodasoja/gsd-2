@@ -169,7 +169,7 @@ export class AssistantMessageComponent extends Container {
 		const lines = super.render(contentWidth);
 		const metaParts = [];
 		if (this.lastMessage?.model) metaParts.push(this.lastMessage.model);
-		if (this.showMetadata && this.lastMessage?.timestamp !== undefined) {
+		if (this.showMetadata && this.lastMessage?.timestamp != null) {
 			metaParts.push(formatTimestamp(this.lastMessage.timestamp, this.timestampFormat));
 		}
 		const rendered = renderAssistantRail(lines, frameWidth, {
