@@ -529,6 +529,28 @@ test("restoreToProjectRoot restores basePath to originalBasePath and rebuilds gi
   assert.equal(deps.calls.filter((c) => c.fn === "GitServiceImpl").length, 1);
 });
 
+test("restoreToProjectRoot loads git preferences from restored session base path", () => {
+  const s = makeSession();
+  s.originalBasePath = "/project";
+  s.basePath = "/project/.gsd/worktrees/M001";
+  const preferenceBasePaths: Array<string | undefined> = [];
+  const deps = makeDeps({
+    loadEffectiveGSDPreferences: (basePath?: string) => {
+      preferenceBasePaths.push(basePath);
+      return { preferences: { git: { main_branch: "trunk" } } };
+    },
+  });
+  const lifecycle = new WorktreeLifecycle(s, deps);
+
+  lifecycle.restoreToProjectRoot();
+
+  assert.deepEqual(preferenceBasePaths, ["/project"]);
+  assert.deepEqual(
+    deps.calls.find((c) => c.fn === "GitServiceImpl")?.args,
+    ["/project", { main_branch: "trunk" }],
+  );
+});
+
 test("restoreToProjectRoot is no-op when originalBasePath is empty", () => {
   const s = makeSession();
   s.originalBasePath = "";

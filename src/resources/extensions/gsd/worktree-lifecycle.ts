@@ -304,7 +304,7 @@ type WorktreeLifecyclePrimitiveOverrides = {
     milestoneId: string,
     fileType: string,
   ) => string | null;
-  loadEffectiveGSDPreferences?: () =>
+  loadEffectiveGSDPreferences?: (basePath?: string) =>
     | { preferences?: { git?: Record<string, unknown> } }
     | null
     | undefined;
@@ -461,7 +461,7 @@ function lifecycleLoadPreferences(
   | null
   | undefined {
   const override = primitiveOverrides(deps).loadEffectiveGSDPreferences;
-  if (override) return override();
+  if (override) return override(basePath);
   return loadEffectiveGSDPreferences(basePath) as
     | { preferences?: { git?: Record<string, unknown> } }
     | null
@@ -832,7 +832,7 @@ function rebuildGitService(
   deps: WorktreeLifecycleDeps,
 ): void {
   const gitConfig =
-    lifecycleLoadPreferences(deps)?.preferences?.git ?? {};
+    lifecycleLoadPreferences(deps, s.basePath)?.preferences?.git ?? {};
   s.gitService = new deps.GitServiceImpl(
     s.basePath,
     gitConfig,
