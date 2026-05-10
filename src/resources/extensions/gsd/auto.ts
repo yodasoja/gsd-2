@@ -190,6 +190,7 @@ import {
   type AutoDashboardData,
   updateProgressWidget as _updateProgressWidget,
   setCompletionProgressWidget,
+  setAutoOutcomeWidget,
   updateSliceProgressCache,
   clearSliceProgressCache,
   describeNextUnit as _describeNextUnit,
@@ -665,6 +666,10 @@ export function isAutoActive(): boolean {
   return s.active;
 }
 
+export function isAutoCompletionStopInProgress(): boolean {
+  return s.completionStopInProgress;
+}
+
 /** Test-only seam for validating auto-mode guards (#4704). Do not use in production code. */
 export function _setAutoActiveForTest(active: boolean): void {
   s.active = active;
@@ -925,6 +930,29 @@ function buildSnapshotOpts(
   };
 }
 
+function currentUnitLabel(): string | null {
+  if (!s.currentUnit) return null;
+  return `${unitVerb(s.currentUnit.type)} ${s.currentUnit.id}`;
+}
+
+function setLifecycleOutcome(
+  ctx: ExtensionContext | undefined,
+  input: {
+    status: "paused" | "stopped" | "blocked" | "failed" | "complete" | "waiting" | "step";
+    title: string;
+    detail?: string | null;
+    nextAction: string;
+    commands?: string[];
+  },
+): void {
+  if (!ctx?.hasUI) return;
+  setAutoOutcomeWidget(ctx, {
+    ...input,
+    unitLabel: currentUnitLabel(),
+    startedAt: s.autoStartTime,
+  });
+}
+
 function handleLostSessionLock(
   ctx?: ExtensionContext,
   lockStatus?: SessionLockStatus,
@@ -1012,7 +1040,9 @@ export async function cleanupAfterLoopExit(ctx: ExtensionContext): Promise<void>
   // visible so the user still has a resumable auto-mode signal on screen.
   if (!s.paused) {
     ctx.ui.setStatus("gsd-auto", undefined);
-    ctx.ui.setWidget("gsd-progress", undefined);
+    if (s.completionStopInProgress) {
+      s.completionStopInProgress = false;
+    }
     initHealthWidget(ctx);
   }
 
@@ -1131,6 +1161,7 @@ export async function stopAuto(
   const loadedPreferences = loadEffectiveGSDPreferences(s.basePath || undefined)?.preferences;
   const reasonSuffix = reason ? ` — ${reason}` : "";
   const preserveCompletionSurface = Boolean(options.completionWidget);
+  s.completionStopInProgress = preserveCompletionSurface;
 
   // #4764 — telemetry: record the exit reason, isolation mode, whether an auto
   // worktree was active, and whether the current milestone was merged before
@@ -1383,14 +1414,21 @@ export async function stopAuto(
     // ── Step 8: Ledger notification ──
     try {
       const ledger = getLedger();
+      const isAllComplete = reason === "All milestones complete";
+      const isMilestoneComplete = /^Milestone\s+\S+\s+complete$/i.test(reason ?? "");
+      const notificationPrefix = isAllComplete
+        ? "All milestones complete"
+        : isMilestoneComplete
+          ? `${reason}. Auto-mode finished this milestone`
+          : `Auto-mode stopped${reasonSuffix}`;
       if (ledger && ledger.units.length > 0) {
         const totals = getProjectTotals(ledger.units);
         ctx?.ui.notify(
-          `Auto-mode stopped${reasonSuffix}. Session: ${formatCost(totals.cost)} · ${formatTokenCount(totals.tokens.total)} tokens · ${ledger.units.length} units`,
+          `${notificationPrefix}. Session: ${formatCost(totals.cost)} · ${formatTokenCount(totals.tokens.total)} tokens · ${ledger.units.length} units`,
           "info",
         );
       } else {
-        ctx?.ui.notify(`Auto-mode stopped${reasonSuffix}.`, "info");
+        ctx?.ui.notify(`${notificationPrefix}.`, "info");
       }
     } catch (e) {
       debugLog("stop-cleanup-ledger", { error: e instanceof Error ? e.message : String(e) });
@@ -1542,6 +1580,16 @@ export async function stopAuto(
     ctx?.ui.setStatus("gsd-auto", undefined);
     if (!preserveCompletionSurface) {
       ctx?.ui.setWidget("gsd-progress", undefined);
+      const status = reason?.startsWith("Blocked:") ? "blocked" : reason?.toLowerCase().includes("fail") ? "failed" : "stopped";
+      setLifecycleOutcome(ctx, {
+        status,
+        title: status === "blocked" ? "Auto-mode blocked" : status === "failed" ? "Auto-mode stopped with an issue" : "Auto-mode stopped",
+        detail: reason ?? "Auto-mode stopped.",
+        nextAction: status === "blocked"
+          ? "Fix the blocker, then run /gsd auto to resume."
+          : "Run /gsd status for the current project state, or /gsd auto to continue.",
+        commands: ["/gsd status for overview", "/gsd auto to run", "/gsd visualize to inspect", "/gsd notifications for history"],
+      });
       if (ctx) initHealthWidget(ctx);
     }
     restoreProjectRootEnv();
@@ -1560,7 +1608,7 @@ export async function stopAuto(
     }
 
     // Reset all session state in one call
-    s.reset();
+    s.resetAfterStop({ preserveCompletionSurface });
   }
 }
 
@@ -1684,8 +1732,15 @@ export async function pauseAuto(
   s.verificationRetryCount.clear();
   ctx?.ui.setStatus("gsd-auto", "paused");
   ctx?.ui.setWidget("gsd-progress", undefined);
-  if (ctx) initHealthWidget(ctx);
   const resumeCmd = s.stepMode ? "/gsd next" : "/gsd auto";
+  setLifecycleOutcome(ctx, {
+    status: "paused",
+    title: `${s.stepMode ? "Step" : "Auto"}-mode paused`,
+    detail: _errorContext?.message ?? "Paused by user request.",
+    nextAction: `Type to steer, or run ${resumeCmd} to resume.`,
+    commands: [resumeCmd, "/gsd status for overview", "/gsd notifications for history"],
+  });
+  if (ctx) initHealthWidget(ctx);
   ctx?.ui.notify(
     `${s.stepMode ? "Step" : "Auto"}-mode paused (Escape). Type to interact, or ${resumeCmd} to resume.`,
     "info",

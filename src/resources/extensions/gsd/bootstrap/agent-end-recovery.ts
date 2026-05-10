@@ -12,7 +12,14 @@ import {
   resetEmptyTurnCounter,
 } from "../guided-flow.js";
 import { clearPathCache } from "../paths.js";
-import { getAutoDashboardData, getAutoModeStartModel, isAutoActive, pauseAuto, setCurrentDispatchedModelId } from "../auto.js";
+import {
+  getAutoDashboardData,
+  getAutoModeStartModel,
+  isAutoActive,
+  isAutoCompletionStopInProgress,
+  pauseAuto,
+  setCurrentDispatchedModelId,
+} from "../auto.js";
 import { getNextFallbackModel, resolveModelWithFallbacksForUnit } from "../preferences.js";
 import { pauseAutoForProviderError } from "../provider-error-pause.js";
 import {
@@ -295,6 +302,12 @@ export async function handleAgentEnd(
   }
 
   if (isObjectRecord(lastMsg) && "stopReason" in lastMsg && lastMsg.stopReason === "aborted") {
+    if (isAutoCompletionStopInProgress()) {
+      resetRetryState(retryState);
+      resolveAgentEnd(event);
+      return;
+    }
+
     // Empty content with aborted stopReason is a non-fatal agent stop (the LLM
     // chose to end without producing output). Only pause on genuine fatal aborts
     // that carry error context — e.g. errorMessage field or non-empty content

@@ -64,6 +64,16 @@ test("discuss prompt allows implementation questions when they materially matter
   assert.doesNotMatch(prompt, /Questions must be about the experience, not the implementation/i);
 });
 
+test("discuss prompt ends milestone planning with next-step handoff", () => {
+  const prompt = readPrompt("discuss");
+  assert.match(prompt, /Next steps:/);
+  assert.match(prompt, /\/gsd auto/);
+  assert.match(prompt, /\/gsd status/);
+  assert.match(prompt, /\/gsd visualize/);
+  assert.match(prompt, /\/gsd notifications/);
+  assert.doesNotMatch(prompt, /nothing else\. Auto-mode will start automatically/);
+});
+
 test("guided discussion prompts avoid wrap-up prompts after every round", () => {
   const milestonePrompt = readPrompt("guided-discuss-milestone");
   const slicePrompt = readPrompt("guided-discuss-slice");

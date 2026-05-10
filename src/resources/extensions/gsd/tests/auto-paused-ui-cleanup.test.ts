@@ -43,7 +43,7 @@ test("cleanupAfterLoopExit preserves paused auto badge after provider pause", as
   }
 });
 
-test("cleanupAfterLoopExit clears status and widget when auto is not paused", async () => {
+test("cleanupAfterLoopExit clears status without replacing the last auto surface", async () => {
   const statusCalls: unknown[] = [];
   const widgetCalls: unknown[] = [];
 
@@ -62,9 +62,56 @@ test("cleanupAfterLoopExit clears status and widget when auto is not paused", as
     } as any);
 
     assert.deepEqual(statusCalls, [["gsd-auto", undefined]]);
-    assert.deepEqual(widgetCalls, [["gsd-progress", undefined]]);
+    assert.equal(
+      widgetCalls.some((args) => Array.isArray(args) && args[0] === "gsd-progress" && args[1] === undefined),
+      false,
+      "cleanup must not clear the last meaningful auto progress surface",
+    );
+    assert.equal(
+      widgetCalls.some((args) => Array.isArray(args) && args[0] === "gsd-outcome"),
+      false,
+      "cleanup must not replace the auto deck with a generic loop-ended card",
+    );
     assert.equal(autoSession.active, false);
     assert.equal(autoSession.paused, false);
+  } finally {
+    autoSession.reset();
+  }
+});
+
+test("cleanupAfterLoopExit preserves completion roll-up after stopAuto reset", async () => {
+  const statusCalls: unknown[] = [];
+  const widgetCalls: unknown[] = [];
+
+  autoSession.reset();
+  autoSession.active = true;
+  autoSession.paused = false;
+  autoSession.completionStopInProgress = true;
+  autoSession.resetAfterStop({ preserveCompletionSurface: true });
+
+  try {
+    await cleanupAfterLoopExit({
+      hasUI: true,
+      ui: {
+        setStatus: (...args: unknown[]) => statusCalls.push(args),
+        setWidget: (...args: unknown[]) => widgetCalls.push(args),
+        setHeader: () => {},
+        notify: () => {},
+      },
+    } as any);
+
+    assert.deepEqual(statusCalls, [["gsd-auto", undefined]]);
+    assert.equal(
+      widgetCalls.some((args) => Array.isArray(args) && args[0] === "gsd-progress" && args[1] === undefined),
+      false,
+      "completion cleanup must not clear the roll-up progress widget",
+    );
+    assert.equal(
+      widgetCalls.some((args) => Array.isArray(args) && args[0] === "gsd-outcome"),
+      false,
+      "completion cleanup must not replace the roll-up with a generic outcome card",
+    );
+    assert.equal(autoSession.completionStopInProgress, false);
   } finally {
     autoSession.reset();
   }
@@ -168,6 +215,7 @@ test("stopAuto completion closeout reroots session, restores cwd, and preserves 
   const base = mkdtempSync(join(tmpdir(), "gsd-completion-stop-"));
   const previousCwd = process.cwd();
   const widgetCalls: Array<[string, unknown]> = [];
+  const notifications: string[] = [];
   const newSessionWorkspaces: string[] = [];
   let restoreCalls = 0;
   const originalRestore = WorktreeLifecycle.prototype.restoreToProjectRoot;
@@ -260,7 +308,9 @@ test("stopAuto completion closeout reroots session, restores cwd, and preserves 
             widgetCalls.push([key, value]);
           },
           setHeader: () => {},
-          notify: () => {},
+          notify: (message: string) => {
+            notifications.push(message);
+          },
         },
         modelRegistry: { find: () => null },
       } as any,
@@ -296,7 +346,23 @@ test("stopAuto completion closeout reroots session, restores cwd, and preserves 
     assert.match(output, /Files: src\/resources\/extensions\/gsd\/auto-dashboard\.ts/);
     assert.match(output, /Lessons: Milestone endings need report output/);
     assert.match(output, /2\/3 slices/);
+    assert.match(output, /Next/);
+    assert.match(output, /Review the roll-up/);
+    assert.match(output, /\/gsd auto for next milestone/);
     assert.doesNotMatch(output, /COMPLETE-MILESTONE/);
+    assert.doesNotMatch(output, /\/gsd auto to resume/);
+    assert.ok(
+      notifications.some(message => message.includes("Milestone M003 complete. Auto-mode finished this milestone.")),
+      "completion stop notification should describe completion, not an aborted pause",
+    );
+    assert.ok(
+      notifications.every(message => !message.includes("/gsd auto to resume")),
+      "completion stop notification must not tell users to resume a finished auto run",
+    );
+    assert.ok(
+      widgetCalls.every(([key, value]) => key !== "gsd-outcome" || value === undefined),
+      "completion stop should use the roll-up as the single final surface",
+    );
   } finally {
     try { closeDatabase(); } catch { /* noop */ }
     autoSession.reset();
