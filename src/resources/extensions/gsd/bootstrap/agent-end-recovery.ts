@@ -153,8 +153,7 @@ export function isBareClaudeCodeStreamAbortPlaceholder(lastMsg: unknown): boolea
  * Claude Code abort markers are intentionally ignored when the abort fires
  * while the session-switch is in flight: the abort is the expected side-effect
  * of the transition, not a user signal. Other branches (genuine `stopReason
- * === "aborted"` with diagnostic content/errorMessage) preserve the prior
- * behavior.
+ * === "aborted"` with explicit errorMessage) preserve the prior behavior.
  */
 export function _handleSessionSwitchAgentEnd(
   lastMsg: unknown,
@@ -178,10 +177,8 @@ export function _handleSessionSwitchAgentEnd(
   }
 
   if (m.stopReason === "aborted") {
-    const content = m.content;
-    const hasEmptyContent = Array.isArray(content) && content.length === 0;
     const hasErrorMessage = !!m.errorMessage;
-    if (!hasEmptyContent || hasErrorMessage) {
+    if (hasErrorMessage) {
       resolveCancelled(_buildAbortedPauseContext(m as { errorMessage?: unknown }));
     }
   }
