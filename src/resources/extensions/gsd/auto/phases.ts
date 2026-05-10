@@ -1340,16 +1340,14 @@ export async function runDispatch(
   // ── Sliding-window stuck detection with graduated recovery ──
   const derivedKey = `${unitType}/${unitId}`;
 
-  // Always record this dispatch in the sliding window so detectStuck() has
-  // accurate history. Skipping the push when pendingVerificationRetry is set
-  // caused infinite artifact-retry loops to be invisible to stuck detection
-  // (#2007). Only the *response* to a stuck signal is suppressed during retries.
+  // Always record this dispatch in the sliding window and run detection so
+  // Rules 1/3/4 can catch retry loops with repeated failure content (#5719).
+  // Rules 2/2b suppress legitimate retry backoff through the dispatch ledger.
   loopState.recentUnits.push({ key: derivedKey });
   if (loopState.recentUnits.length > STUCK_WINDOW_SIZE) loopState.recentUnits.shift();
 
-  if (!s.pendingVerificationRetry) {
-    const stuckSignal = detectStuck(loopState.recentUnits);
-    if (stuckSignal) {
+  const stuckSignal = detectStuck(loopState.recentUnits);
+  if (stuckSignal) {
       debugLog("autoLoop", {
         phase: "stuck-check",
         unitType,
@@ -1465,16 +1463,15 @@ export async function runDispatch(
         );
         return { action: "break", reason: "stuck-detected" };
       }
-    } else {
-      // Progress detected — reset recovery counter
-      if (loopState.stuckRecoveryAttempts > 0) {
-        debugLog("autoLoop", {
-          phase: "stuck-counter-reset",
-          from: loopState.recentUnits[loopState.recentUnits.length - 2]?.key ?? "",
-          to: derivedKey,
-        });
-        loopState.stuckRecoveryAttempts = 0;
-      }
+  } else {
+    // Progress detected — reset recovery counter
+    if (loopState.stuckRecoveryAttempts > 0) {
+      debugLog("autoLoop", {
+        phase: "stuck-counter-reset",
+        from: loopState.recentUnits[loopState.recentUnits.length - 2]?.key ?? "",
+        to: derivedKey,
+      });
+      loopState.stuckRecoveryAttempts = 0;
     }
   }
 

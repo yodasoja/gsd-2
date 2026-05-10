@@ -2144,7 +2144,7 @@ test("stuck detection: window resets recovery when deriveState returns a differe
   );
 });
 
-test("stuck detection: does not push to window during verification retry", async () => {
+test("stuck detection: verification retries remain visible to the sliding window", async () => {
   _resetPendingResolve();
   mock.timers.enable({ apis: ["Date", "setTimeout"], now: 20_000 });
 
@@ -2199,8 +2199,9 @@ test("stuck detection: does not push to window during verification retry", async
 
     const loopPromise = autoLoop(ctx, pi, s, deps);
 
-    // Resolve agent_end for 4 iterations (1 initial + 3 retries)
-    for (let i = 1; i <= 4; i++) {
+    // Resolve agent_end for 3 attempts. The 4th iteration should stop before
+    // dispatch because retry dispatches stay visible to stuck detection.
+    for (let i = 1; i <= 3; i++) {
       await waitForMicrotasks(() => pi.calls.length === i, `dispatch ${i}`);
       resolveAgentEnd(makeEvent());
       await drainMicrotasks(100);
@@ -2209,16 +2210,14 @@ test("stuck detection: does not push to window during verification retry", async
 
     await loopPromise;
 
-    // Even though same unit was derived 4 times, verification retries should
-    // not push to the sliding window, so stuck detection should not have fired
     assert.ok(
-      !stopReason.includes("Stuck"),
-      `stuck detection should not fire during verification retries, got: ${stopReason}`,
+      stopReason.includes("Stuck"),
+      `stuck detection should fire during repeated verification retries, got: ${stopReason}`,
     );
     assert.equal(
       verifyCallCount,
-      4,
-      "verification should have been called 4 times (1 initial + 3 retries)",
+      3,
+      "verification should stop before a 4th repeated retry dispatch",
     );
   } finally {
     mock.timers.reset();
@@ -2304,7 +2303,8 @@ test("detectStuck: truncates long error strings", () => {
     { key: "A", error: longError },
   ]);
   assert.ok(result?.stuck);
-  assert.ok(result!.reason.length < 300, "reason should be truncated");
+  assert.ok(result!.reason.includes(longError.slice(0, 200)), "reason should include the truncated error prefix");
+  assert.equal(result!.reason.includes(longError), false, "reason should not include the full long error");
 });
 
 // NOTE: the "stuck-detected" / "stuck-counter-reset" debug-log grep was
@@ -3204,6 +3204,77 @@ test("dispatch Worktree Safety wins before stuck detection for execute-task with
   assert.ok(
     !notifications.some((n) => n.includes("Stuck on execute-task")),
     "stuck-loop message must not mask the worktree health failure",
+  );
+});
+
+test("runDispatch runs stuck detection while artifact verification retry is pending (#5719)", async (t) => {
+  _resetPendingResolve();
+
+  const ctx = makeMockCtx();
+  const pi = makeMockPi();
+  const notifications: string[] = [];
+  ctx.ui.notify = (msg: string) => { notifications.push(msg); };
+
+  const basePath = mkdtempSync(join(tmpdir(), "gsd-5719-retry-stuck-"));
+  t.after(() => rmSync(basePath, { recursive: true, force: true }));
+
+  const s = makeLoopSession({
+    basePath,
+    pendingVerificationRetry: {
+      unitId: "M001/S01/T01",
+      failureContext: "ENOENT: no such file or directory, access '/tmp/missing-plan.md'",
+      attempt: 1,
+    },
+  });
+  const deps = makeMockDeps();
+  const loopState = {
+    recentUnits: [
+      {
+        key: "execute-task/M001/S01/T01",
+        error: "ENOENT: no such file or directory, access '/tmp/missing-plan.md'",
+      },
+      { key: "plan-slice/M001/S02", error: "other failure" },
+      {
+        key: "complete-slice/M001/S01",
+        error: "ENOENT: no such file or directory, access '/tmp/missing-plan.md'",
+      },
+    ],
+    stuckRecoveryAttempts: 0,
+    consecutiveFinalizeTimeouts: 0,
+  };
+
+  const result = await runDispatch(
+    {
+      ctx,
+      pi,
+      s,
+      deps,
+      prefs: undefined,
+      iteration: 1,
+      flowId: "test-flow",
+      nextSeq: () => 1,
+    },
+    {
+      state: {
+        phase: "executing",
+        activeMilestone: { id: "M001", title: "Test", status: "active" },
+        activeSlice: { id: "S01", title: "Slice 1" },
+        activeTask: { id: "T01" },
+        registry: [{ id: "M001", status: "active" }],
+        blockers: [],
+      } as any,
+      mid: "M001",
+      midTitle: "Test",
+    },
+    loopState,
+  );
+
+  assert.equal(result.action, "next", "level-1 stuck recovery should still allow the recovery dispatch");
+  assert.equal(loopState.stuckRecoveryAttempts, 1, "stuck recovery should record the first recovery attempt");
+  assert.ok(deps.callLog.includes("invalidateAllCaches"), "stuck recovery should invalidate caches");
+  assert.ok(
+    notifications.some((n) => n.includes("Missing file referenced twice")),
+    "notification should surface the repeated ENOENT stuck reason",
   );
 });
 
