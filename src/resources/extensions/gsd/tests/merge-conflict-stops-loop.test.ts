@@ -106,7 +106,7 @@ function makeDeps(
       _basePath: string,
       _unitType: string,
       _unitId: string,
-      _taskContext?: TaskCommitContext,
+      _taskContext?: unknown,
     ) => null,
     getCurrentBranch: () => "worktree/M001",
     checkoutBranch: () => undefined,

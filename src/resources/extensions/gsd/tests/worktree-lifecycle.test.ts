@@ -14,7 +14,6 @@ import {
   type NotifyCtx,
 } from "../worktree-lifecycle.js";
 import { WorktreeStateProjection } from "../worktree-state-projection.js";
-import { type TaskCommitContext } from "../worktree.js";
 import { AutoSession } from "../auto/session.js";
 import { openDatabase, closeDatabase, insertMilestone } from "../gsd-db.js";
 import { registerAutoWorker } from "../db/auto-workers.js";
@@ -66,7 +65,7 @@ function makeDeps(
       basePath: string,
       unitType: string,
       unitId: string,
-      taskContext?: TaskCommitContext,
+      taskContext?: unknown,
     ) => {
       calls.push({ fn: "autoCommitCurrentBranch", args: [basePath, unitType, unitId, taskContext] });
       return null;
