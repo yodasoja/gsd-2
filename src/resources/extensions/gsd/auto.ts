@@ -1124,10 +1124,9 @@ export async function stopAuto(
   const reasonSuffix = reason ? ` — ${reason}` : "";
   const preserveCompletionSurface = Boolean(options.completionWidget);
 
-  // #4764 — telemetry: record the exit reason and whether the current milestone
-  // was merged before we entered stopAuto. This is the producer-side signal for
-  // the #4761 orphan class: milestoneMerged=false + currentMilestoneId present
-  // is exactly the pattern that strands work.
+  // #4764 — telemetry: record the exit reason, isolation mode, whether an auto
+  // worktree was active, and whether the current milestone was merged before
+  // stopAuto. The unmerged-work warning is only meaningful for real worktrees.
   try {
     const { emitAutoExit } = await import("./worktree-telemetry.js");
     type AutoExitReason =
@@ -1152,10 +1151,13 @@ export async function stopAuto(
                 : rawReason === "stop" || rawReason === "pause"
                   ? rawReason
                   : "other";
-    emitAutoExit(s.originalBasePath || s.basePath, {
+    const telemetryBase = s.originalBasePath || s.basePath;
+    emitAutoExit(telemetryBase, {
       reason: normalizedReason,
       milestoneId: s.currentMilestoneId ?? undefined,
       milestoneMerged: s.milestoneMergedInPhases === true,
+      isolationMode: getIsolationMode(telemetryBase),
+      worktreeActive: isInAutoWorktree(s.basePath),
     });
   } catch (err) {
     logWarning("engine", `auto-exit telemetry failed: ${err instanceof Error ? err.message : String(err)}`);
