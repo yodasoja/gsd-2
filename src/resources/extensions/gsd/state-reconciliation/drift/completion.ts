@@ -121,10 +121,15 @@ export function repairMissingCompletionTimestamp(
     const [mid] = parts;
     if (!mid) return;
     const milestone = getMilestone(mid);
-    if (!milestone || milestone.completed_at !== null) return;
+    if (
+      !milestone ||
+      milestone.completed_at !== null ||
+      !COMPLETE_STATUSES.has(milestone.status)
+    ) return;
     const summary = resolveMilestoneFile(ctx.basePath, mid, "SUMMARY");
     const ts = summary ? summaryMtimeIso(summary) : null;
-    updateMilestoneStatus(mid, milestone.status, ts ?? new Date().toISOString());
+    if (!ts) return;
+    updateMilestoneStatus(mid, milestone.status, ts);
     return;
   }
 
@@ -132,10 +137,15 @@ export function repairMissingCompletionTimestamp(
     const [mid, sid] = parts;
     if (!mid || !sid) return;
     const slice = getMilestoneSlices(mid).find((s) => s.id === sid);
-    if (!slice || slice.completed_at !== null) return;
+    if (
+      !slice ||
+      slice.completed_at !== null ||
+      !COMPLETE_STATUSES.has(slice.status)
+    ) return;
     const summary = resolveSliceFile(ctx.basePath, mid, sid, "SUMMARY");
     const ts = summary ? summaryMtimeIso(summary) : null;
-    updateSliceStatus(mid, sid, slice.status, ts ?? new Date().toISOString());
+    if (!ts) return;
+    updateSliceStatus(mid, sid, slice.status, ts);
     return;
   }
 
@@ -143,10 +153,15 @@ export function repairMissingCompletionTimestamp(
     const [mid, sid, tid] = parts;
     if (!mid || !sid || !tid) return;
     const task = getSliceTasks(mid, sid).find((t) => t.id === tid);
-    if (!task || task.completed_at !== null) return;
+    if (
+      !task ||
+      task.completed_at !== null ||
+      !COMPLETE_STATUSES.has(task.status)
+    ) return;
     const summary = resolveTaskFile(ctx.basePath, mid, sid, tid, "SUMMARY");
     const ts = summary ? summaryMtimeIso(summary) : null;
-    updateTaskStatus(mid, sid, tid, task.status, ts ?? new Date().toISOString());
+    if (!ts) return;
+    updateTaskStatus(mid, sid, tid, task.status, ts);
   }
 }
 

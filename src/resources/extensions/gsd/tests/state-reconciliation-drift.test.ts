@@ -9,7 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -779,7 +779,9 @@ test("ADR-017 (#5706): task with SUMMARY but null completed_at → backfilled", 
   // an external recovery path or a partial state migration).
   updateTaskStatus("M001", "S01", "T01", "complete", undefined);
   // SUMMARY.md attests to completion on disk.
-  writeFileSync(join(tasksDir, "T01-SUMMARY.md"), "# T01 Summary\n");
+  const summaryPath = join(tasksDir, "T01-SUMMARY.md");
+  writeFileSync(summaryPath, "# T01 Summary\n");
+  const summaryMtimeMs = statSync(summaryPath).mtime.getTime();
 
   const taskBefore = getSliceTasks("M001", "S01").find((t) => t.id === "T01");
   assert.equal(taskBefore?.status, "complete");
@@ -793,7 +795,9 @@ test("ADR-017 (#5706): task with SUMMARY but null completed_at → backfilled", 
   assert.equal(result.ok, true);
   const taskAfter = getSliceTasks("M001", "S01").find((t) => t.id === "T01");
   assert.ok(taskAfter?.completed_at, "post: completed_at populated");
-  assert.equal(typeof taskAfter?.completed_at, "string");
+  const completedAtMs = Date.parse(taskAfter?.completed_at ?? "");
+  assert.ok(Number.isFinite(completedAtMs), "post: completed_at is parseable ISO string");
+  assert.equal(completedAtMs, summaryMtimeMs, "post: completed_at derived from SUMMARY mtime");
   const drift = result.repaired.find((d) => d.kind === "missing-completion-timestamp");
   assert.ok(drift, "drift recorded");
   if (drift?.kind === "missing-completion-timestamp") {
@@ -815,7 +819,9 @@ test("ADR-017 (#5706): repair is idempotent — re-running preserves the timesta
   insertMilestone({ id: "M001", title: "Test", status: "active" });
   insertSlice({ id: "S01", milestoneId: "M001", title: "Slice", status: "pending", risk: "low", depends: [], demo: "", sequence: 1 });
   updateSliceStatus("M001", "S01", "complete", undefined);
-  writeFileSync(join(sliceDir, "S01-SUMMARY.md"), "# S01 Summary\n");
+  const summaryPath = join(sliceDir, "S01-SUMMARY.md");
+  writeFileSync(summaryPath, "# S01 Summary\n");
+  const summaryMtimeMs = statSync(summaryPath).mtime.getTime();
 
   const firstResult = await reconcileBeforeDispatch(base, {
     invalidateStateCache: () => {},
@@ -824,6 +830,9 @@ test("ADR-017 (#5706): repair is idempotent — re-running preserves the timesta
   assert.equal(firstResult.ok, true);
   const tsAfterFirst = getSlice("M001", "S01")?.completed_at;
   assert.ok(tsAfterFirst, "first pass: completed_at populated");
+  const completedAtMs = Date.parse(tsAfterFirst ?? "");
+  assert.ok(Number.isFinite(completedAtMs), "first pass: completed_at is parseable ISO string");
+  assert.equal(completedAtMs, summaryMtimeMs, "first pass: completed_at derived from SUMMARY mtime");
 
   // Second pass — drift is already cleared, no record should appear, and
   // the existing timestamp is untouched.
