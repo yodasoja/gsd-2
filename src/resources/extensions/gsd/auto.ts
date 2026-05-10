@@ -1026,14 +1026,9 @@ export async function cleanupAfterLoopExit(ctx: ExtensionContext): Promise<void>
   if (s.originalBasePath) {
     try {
       buildLifecycle().restoreToProjectRoot();
-    } catch (err) {
-      logWarning("engine", `basePath restore failed: ${err instanceof Error ? err.message : String(err)}`, { file: "auto.ts" });
-    }
-    try {
       process.chdir(s.basePath);
     } catch (err) {
-      /* best-effort */
-      logWarning("engine", `chdir failed: ${err instanceof Error ? err.message : String(err)}`, { file: "auto.ts" });
+      logWarning("engine", `basePath restore/chdir failed: ${err instanceof Error ? err.message : String(err)}`, { file: "auto.ts" });
     }
   }
 

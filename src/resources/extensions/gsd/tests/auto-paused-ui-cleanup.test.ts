@@ -106,7 +106,7 @@ test("cleanupAfterLoopExit restores project root through lifecycle and preserves
   }
 });
 
-test("cleanupAfterLoopExit still attempts chdir when lifecycle restore throws", async (t) => {
+test("cleanupAfterLoopExit keeps cleanup best-effort when lifecycle restore throws", async (t) => {
   const base = mkdtempSync(join(tmpdir(), "gsd-cleanup-restore-throw-"));
   const worktree = join(base, ".gsd", "worktrees", "M001");
   const previousCwd = process.cwd();
@@ -130,7 +130,7 @@ test("cleanupAfterLoopExit still attempts chdir when lifecycle restore throws", 
     } as any);
 
     assert.equal(autoSession.basePath, worktree);
-    assert.equal(realpathSync(process.cwd()), realpathSync(worktree));
+    assert.equal(realpathSync(process.cwd()), realpathSync(previousCwd));
   } finally {
     autoSession.reset();
     process.chdir(previousCwd);

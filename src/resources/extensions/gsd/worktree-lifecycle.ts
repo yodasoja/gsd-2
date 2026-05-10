@@ -1539,8 +1539,9 @@ export class WorktreeLifecycle {
    * Owns the swap-run-revert protocol that bootstrap previously open-coded:
    *
    *   1. Snapshot prior `s.basePath` and `s.originalBasePath`.
-   *   2. Set `s.originalBasePath = base` and
-   *      `s.basePath = getAutoWorktreePath(base, milestoneId) ?? base`.
+   *   2. Resolve `getAutoWorktreePath(base, milestoneId) ?? base` before
+   *      mutating session state, then set `s.originalBasePath = base` and
+   *      `s.basePath` to the resolved path.
    *   3. Invoke the caller-supplied `run` callback under the swap.
    *   4. On `!result.merged`: revert to `base` and `chdir(base)` so the
    *      caller can return early without leaving the session in a half-

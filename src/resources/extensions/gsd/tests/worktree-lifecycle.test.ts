@@ -711,3 +711,53 @@ test("adoptOrphanWorktree forwards the callback's return value", () => {
   assert.equal(result.merged, true);
   assert.equal(result.customField, "preserved");
 });
+
+test("adoptOrphanWorktree leaves session unchanged when getAutoWorktreePath throws", () => {
+  const s = makeSession();
+  s.basePath = "/prior";
+  s.originalBasePath = "/prior-original";
+  s.active = true;
+  const lifecycle = new WorktreeLifecycle(
+    s,
+    makeDeps({
+      getAutoWorktreePath: () => {
+        throw new Error("git state unavailable");
+      },
+    }),
+  );
+
+  assert.throws(
+    () =>
+      lifecycle.adoptOrphanWorktree("M001", "/project", () => ({
+        merged: true as const,
+      })),
+    /git state unavailable/,
+  );
+  assert.equal(s.basePath, "/prior");
+  assert.equal(s.originalBasePath, "/prior-original");
+});
+
+test("adoptOrphanWorktree restores prior paths when callback throws", () => {
+  const s = makeSession();
+  s.basePath = "/prior";
+  s.originalBasePath = "/prior-original";
+  s.active = true;
+  const lifecycle = new WorktreeLifecycle(
+    s,
+    makeDeps({
+      getAutoWorktreePath: () => "/project/.gsd/worktrees/M001",
+    }),
+  );
+
+  assert.throws(
+    () =>
+      lifecycle.adoptOrphanWorktree("M001", "/project", () => {
+        assert.equal(s.basePath, "/project/.gsd/worktrees/M001");
+        assert.equal(s.originalBasePath, "/project");
+        throw new Error("merge exploded");
+      }),
+    /merge exploded/,
+  );
+  assert.equal(s.basePath, "/prior");
+  assert.equal(s.originalBasePath, "/prior-original");
+});
