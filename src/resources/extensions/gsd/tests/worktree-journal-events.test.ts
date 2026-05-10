@@ -1,6 +1,6 @@
 import { describe, test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, readdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -168,14 +168,25 @@ describe("worktree journal events", () => {
   });
 
   test("mergeAndExit emits worktree-merge-start", () => {
+    const worktreePath = join(tmp, "worktree");
+    mkdirSync(worktreePath, { recursive: true });
     const s = makeSession({
-      basePath: join(tmp, "worktree"),
+      basePath: worktreePath,
       originalBasePath: tmp,
     });
     const deps = makeDeps({
       isInAutoWorktree: () => true,
       getIsolationMode: () => "worktree",
+      mergeMilestoneToMain: () => {
+        assert.equal(
+          realpathSync(process.cwd()),
+          realpathSync(worktreePath),
+          "worktree-mode merge must keep the real worktree as cwd",
+        );
+        return { pushed: false, codeFilesChanged: true };
+      },
     });
+    process.chdir(worktreePath);
     new WorktreeLifecycle(s, deps).exitMilestone(
       "M001",
       { merge: true },
@@ -187,6 +198,33 @@ describe("worktree journal events", () => {
     assert.ok(start, "worktree-merge-start event should be emitted");
     assert.equal(start!.data?.milestoneId, "M001");
     assert.equal(start!.data?.mode, "worktree");
+  });
+
+  test("exitMilestone returns real codeFilesChanged from merge", () => {
+    const worktreePath = join(tmp, "worktree");
+    mkdirSync(worktreePath, { recursive: true });
+    const s = makeSession({
+      basePath: worktreePath,
+      originalBasePath: tmp,
+    });
+    const deps = makeDeps({
+      isInAutoWorktree: () => true,
+      getIsolationMode: () => "worktree",
+      mergeMilestoneToMain: () => ({ pushed: false, codeFilesChanged: true }),
+    });
+    process.chdir(worktreePath);
+
+    const result = new WorktreeLifecycle(s, deps).exitMilestone(
+      "M001",
+      { merge: true },
+      makeNotifyCtx(),
+    );
+
+    assert.deepEqual(result, {
+      ok: true,
+      merged: true,
+      codeFilesChanged: true,
+    });
   });
 
   test("mergeAndExit emits worktree-merge-failed on error", () => {

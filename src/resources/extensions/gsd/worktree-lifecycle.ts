@@ -98,6 +98,16 @@ export interface WorktreeLifecycleDeps {
     milestoneId: string,
     opts?: { preserveBranch?: boolean },
   ) => void;
+  /**
+   * Inner squash-merge primitive (`auto-worktree.ts:mergeMilestoneToMain`).
+   *
+   * **Module-internal seam — do not construct your own.** Only the wiring
+   * factory `auto.ts:buildWorktreeLifecycleDeps()` is permitted to populate
+   * this field. The primitive is `@internal` (ADR-016 phase 2 / A3, issue
+   * #5619); production callers reach the merge body through
+   * `mergeMilestoneStandalone` or `WorktreeLifecycle.exitMilestone`, never
+   * by calling this dep directly.
+   */
   mergeMilestoneToMain: (
     basePath: string,
     milestoneId: string,
@@ -746,11 +756,10 @@ function _mergeWorktreeModeImpl(
       /* best-effort */
     }
 
-    // Error recovery: always chdir back to project root so subsequent
-    // process.cwd() calls don't ENOENT. Session-side cleanup
-    // (restoreToProjectRoot, gitService rebuild) is the caller's
-    // responsibility.
-    if (originalBasePath) {
+    // Error recovery: chdir back to project root only when no real worktree
+    // path is available. Session-side cleanup (restoreToProjectRoot,
+    // gitService rebuild) is the caller's responsibility.
+    if (originalBasePath && !worktreeBasePath) {
       try {
         process.chdir(originalBasePath);
       } catch {
@@ -899,9 +908,11 @@ function _mergeBranchModeImpl(
  * `_mergeAndExit`) by the single-loop path. Caller is responsible for any
  * session-side cleanup based on the returned `mode`.
  *
- * **CWD anchor**: anchors `process.cwd()` at `originalBasePath` before the
- * merge to mirror the single-loop guard against ENOENT after teardown
- * (de73fb43d). Best-effort; silent on failure.
+ * **CWD anchor**: anchors `process.cwd()` at `originalBasePath` before
+ * non-worktree merge paths to mirror the single-loop guard against ENOENT
+ * after teardown (de73fb43d). Worktree-mode merge paths keep the real
+ * worktree as cwd because `mergeMilestoneToMain()` infers source worktree
+ * state from `process.cwd()`. Best-effort; silent on failure.
  *
  * **Failure handling**: `MergeConflictError` and other unrecoverable errors
  * propagate to the caller. The caller is responsible for any state restore
@@ -915,29 +926,20 @@ export function mergeMilestoneStandalone(
   const { originalBasePath, worktreeBasePath, milestoneId, notify } = mctx;
   validateMilestoneId(milestoneId);
 
-  // Anchor cwd at the project root before any merge work. Some merge paths
-  // (mergeMilestoneToMain, slice-cadence) chdir explicitly; others (branch-
-  // mode, isolation-degraded skip) do not. If the worktree dir is later
-  // torn down while cwd still points into it, every subsequent
-  // process.cwd() throws ENOENT — which after de73fb43d surfaces as a
-  // session-failed cancel and (in headless mode) terminates the whole gsd
-  // process. Best-effort: silent on failure so synthetic test paths still
-  // pass.
-  if (originalBasePath) {
-    try {
-      process.chdir(originalBasePath);
-    } catch (err) {
-      debugLog("WorktreeLifecycle", {
-        action: "mergeAndExit",
-        phase: "pre-merge-chdir-failed",
-        milestoneId,
-        originalBasePath,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
   if (mctx.isolationDegraded) {
+    if (originalBasePath) {
+      try {
+        process.chdir(originalBasePath);
+      } catch (err) {
+        debugLog("WorktreeLifecycle", {
+          action: "mergeAndExit",
+          phase: "pre-merge-chdir-failed",
+          milestoneId,
+          originalBasePath,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
     debugLog("WorktreeLifecycle", {
       action: "mergeAndExit",
       milestoneId,
@@ -984,12 +986,43 @@ export function mergeMilestoneStandalone(
       skipped: true,
       reason: "mode-none",
     });
+    // Anchor cwd at project root before the early return so subsequent
+    // process.cwd() calls after the skip don't ENOENT if we were inside a
+    // worktree directory that gets torn down later. Best-effort.
+    if (originalBasePath) {
+      try {
+        process.chdir(originalBasePath);
+      } catch {
+        /* best-effort */
+      }
+    }
     return {
       merged: false,
       mode: "skipped",
       codeFilesChanged: false,
       pushed: false,
     };
+  }
+
+  // Set cwd to the correct anchor before dispatching to mode implementations.
+  // Worktree mode / in-worktree override must run from the live worktree so
+  // mergeMilestoneToMain can find worktree-local state; branch mode runs from
+  // the original project root. Best-effort for synthetic test paths.
+  const targetCwd = mode === "worktree" || inWorktree
+    ? worktreeBasePath
+    : originalBasePath;
+  if (targetCwd) {
+    try {
+      process.chdir(targetCwd);
+    } catch (err) {
+      debugLog("WorktreeLifecycle", {
+        action: "mergeAndExit",
+        phase: "pre-merge-chdir-failed",
+        milestoneId,
+        targetCwd,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   if (mode === "worktree" || inWorktree) {
@@ -1058,7 +1091,11 @@ export class WorktreeLifecycle {
     if (opts.merge) {
       try {
         const merged = this._mergeAndExit(milestoneId, ctx);
-        return { ok: true, merged, codeFilesChanged: false };
+        return {
+          ok: true,
+          merged: merged.merged,
+          codeFilesChanged: merged.codeFilesChanged,
+        };
       } catch (err) {
         if (err instanceof MergeConflictError) {
           return { ok: false, reason: "merge-conflict", cause: err };
@@ -1095,7 +1132,7 @@ export class WorktreeLifecycle {
     let merged = false;
     let mergeThrew = false;
     try {
-      merged = this._mergeAndExit(currentMilestoneId, ctx);
+      merged = this._mergeAndExit(currentMilestoneId, ctx).merged;
     } catch (err) {
       if (err instanceof UserNotifiedError) throw err;
       mergeThrew = true;
@@ -1235,11 +1272,14 @@ export class WorktreeLifecycle {
    * - mode-specific session restore: worktree-mode → `restoreToProjectRoot`,
    *   branch-mode → `gitService` rebuild
    *
-   * Returns `true` when an actual squash-merge ran. Errors propagate after
+   * Returns the session-less merge result. Errors propagate after
    * `restoreToProjectRoot()` runs so callers always receive a consistent
    * session.
    */
-  private _mergeAndExit(milestoneId: string, ctx: NotifyCtx): boolean {
+  private _mergeAndExit(
+    milestoneId: string,
+    ctx: NotifyCtx,
+  ): MergeStandaloneResult {
     // #4764 — telemetry: record start timestamp so we can emit merge duration.
     const mergeStartedAt = new Date().toISOString();
     const mergeStartMs = Date.now();
@@ -1276,7 +1316,7 @@ export class WorktreeLifecycle {
           basePath: this.s.basePath,
         });
       }
-      return false;
+      return result;
     }
 
     // #4765 — when collapse_cadence=slice AND milestone_resquash=true, the
@@ -1352,7 +1392,7 @@ export class WorktreeLifecycle {
       // Rebuild GitService after merge (branch HEAD changed)
       rebuildGitService(this.s, this.deps);
     }
-    return true;
+    return result;
   }
 
   // ── Removed: _mergeWorktreeMode / _mergeBranchMode bodies ────────────
