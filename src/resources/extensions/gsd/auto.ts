@@ -1016,13 +1016,13 @@ export async function cleanupAfterLoopExit(ctx: ExtensionContext): Promise<void>
     initHealthWidget(ctx);
   }
 
-  // ADR-016 phase 2 / B5 (#5623): the stop-path basePath restore is the
-  // same contract as `Lifecycle.restoreToProjectRoot()` — set s.basePath
-  // back to s.originalBasePath, rebuild git service, invalidate caches.
-  // Route through the verb so the file-boundary closure invariant
-  // ("single owner of `s.basePath` mutation") holds at the stop site
-  // too. The chdir stays at the call site since `restoreToProjectRoot`
-  // is a pure session-state mutation.
+  // ADR-016 phase 3 (#5693): the stop-path basePath restore routes through
+  // `Lifecycle.restoreToProjectRoot()`, the sole owner of `s.basePath`
+  // mutation. The verb assigns `s.basePath` before any throwable work
+  // (rebuildGitService, cache invalidation), so a thrown error still leaves
+  // basePath restored — no fallback assignment needed at the call site.
+  // The chdir stays here because `restoreToProjectRoot` is a pure
+  // session-state mutation.
   if (s.originalBasePath) {
     try {
       buildLifecycle().restoreToProjectRoot();
@@ -1032,7 +1032,6 @@ export async function cleanupAfterLoopExit(ctx: ExtensionContext): Promise<void>
         `restore project root failed: ${err instanceof Error ? err.message : String(err)}`,
         { file: "auto.ts" },
       );
-      s.basePath = s.originalBasePath;
     }
     try {
       process.chdir(s.originalBasePath);
@@ -1351,13 +1350,14 @@ export async function stopAuto(
       }
     }
 
-    // ── Step 7: Restore basePath and chdir (ADR-016 phase 2 / B5, #5623) ──
+    // ── Step 7: Restore basePath and chdir (ADR-016 phase 3, #5693) ──
+    // `restoreToProjectRoot` assigns s.basePath before any throwable work;
+    // no fallback assignment is needed at the call site.
     if (s.originalBasePath) {
       try {
         buildLifecycle().restoreToProjectRoot();
       } catch (e) {
         debugLog("stop-cleanup-basepath", { error: e instanceof Error ? e.message : String(e) });
-        s.basePath = s.originalBasePath;
       }
       try {
         process.chdir(s.basePath);

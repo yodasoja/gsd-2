@@ -111,8 +111,15 @@ test("cleanupAfterLoopExit keeps cleanup best-effort when lifecycle restore thro
   const worktree = join(base, ".gsd", "worktrees", "M001");
   const previousCwd = process.cwd();
   let restoreCalls = 0;
-  t.mock.method(WorktreeLifecycle.prototype, "restoreToProjectRoot", () => {
+  // ADR-016 phase 3 (#5693): the real `restoreToProjectRoot` assigns
+  // `s.basePath = s.originalBasePath` BEFORE any throwable work
+  // (rebuildGitService, cache invalidation). Mirror that ordering in the
+  // mock so the throw scenario reflects production: basePath is restored
+  // even when the verb throws partway through.
+  t.mock.method(WorktreeLifecycle.prototype, "restoreToProjectRoot", function (this: WorktreeLifecycle) {
     restoreCalls += 1;
+    (this as unknown as { s: { basePath: string; originalBasePath: string } })
+      .s.basePath = (this as unknown as { s: { originalBasePath: string } }).s.originalBasePath;
     throw new Error("restore failed");
   });
 
