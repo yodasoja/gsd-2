@@ -630,6 +630,71 @@ test("adoptOrphanWorktree falls back to base when getAutoWorktreePath returns nu
   assert.equal(basePathInsideCallback, "/project");
 });
 
+test("adoptOrphanWorktree restores prior paths and cwd when the callback throws", () => {
+  const originalCwd = process.cwd();
+  const base = mkdtempSync(join(tmpdir(), "gsd-orphan-rollback-base-"));
+  const worktree = mkdtempSync(join(tmpdir(), "gsd-orphan-rollback-wt-"));
+  const s = makeSession({
+    basePath: "/prior",
+    originalBasePath: originalCwd,
+    active: true,
+  });
+  const deps = makeDeps({
+    getAutoWorktreePath: () => worktree,
+  });
+  const lifecycle = new WorktreeLifecycle(s, deps);
+  const thrown = new Error("synthetic callback failure");
+
+  try {
+    assert.throws(
+      () =>
+        lifecycle.adoptOrphanWorktree<{ merged: boolean }>("M001", base, () => {
+          assert.equal(s.basePath, worktree);
+          assert.equal(s.originalBasePath, base);
+          throw thrown;
+        }),
+      thrown,
+    );
+
+    assert.equal(s.basePath, "/prior");
+    assert.equal(s.originalBasePath, originalCwd);
+    assert.equal(process.cwd(), originalCwd);
+  } finally {
+    process.chdir(originalCwd);
+    rmSync(base, { recursive: true, force: true });
+    rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
+test("adoptOrphanWorktree rejects traversal-style milestone ids before path resolution", () => {
+  const s = makeSession({
+    basePath: "/prior",
+    originalBasePath: "/prior-original",
+    active: true,
+  });
+  const deps = makeDeps({
+    getAutoWorktreePath: () => {
+      throw new Error("getAutoWorktreePath should not be called");
+    },
+  });
+  const lifecycle = new WorktreeLifecycle(s, deps);
+
+  assert.throws(
+    () =>
+      lifecycle.adoptOrphanWorktree("../M001", "/project", () => ({
+        merged: true as const,
+      })),
+    /Invalid milestoneId: \.\.\/M001/,
+  );
+
+  assert.equal(s.basePath, "/prior");
+  assert.equal(s.originalBasePath, "/prior-original");
+  assert.equal(
+    deps.calls.filter((c) => c.fn === "getAutoWorktreePath").length,
+    0,
+  );
+});
+
 test("adoptOrphanWorktree forwards the callback's return value", () => {
   const s = makeSession();
   s.active = true;

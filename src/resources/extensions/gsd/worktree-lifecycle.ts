@@ -1560,14 +1560,44 @@ export class WorktreeLifecycle {
     base: string,
     run: () => T,
   ): T {
+    validateMilestoneId(milestoneId);
+
     const priorBasePath = this.s.basePath;
     const priorOriginalBasePath = this.s.originalBasePath;
+    const restorePriorPaths = (phase: string): void => {
+      this.s.basePath = priorBasePath || base;
+      this.s.originalBasePath = priorOriginalBasePath || base;
+      try {
+        process.chdir(this.s.originalBasePath || base);
+      } catch (err) {
+        debugLog("WorktreeLifecycle", {
+          action: "adoptOrphanWorktree",
+          phase,
+          base: this.s.originalBasePath || base,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    };
+
+    let adoptedBasePath: string;
+    try {
+      adoptedBasePath = this.deps.getAutoWorktreePath(base, milestoneId) ?? base;
+    } catch (err) {
+      restorePriorPaths("rollback-resolve-worktree-failed");
+      throw err;
+    }
 
     // Swap into the orphan worktree.
     this.s.originalBasePath = base;
-    this.s.basePath = this.deps.getAutoWorktreePath(base, milestoneId) ?? base;
+    this.s.basePath = adoptedBasePath;
 
-    const result = run();
+    let result: T;
+    try {
+      result = run();
+    } catch (err) {
+      restorePriorPaths("rollback-run-failed");
+      throw err;
+    }
 
     if (!result.merged) {
       // Failed orphan merge — revert to project root so the caller can
