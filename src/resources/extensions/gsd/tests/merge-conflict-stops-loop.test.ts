@@ -167,6 +167,15 @@ describe("WorktreeResolver.mergeAndExit re-throws MergeConflictError (#2330)", (
       join(baseDir, ".gsd", "milestones", "M001", "M001-ROADMAP.md"),
       "# M001\n",
     );
+    // ADR-016 phase 2 / C3 (#5626): `getIsolationMode` is also inlined.
+    // Without explicit isolation preferences the mode defaults to "none"
+    // and the merge short-circuits before the test's mocked
+    // `mergeMilestoneToMain` is reached. Write a preferences file so the
+    // standalone routes through worktree-mode merge.
+    writeFileSync(
+      join(baseDir, ".gsd", "preferences.md"),
+      "## Git\n- isolation: worktree\n",
+    );
   });
 
   afterEach(() => {

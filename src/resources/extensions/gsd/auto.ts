@@ -1708,24 +1708,21 @@ export async function pauseAuto(
  * Lifecycle Module instead of bypassing it (ADR-016 phase 2 / A2).
  */
 export function buildWorktreeLifecycleDeps(): WorktreeLifecycleDeps {
-  // ADR-016 phase 2 / C1 + C2:
+  // ADR-016 phase 2 / C1 + C2 + C3:
   //   C1 (#5624) inlined readFileSync, getCurrentBranch, checkoutBranch,
   //   autoCommitCurrentBranch.
   //   C2 (#5625) inlined enterAutoWorktree, createAutoWorktree,
   //   enterBranchModeForMilestone, getAutoWorktreePath,
   //   teardownAutoWorktree, isInAutoWorktree, autoWorktreeBranch.
-  // Dep bag is now 7 fields. C3 (#5626) and C4 (#5627) close out the
-  // remaining four leaf primitives + the GitServiceImpl shape.
-  const deps: WorktreeLifecycleDeps = {
-    getIsolationMode,
-    invalidateAllCaches,
+  //   C3 (#5626) inlined invalidateAllCaches, loadEffectiveGSDPreferences,
+  //   getIsolationMode, resolveMilestoneFile.
+  // Dep bag is now 3 fields. C4 (#5627) converts GitServiceImpl to a
+  // factory; the final shape will be ≤6 fields.
+  return {
     GitServiceImpl,
-    loadEffectiveGSDPreferences,
     worktreeProjection: new WorktreeStateProjection(),
     mergeMilestoneToMain,
-    resolveMilestoneFile,
-  };
-  return deps;
+  } as unknown as WorktreeLifecycleDeps;
 }
 
 function buildLifecycle(): WorktreeLifecycle {

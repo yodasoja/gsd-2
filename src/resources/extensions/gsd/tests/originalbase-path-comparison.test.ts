@@ -300,92 +300,15 @@ describe("normalizeWorktreePathForCompare equalises canonical vs non-canonical f
 // resolveMilestoneFile call against the "worktree" path that is actually the
 // same directory). The new code correctly skips the fallback.
 
-describe("WorktreeResolver: roadmap-fallback skipped when basePath is same physical path as originalBase", () => {
-  test("with trailing-slash basePath equal to originalBase: resolveMilestoneFile called once", () => {
-    // originalBase is canonical (as returned by workspace registry)
-    const canonicalBase = "/tmp/m5-test-project";
-    // s.basePath has a trailing slash — same physical dir, non-canonical string
-    const trailingSlashBase = canonicalBase + "/";
-
-    const s = makeSession({
-      basePath: trailingSlashBase,
-      originalBasePath: canonicalBase,
-    });
-
-    const calls: CallLog[] = [];
-    const deps = makeDeps({
-      // isInAutoWorktree: basePath has trailing slash but is NOT a worktree
-      isInAutoWorktree: (basePath: string) => {
-        calls.push({ fn: "isInAutoWorktree", args: [basePath] });
-        return false;
-      },
-      // resolveMilestoneFile always returns null (no roadmap found)
-      resolveMilestoneFile: (basePath: string, milestoneId: string, fileType: string) => {
-        calls.push({ fn: "resolveMilestoneFile", args: [basePath, milestoneId, fileType] });
-        return null;
-      },
-      teardownAutoWorktree: (basePath: string, milestoneId: string, opts?: { preserveBranch?: boolean }) => {
-        calls.push({ fn: "teardownAutoWorktree", args: [basePath, milestoneId, opts] });
-      },
-    });
-
-    // Override calls ref so we can inspect it directly
-    (deps as unknown as { calls: CallLog[] }).calls = calls;
-
-    const resolver = makeResolver(s, deps);
-    const ctx = makeNotifyCtx();
-
-    // mergeAndExit → _mergeWorktreeMode
-    // originalBase = s.originalBasePath = canonicalBase
-    // s.basePath = trailingSlashBase — physically same as canonicalBase
-    // Post-fix: isSamePath(trailingSlashBase, canonicalBase) is true
-    //   → roadmap fallback branch is skipped (resolveMilestoneFile called once)
-    // Pre-fix (bug): trailingSlashBase !== canonicalBase → fallback entered
-    //   → resolveMilestoneFile called twice
-
-    resolver.mergeAndExit("M001", ctx);
-
-    const rmfCalls = calls.filter(c => c.fn === "resolveMilestoneFile");
-    assert.strictEqual(rmfCalls.length, 1,
-      "resolveMilestoneFile must be called exactly once — fallback should be skipped when " +
-      "s.basePath is the same physical path as originalBase (isSamePath fix)");
-  });
-
-  test("with genuinely different basePath (inside worktree): resolveMilestoneFile called twice", () => {
-    // originalBase is the project root
-    const projectRoot = "/tmp/m5-test-project";
-    // s.basePath is inside a worktree — a physically different path
-    const worktreePath = projectRoot + "/.gsd/worktrees/M002";
-
-    const s = makeSession({
-      basePath: worktreePath,
-      originalBasePath: projectRoot,
-    });
-
-    const calls: CallLog[] = [];
-    const deps = makeDeps({
-      isInAutoWorktree: (basePath: string) => {
-        calls.push({ fn: "isInAutoWorktree", args: [basePath] });
-        return basePath.includes("worktrees");
-      },
-      resolveMilestoneFile: (basePath: string, milestoneId: string, fileType: string) => {
-        calls.push({ fn: "resolveMilestoneFile", args: [basePath, milestoneId, fileType] });
-        return null; // no roadmap in either location
-      },
-      teardownAutoWorktree: (basePath: string, milestoneId: string, opts?: { preserveBranch?: boolean }) => {
-        calls.push({ fn: "teardownAutoWorktree", args: [basePath, milestoneId, opts] });
-      },
-    });
-    (deps as unknown as { calls: CallLog[] }).calls = calls;
-
-    const resolver = makeResolver(s, deps);
-    const ctx = makeNotifyCtx();
-
-    resolver.mergeAndExit("M002", ctx);
-
-    const rmfCalls = calls.filter(c => c.fn === "resolveMilestoneFile");
-    assert.strictEqual(rmfCalls.length, 2,
-      "resolveMilestoneFile must be called twice when basePath is a genuine worktree path " +
-      "(fallback should run for different physical paths)");
-  });
-});
+// ADR-016 phase 2 / C2 + C3 (#5625, #5626): the prior two tests in this
+// suite asserted call counts on `deps.resolveMilestoneFile` /
+// `deps.isInAutoWorktree` / `deps.teardownAutoWorktree` to verify that the
+// roadmap-fallback branch was skipped when basePath was a non-canonical
+// form of originalBase (trailing slash). After C2/C3 those fields are
+// inlined into worktree-lifecycle.ts as direct imports — the mocks no
+// longer fire and the call-count assertions test nothing meaningful. The
+// underlying invariant (isSamePathPhysical normalises trailing slashes,
+// canonical/non-canonical pairs, and case differences) is preserved
+// inside worktree-lifecycle.ts and covered indirectly by the merge-area
+// integration tests, which exercise real worktree merges where the
+// fallback choice matters.

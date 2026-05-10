@@ -68,19 +68,13 @@ function makeDeps(
   overrides?: Partial<LegacyTestDeps>,
 ): LegacyTestDeps & { calls: CallLog[] } {
   const calls: CallLog[] = [];
-  // ADR-016 phase 2 / C1 + C2 inlined worktree-manager + fs/git-CLI primitives.
-  // Tests still pass legacy fields via `LegacyTestDeps` — Lifecycle ignores the
-  // extras structurally and reads override hooks (`getAutoWorktreePath`,
-  // `getCurrentBranch`, etc.) through the C1-healing primitive-override pattern.
+  // ADR-016 phase 2 / C1 + C2 + C3 inlined worktree-manager, fs/git-CLI,
+  // cache, preferences, and path primitives. Tests still pass legacy fields
+  // via `LegacyTestDeps` — Lifecycle ignores the extras structurally and
+  // reads override hooks (`getAutoWorktreePath`, `getCurrentBranch`, etc.)
+  // through the C1-healing primitive-override pattern.
   const deps: LegacyTestDeps & { calls: CallLog[] } = {
     calls,
-    getIsolationMode: () => {
-      calls.push({ fn: "getIsolationMode", args: [] });
-      return "worktree";
-    },
-    invalidateAllCaches: () => {
-      calls.push({ fn: "invalidateAllCaches", args: [] });
-    },
     GitServiceImpl: class MockGitService {
       basePath: string;
       gitConfig: unknown;
@@ -90,10 +84,6 @@ function makeDeps(
         this.gitConfig = gitConfig;
       }
     } as unknown as WorktreeLifecycleDeps["GitServiceImpl"],
-    loadEffectiveGSDPreferences: () => {
-      calls.push({ fn: "loadEffectiveGSDPreferences", args: [] });
-      return { preferences: { git: {} } };
-    },
     worktreeProjection: new WorktreeStateProjection(),
     // Legacy stubs — Lifecycle no longer reads these post-C2; preserved as
     // no-ops so existing test fixtures keep type-checking.
@@ -110,7 +100,6 @@ function makeDeps(
     autoWorktreeBranch: (mid: string) => `milestone/${mid}`,
     teardownAutoWorktree: () => {},
     mergeMilestoneToMain: () => ({ pushed: false, codeFilesChanged: true }),
-    resolveMilestoneFile: () => null,
     ...overrides,
   };
   return deps;
@@ -206,10 +195,8 @@ test("enterMilestone returns ok:true mode:worktree on successful create", (t) =>
     s.basePath.endsWith("/.gsd/worktrees/M001"),
     `expected s.basePath to end with /.gsd/worktrees/M001, got ${s.basePath}`,
   );
-  assert.equal(
-    deps.calls.filter((c) => c.fn === "invalidateAllCaches").length,
-    1,
-  );
+  // After C3 (#5626) `invalidateAllCaches` is inlined; assertion against
+  // `deps.calls` for cache invalidation is no longer possible.
 });
 
 test("enterMilestone returns ok:true mode:branch on successful branch fallback", (t) => {
@@ -486,7 +473,7 @@ test("degradeToBranchMode sets isolationDegraded and runs branch-mode setup", (t
   lifecycle.degradeToBranchMode("M001", ctx);
 
   assert.equal(s.isolationDegraded, true);
-  assert.equal(deps.calls.filter((c) => c.fn === "invalidateAllCaches").length, 1);
+  // After C3 (#5626) `invalidateAllCaches` is inlined.
 });
 
 test("degradeToBranchMode is no-op when isolationDegraded is already true", () => {
@@ -498,8 +485,12 @@ test("degradeToBranchMode is no-op when isolationDegraded is already true", () =
 
   lifecycle.degradeToBranchMode("M001", ctx);
 
-  // No git/cache invocation when already degraded — pre-check returns early.
-  assert.equal(deps.calls.filter((c) => c.fn === "invalidateAllCaches").length, 0);
+  // Pre-check returns early before any side effect. After C3 the
+  // `invalidateAllCaches` mock is gone; we assert the observable
+  // contract: `s.isolationDegraded` stays true and no notify message
+  // is emitted.
+  assert.equal(s.isolationDegraded, true);
+  assert.equal(ctx.messages.length, 0);
 });
 
 test("degradeToBranchMode marks degraded and notifies on branch-mode failure", () => {
@@ -533,8 +524,31 @@ test("restoreToProjectRoot restores basePath to originalBasePath and rebuilds gi
   lifecycle.restoreToProjectRoot();
 
   assert.equal(s.basePath, "/project");
+  // GitServiceImpl is still injected (C4 will retire it). After C3
+  // `invalidateAllCaches` is inlined and no longer routes through deps.
   assert.equal(deps.calls.filter((c) => c.fn === "GitServiceImpl").length, 1);
-  assert.equal(deps.calls.filter((c) => c.fn === "invalidateAllCaches").length, 1);
+});
+
+test("restoreToProjectRoot loads git preferences from restored session base path", () => {
+  const s = makeSession();
+  s.originalBasePath = "/project";
+  s.basePath = "/project/.gsd/worktrees/M001";
+  const preferenceBasePaths: Array<string | undefined> = [];
+  const deps = makeDeps({
+    loadEffectiveGSDPreferences: (basePath?: string) => {
+      preferenceBasePaths.push(basePath);
+      return { preferences: { git: { main_branch: "trunk" } } };
+    },
+  });
+  const lifecycle = new WorktreeLifecycle(s, deps);
+
+  lifecycle.restoreToProjectRoot();
+
+  assert.deepEqual(preferenceBasePaths, ["/project"]);
+  assert.deepEqual(
+    deps.calls.find((c) => c.fn === "GitServiceImpl")?.args,
+    ["/project", { main_branch: "trunk" }],
+  );
 });
 
 test("restoreToProjectRoot is no-op when originalBasePath is empty", () => {
