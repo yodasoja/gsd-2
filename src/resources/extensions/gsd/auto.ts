@@ -241,7 +241,10 @@ import { resolveUokFlags } from "./uok/flags.js";
 import { validateDirectory } from "./validate-directory.js";
 import { createAutoOrchestrator } from "./auto/orchestrator.js";
 import type { AutoOrchestrationModule, AutoOrchestratorDeps } from "./auto/contracts.js";
-import { reconcileBeforeDispatch } from "./state-reconciliation.js";
+import {
+  reconcileBeforeDispatch,
+  ReconciliationFailedError,
+} from "./state-reconciliation.js";
 import { compileUnitToolContract } from "./tool-contract.js";
 import { createWorktreeSafetyModule } from "./worktree-safety.js";
 import { resolveManifest } from "./unit-context-manifest.js";
@@ -1811,19 +1814,30 @@ export function createWiredAutoOrchestrationModule(
   const deps: AutoOrchestratorDeps = {
     stateReconciliation: {
       async reconcileBeforeDispatch() {
-        const result = await reconcileBeforeDispatch(dispatchBasePath);
-        if (!result.ok) {
+        try {
+          const result = await reconcileBeforeDispatch(dispatchBasePath);
+          if (result.blockers.length > 0) {
+            return {
+              ok: false,
+              reason: result.blockers[0],
+              stateSnapshot: result.stateSnapshot,
+            };
+          }
+          const repairedKinds = result.repaired.map((d) => d.kind);
           return {
-            ok: false,
-            reason: result.reason,
+            ok: true,
+            reason:
+              repairedKinds.length > 0
+                ? `repaired: ${repairedKinds.join(", ")}`
+                : "clean",
             stateSnapshot: result.stateSnapshot,
           };
+        } catch (err) {
+          if (err instanceof ReconciliationFailedError) {
+            return { ok: false, reason: err.message };
+          }
+          throw err;
         }
-        return {
-          ok: true,
-          reason: result.repaired.join(", "),
-          stateSnapshot: result.stateSnapshot,
-        };
       },
     },
     dispatch: {
