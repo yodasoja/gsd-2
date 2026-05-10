@@ -44,6 +44,14 @@ type DriftRecord =
     };
 ```
 
+`roadmap-divergence` means the milestone `ROADMAP.md` projection and DB slice
+rows no longer agree on slice presence, sequence, or declared `depends` values.
+Its repair treats `ROADMAP.md` as the source of truth: the markdown hierarchy is
+re-imported into the DB, then each parsed slice's `depends` list is synced into
+the `slice_dependencies` junction table. This keeps both the JSON `slices.depends`
+column and the relational dependency view aligned before Dispatch decides which
+slice or task can run.
+
 ### Lifecycle
 
 ```ts
