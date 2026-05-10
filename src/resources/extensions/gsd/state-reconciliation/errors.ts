@@ -8,8 +8,18 @@ export interface ReconciliationFailureDetail {
   cause: unknown;
 }
 
+export interface ReconciliationDetectionFailureDetail {
+  handlerKind: string;
+  phase: "detect";
+  basePath: string;
+  statePhase?: string;
+  activeMilestoneId?: string;
+  cause: unknown;
+}
+
 export interface ReconciliationFailedErrorOptions {
   failures?: ReadonlyArray<ReconciliationFailureDetail>;
+  detectionFailures?: ReadonlyArray<ReconciliationDetectionFailureDetail>;
   persistentDrift?: ReadonlyArray<DriftRecord>;
   pass?: number;
 }
@@ -24,6 +34,7 @@ export interface ReconciliationFailedErrorOptions {
  */
 export class ReconciliationFailedError extends Error {
   readonly failures: ReadonlyArray<ReconciliationFailureDetail>;
+  readonly detectionFailures: ReadonlyArray<ReconciliationDetectionFailureDetail>;
   readonly persistentDrift: ReadonlyArray<DriftRecord>;
   readonly pass?: number;
 
@@ -31,12 +42,18 @@ export class ReconciliationFailedError extends Error {
     super(formatMessage(opts));
     this.name = "ReconciliationFailedError";
     this.failures = opts.failures ?? [];
+    this.detectionFailures = opts.detectionFailures ?? [];
     this.persistentDrift = opts.persistentDrift ?? [];
     this.pass = opts.pass;
   }
 }
 
 function formatMessage(opts: ReconciliationFailedErrorOptions): string {
+  if (opts.detectionFailures && opts.detectionFailures.length > 0) {
+    const kinds = opts.detectionFailures.map((f) => f.handlerKind).join(", ");
+    const passSuffix = opts.pass !== undefined ? ` in pass ${opts.pass}` : "";
+    return `Reconciliation detect failed${passSuffix} for handlers: ${kinds}`;
+  }
   if (opts.failures && opts.failures.length > 0) {
     const kinds = opts.failures.map((f) => f.drift.kind).join(", ");
     const passSuffix = opts.pass !== undefined ? ` in pass ${opts.pass}` : "";

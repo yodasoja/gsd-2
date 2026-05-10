@@ -65,7 +65,7 @@ export async function reconcileBeforeDispatch(
     const stateSnapshot = await deps.deriveState(basePath, deps.deriveStateOptions);
     const ctx: DriftContext = { basePath, state: stateSnapshot };
 
-    const drift = await detectAllDrift(stateSnapshot, ctx, registry);
+    const drift = await detectAllDrift(stateSnapshot, ctx, registry, pass);
     if (drift.length === 0) {
       return {
         ok: true,
@@ -122,12 +122,21 @@ export async function reconcileBeforeDispatch(
 async function detectAllDrift(
   state: GSDState,
   ctx: DriftContext,
-  registry: ReadonlyArray<DriftHandler>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  registry: ReadonlyArray<DriftHandler<any>>,
+  pass?: number,
 ): Promise<DriftRecord[]> {
   const collected: DriftRecord[] = [];
   for (const handler of registry) {
-    const detected = await handler.detect(state, ctx);
-    collected.push(...detected);
+    try {
+      const detected = await handler.detect(state, ctx);
+      collected.push(...detected);
+    } catch (cause) {
+      throw new ReconciliationFailedError({
+        failures: [{ drift: { kind: handler.kind } as DriftRecord, cause }],
+        pass,
+      });
+    }
   }
   return collected;
 }

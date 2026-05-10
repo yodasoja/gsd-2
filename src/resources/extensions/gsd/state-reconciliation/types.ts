@@ -8,12 +8,12 @@ import type { GSDState } from "../types.js";
  * Discriminated union over drift kinds the State Reconciliation Module
  * recognizes. Each variant carries the identifiers its matching repair needs.
  *
- * Subsequent ADR-017 issues add variants: unmerged-merge-state, stale-render,
- * stale-worker, unregistered-milestone, roadmap-divergence,
- * missing-completion-timestamp.
+ * Subsequent ADR-017 issues add variants: stale-render, stale-worker,
+ * unregistered-milestone, roadmap-divergence, missing-completion-timestamp.
  */
 export type DriftRecord =
-  | { kind: "stale-sketch-flag"; mid: string; sid: string };
+  | { kind: "stale-sketch-flag"; mid: string; sid: string }
+  | { kind: "unmerged-merge-state"; basePath: string };
 
 /**
  * Context threaded to detector and repair functions. Keeps handlers from
@@ -65,7 +65,13 @@ export interface ReconciliationDeps {
     basePath: string,
     opts?: DeriveStateOptions,
   ) => Promise<GSDState>;
-  /** Override of the drift handler catalog. Defaults to DRIFT_REGISTRY. */
-  registry?: ReadonlyArray<DriftHandler>;
+  /**
+   * Override of the drift handler catalog. Defaults to DRIFT_REGISTRY. Each
+   * handler is parameterized over its own DriftRecord variant; the union of
+   * disjoint parameter types in repair forces the array element type to
+   * DriftHandler<any> here (see registry.ts comment).
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  registry?: ReadonlyArray<DriftHandler<any>>;
   deriveStateOptions?: DeriveStateOptions;
 }
