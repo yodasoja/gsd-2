@@ -129,9 +129,9 @@ function makeGitRepoBase(opts?: {
   return base;
 }
 
-function cleanupRepoBase(base: string, previousCwd: string): void {
+function cleanupRepoBase(base: string, previousCwd?: string): void {
   try { closeDatabase(); } catch { /* noop */ }
-  try { process.chdir(previousCwd); } catch { /* noop */ }
+  try { if (previousCwd) process.chdir(previousCwd); } catch { /* noop */ }
   try { rmSync(base, { recursive: true, force: true }); } catch { /* noop */ }
 }
 

@@ -1350,18 +1350,19 @@ export async function stopAuto(
     }
 
     // ── Step 7: Restore basePath and chdir (ADR-016 phase 2 / B5, #5623) ──
-    try {
-      if (s.originalBasePath) {
+    if (s.originalBasePath) {
+      try {
         buildLifecycle().restoreToProjectRoot();
-        try {
-          process.chdir(s.basePath);
-        } catch (err) {
-          /* best-effort */
-          logWarning("engine", `chdir failed: ${err instanceof Error ? err.message : String(err)}`, { file: "auto.ts" });
-        }
+      } catch (e) {
+        debugLog("stop-cleanup-basepath", { error: e instanceof Error ? e.message : String(e) });
+        s.basePath = s.originalBasePath;
       }
-    } catch (e) {
-      debugLog("stop-cleanup-basepath", { error: e instanceof Error ? e.message : String(e) });
+      try {
+        process.chdir(s.basePath);
+      } catch (err) {
+        /* best-effort */
+        logWarning("engine", `chdir failed: ${err instanceof Error ? err.message : String(err)}`, { file: "auto.ts" });
+      }
     }
 
     // Re-root the active command session/tool runtime after worktree teardown.
@@ -1713,7 +1714,7 @@ export function buildWorktreeLifecycleDeps(): WorktreeLifecycleDeps {
   //   teardownAutoWorktree, isInAutoWorktree, autoWorktreeBranch.
   // Dep bag is now 7 fields. C3 (#5626) and C4 (#5627) close out the
   // remaining four leaf primitives + the GitServiceImpl shape.
-  return {
+  const deps: WorktreeLifecycleDeps = {
     getIsolationMode,
     invalidateAllCaches,
     GitServiceImpl,
@@ -1721,7 +1722,8 @@ export function buildWorktreeLifecycleDeps(): WorktreeLifecycleDeps {
     worktreeProjection: new WorktreeStateProjection(),
     mergeMilestoneToMain,
     resolveMilestoneFile,
-  } as unknown as WorktreeLifecycleDeps;
+  };
+  return deps;
 }
 
 function buildLifecycle(): WorktreeLifecycle {

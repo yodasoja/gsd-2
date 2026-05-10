@@ -35,6 +35,7 @@ import {
   releaseMilestoneLease,
 } from "./db/milestone-leases.js";
 import { MergeConflictError } from "./git-service.js";
+import type { GitPreferences } from "./git-service.js";
 import {
   getCollapseCadence,
   getMilestoneResquash,
@@ -94,9 +95,10 @@ export interface WorktreeLifecycleDeps {
 
   // ── Cache + git service rebuild ──────────────────────────────────────
   invalidateAllCaches: () => void;
-  GitServiceImpl: new (basePath: string, gitConfig: unknown) => unknown;
+  GitServiceImpl: new (basePath: string, gitConfig?: GitPreferences) => unknown;
   loadEffectiveGSDPreferences: () =>
-    | { preferences?: { git?: Record<string, unknown> } }
+    | { preferences?: { git?: GitPreferences } }
+    | null
     | undefined;
 
   // ── State Projection Module (ADR-016 one-way edge) ───────────────────
