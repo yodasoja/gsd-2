@@ -23,6 +23,7 @@ import {
 } from "../../native-git-bridge.js";
 import type { GSDState } from "../../types.js";
 import { logError, logWarning } from "../../workflow-logger.js";
+import { resolveGitDir } from "../../worktree-manager.js";
 import type { DriftContext, DriftHandler, DriftRecord } from "../types.js";
 
 export type MergeReconcileResult = "clean" | "reconciled" | "blocked";
