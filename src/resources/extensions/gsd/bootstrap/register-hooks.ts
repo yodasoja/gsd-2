@@ -143,7 +143,7 @@ const AUTO_UNIT_SCOPED_TOOLS: Record<string, readonly string[]> = {
   "plan-slice": ["gsd_plan_slice", "gsd_plan_task", "gsd_decision_save"],
   "refine-slice": ["gsd_plan_slice", "gsd_plan_task", "gsd_decision_save"],
   "replan-slice": ["gsd_replan_slice", "gsd_plan_task", "gsd_decision_save"],
-  "complete-slice": ["gsd_slice_complete", "gsd_decision_save", "gsd_requirement_update", "subagent"],
+  "complete-slice": ["gsd_slice_complete", "gsd_task_reopen", "gsd_replan_slice", "gsd_decision_save", "gsd_requirement_update", "subagent"],
   "reassess-roadmap": ["gsd_reassess_roadmap"],
   "execute-task": ["gsd_task_complete", "gsd_decision_save"],
   "execute-task-simple": ["gsd_task_complete", "gsd_decision_save"],
