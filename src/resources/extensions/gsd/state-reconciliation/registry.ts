@@ -5,6 +5,7 @@
 import { mergeStateHandler } from "./drift/merge-state.js";
 import { sketchFlagHandler } from "./drift/sketch-flag.js";
 import { staleRenderHandler } from "./drift/stale-render.js";
+import { staleWorkerHandler } from "./drift/stale-worker.js";
 import type { DriftHandler } from "./types.js";
 
 // Each handler is parameterized over its specific DriftRecord variant for
@@ -16,4 +17,5 @@ export const DRIFT_REGISTRY: ReadonlyArray<DriftHandler<any>> = [
   sketchFlagHandler,
   mergeStateHandler,
   staleRenderHandler,
+  staleWorkerHandler,
 ];

@@ -1,8 +1,9 @@
 // Project/App: GSD-2
 // File Purpose: ADR-017 contract tests for drift-driven State Reconciliation.
-// Covers sketch-flag (#5700), merge-state (#5701), and stale-render (#5702)
-// drift end-to-end, plus the repair-throw and persistent-drift error paths,
-// and Recovery Classification mapping for ReconciliationFailedError.
+// Covers sketch-flag (#5700), merge-state (#5701), stale-render (#5702), and
+// stale-worker (#5703) drift end-to-end, plus the repair-throw and
+// persistent-drift error paths and Recovery Classification mapping for
+// ReconciliationFailedError.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -460,6 +461,79 @@ test("ADR-017 (#5702): stale-render detector reason strings match repair contrac
     "T01 is complete with summary in DB but SUMMARY.md missing on disk",
     "T01 is done in DB but unchecked in plan",
   ].sort());
+});
+
+// ─── #5703: stale-worker drift ───────────────────────────────────────────────
+
+const DEAD_PID = 999_999_999; // far above any realistic system PID; process.kill(pid, 0) → ESRCH
+
+function writeFakeSessionLock(base: string, pid: number): string {
+  const gsdDir = join(base, ".gsd");
+  mkdirSync(gsdDir, { recursive: true });
+  const lockFile = join(gsdDir, "auto.lock");
+  // Mirror SessionLockData minimum shape
+  writeFileSync(
+    lockFile,
+    JSON.stringify({
+      pid,
+      startedAt: new Date().toISOString(),
+      unitType: "starting",
+      unitId: "bootstrap",
+    }),
+  );
+  // Also create the proper-lockfile directory artifact at <gsdDir>.lock
+  mkdirSync(`${gsdDir}.lock`, { recursive: true });
+  return lockFile;
+}
+
+test("ADR-017 (#5703): stale-worker drift detected and orphaned lock cleared", async (t) => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-adr017-worker-"));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+
+  const lockFile = writeFakeSessionLock(base, DEAD_PID);
+  assert.ok(existsSync(lockFile), "pre: lock file written");
+
+  const result = await reconcileBeforeDispatch(base, {
+    invalidateStateCache: () => {},
+    deriveState: async () => makeState(),
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(existsSync(lockFile), false, "post: orphaned lock file removed");
+  const workerRepaired = result.repaired.find((d) => d.kind === "stale-worker");
+  assert.ok(workerRepaired, "repaired list should include the stale-worker drift");
+  if (workerRepaired?.kind === "stale-worker") {
+    assert.equal(workerRepaired.pid, DEAD_PID);
+  }
+});
+
+test("ADR-017 (#5703): live worker lock is not cleared", async (t) => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-adr017-worker-live-"));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+
+  // PID 1 (init/launchd): process.kill(1, 0) returns EPERM as non-root, which
+  // isPidAlive correctly treats as alive. process.pid would be rejected by the
+  // self-PID guard in isPidAlive (treated as not alive).
+  const ALIVE_PID = 1;
+  const lockFile = writeFakeSessionLock(base, ALIVE_PID);
+  assert.ok(existsSync(lockFile), "pre: lock file written");
+
+  const result = await reconcileBeforeDispatch(base, {
+    invalidateStateCache: () => {},
+    deriveState: async () => makeState(),
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(
+    existsSync(lockFile),
+    true,
+    "live lock must NOT be cleared (would steal the lock from a running session)",
+  );
+  assert.equal(
+    result.repaired.some((d) => d.kind === "stale-worker"),
+    false,
+    "no stale-worker drift should be reported when the lock owner is alive",
+  );
 });
 
 // ─── Lifecycle and classification ────────────────────────────────────────────
