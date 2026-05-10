@@ -33,6 +33,7 @@ import { detectStaleRenders } from "../markdown-renderer.ts";
 import { invalidateStateCache } from "../state.ts";
 import {
   reconcileBeforeDispatch,
+  reconcileBeforeSpawn,
   ReconciliationFailedError,
   type DriftHandler,
   type DriftRecord,
@@ -847,6 +848,74 @@ test("ADR-017 (#5706): repair is idempotent — re-running preserves the timesta
     "second pass: no drift detected after first repair",
   );
   assert.equal(getSlice("M001", "S01")?.completed_at, tsAfterFirst, "timestamp unchanged");
+});
+
+// ─── #5707: caller closure (reconcileBeforeSpawn) ────────────────────────────
+
+test("ADR-017 (#5707): reconcileBeforeSpawn returns ok=true on clean reconciliation", async () => {
+  const result = await reconcileBeforeSpawn("/project", {
+    invalidateStateCache: () => {},
+    deriveState: async () => makeState(),
+    registry: [],
+  });
+  assert.equal(result.ok, true);
+});
+
+test("ADR-017 (#5707): reconcileBeforeSpawn surfaces blockers as ok=false", async () => {
+  const result = await reconcileBeforeSpawn("/project", {
+    invalidateStateCache: () => {},
+    deriveState: async () => makeState({ phase: "blocked", blockers: ["lock missing"] }),
+    registry: [],
+  });
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.match(result.reason, /lock missing/);
+  }
+});
+
+test("ADR-017 (#5707): reconcileBeforeSpawn catches ReconciliationFailedError → ok=false", async () => {
+  const persistent: DriftRecord = { kind: "stale-sketch-flag", mid: "M001", sid: "S02" };
+  const handler: DriftHandler = {
+    kind: "stale-sketch-flag",
+    detect: () => [persistent],
+    repair: () => { /* no-op: drift cannot be cleared, persists past cap=2 */ },
+  };
+
+  const result = await reconcileBeforeSpawn("/project", {
+    invalidateStateCache: () => {},
+    deriveState: async () => makeState(),
+    registry: [handler],
+  });
+
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.match(result.reason, /stale-sketch-flag/);
+  }
+});
+
+test("ADR-017 (#5707): reconcileBeforeSpawn reports repaired drift in ok=true reason", async () => {
+  let detectCalls = 0;
+  const handler: DriftHandler = {
+    kind: "stale-sketch-flag",
+    detect: () => {
+      detectCalls++;
+      return detectCalls === 1
+        ? [{ kind: "stale-sketch-flag", mid: "M001", sid: "S02" }]
+        : [];
+    },
+    repair: () => { /* repair "succeeds" — second detect returns empty */ },
+  };
+
+  const result = await reconcileBeforeSpawn("/project", {
+    invalidateStateCache: () => {},
+    deriveState: async () => makeState(),
+    registry: [handler],
+  });
+
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.match(result.reason ?? "", /stale-sketch-flag/);
+  }
 });
 
 // ─── Lifecycle and classification ────────────────────────────────────────────

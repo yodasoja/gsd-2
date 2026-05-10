@@ -58,6 +58,7 @@ import { withTimeout, FINALIZE_PRE_TIMEOUT_MS, FINALIZE_POST_TIMEOUT_MS } from "
 import { getEligibleSlices } from "../slice-parallel-eligibility.js";
 import { startSliceParallel } from "../slice-parallel-orchestrator.js";
 import { isDbAvailable, getMilestoneSlices } from "../gsd-db.js";
+import { reconcileBeforeSpawn } from "../state-reconciliation.js";
 import type { MinimalModelRegistry } from "../context-budget.js";
 import type { PostflightResult, PreflightResult } from "../clean-root-preflight.js";
 import { ensurePlanV2Graph, isEmptyPlanV2GraphResult, isMissingFinalizedContextResult } from "../uok/plan-v2.js";
@@ -878,6 +879,16 @@ export async function runPreDispatch(
             `Slice-parallel: dispatching ${eligible.length} eligible slices for ${mid}.`,
             "info",
           );
+          // ADR-017 #5707: reconcile before spawning so each worker doesn't
+          // independently race on the same drift. Failure aborts the spawn.
+          const spawnGate = await reconcileBeforeSpawn(s.basePath);
+          if (!spawnGate.ok) {
+            ctx.ui.notify(
+              `Slice-parallel: aborting spawn — ${spawnGate.reason}`,
+              "error",
+            );
+            return { action: "break", reason: `slice-parallel-reconciliation-failed: ${spawnGate.reason}` };
+          }
           const result = await startSliceParallel(
             s.basePath,
             mid,

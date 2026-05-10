@@ -17,3 +17,9 @@ export type {
   ReconciliationFailureDetail,
   ReconciliationResult,
 } from "./state-reconciliation/index.js";
+
+export { reconcileBeforeSpawn } from "./state-reconciliation/spawn-gate.js";
+export type {
+  SpawnGateDeps,
+  SpawnGateResult,
+} from "./state-reconciliation/spawn-gate.js";
