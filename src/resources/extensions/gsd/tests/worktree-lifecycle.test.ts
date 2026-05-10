@@ -2,9 +2,10 @@
 // File Purpose: Worktree Lifecycle Module — typed-result contract tests for enterMilestone (ADR-016).
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 import {
   WorktreeLifecycle,
   resolvePausedResumeBasePath,
@@ -25,13 +26,31 @@ interface CallLog {
   args: unknown[];
 }
 
+// ADR-016 phase 2 / C2 retired the worktree-manager fields from
+// WorktreeLifecycleDeps. Tests still pass them via the structural-typing
+// escape hatch (Lifecycle ignores extras) and stub them out as no-ops in
+// makeDeps so existing fixtures keep type-checking.
 type LegacyTestDeps = WorktreeLifecycleDeps & {
+  getAutoWorktreePath?: (
+    basePath: string,
+    milestoneId: string,
+  ) => string | null;
+  isInAutoWorktree?: (basePath: string) => boolean;
+  autoWorktreeBranch?: (milestoneId: string) => string;
+  teardownAutoWorktree?: (
+    basePath: string,
+    milestoneId: string,
+    opts?: { preserveBranch?: boolean },
+  ) => void;
+  enterAutoWorktree?: (basePath: string, milestoneId: string) => string;
+  createAutoWorktree?: (basePath: string, milestoneId: string) => string;
+  enterBranchModeForMilestone?: (basePath: string, milestoneId: string) => void;
   autoCommitCurrentBranch?: (
     basePath: string,
-    unitType: string,
-    unitId: string,
+    reasonOrUnitType: string,
+    milestoneOrUnitId: string,
     taskContext?: TaskCommitContext,
-  ) => string | null;
+  ) => string | null | void;
   getCurrentBranch?: (basePath: string) => string;
   checkoutBranch?: (basePath: string, branch: string) => void;
   readFileSync?: (path: string, encoding: BufferEncoding) => string;
@@ -49,26 +68,12 @@ function makeDeps(
   overrides?: Partial<LegacyTestDeps>,
 ): LegacyTestDeps & { calls: CallLog[] } {
   const calls: CallLog[] = [];
+  // ADR-016 phase 2 / C1 + C2 inlined worktree-manager + fs/git-CLI primitives.
+  // Tests still pass legacy fields via `LegacyTestDeps` — Lifecycle ignores the
+  // extras structurally and reads override hooks (`getAutoWorktreePath`,
+  // `getCurrentBranch`, etc.) through the C1-healing primitive-override pattern.
   const deps: LegacyTestDeps & { calls: CallLog[] } = {
     calls,
-    enterAutoWorktree: (basePath, milestoneId) => {
-      calls.push({ fn: "enterAutoWorktree", args: [basePath, milestoneId] });
-      return `/project/.gsd/worktrees/${milestoneId}`;
-    },
-    createAutoWorktree: (basePath, milestoneId) => {
-      calls.push({ fn: "createAutoWorktree", args: [basePath, milestoneId] });
-      return `/project/.gsd/worktrees/${milestoneId}`;
-    },
-    enterBranchModeForMilestone: (basePath, milestoneId) => {
-      calls.push({
-        fn: "enterBranchModeForMilestone",
-        args: [basePath, milestoneId],
-      });
-    },
-    getAutoWorktreePath: (basePath, milestoneId) => {
-      calls.push({ fn: "getAutoWorktreePath", args: [basePath, milestoneId] });
-      return null;
-    },
     getIsolationMode: () => {
       calls.push({ fn: "getIsolationMode", args: [] });
       return "worktree";
@@ -89,9 +94,9 @@ function makeDeps(
       calls.push({ fn: "loadEffectiveGSDPreferences", args: [] });
       return { preferences: { git: {} } };
     },
-    // Slice 7 widened WorktreeLifecycleDeps with merge/exit-side fields.
-    // These tests focus on enter; merge-side helpers are no-op stubs.
     worktreeProjection: new WorktreeStateProjection(),
+    // Legacy stubs — Lifecycle no longer reads these post-C2; preserved as
+    // no-ops so existing test fixtures keep type-checking.
     isInAutoWorktree: () => false,
     autoCommitCurrentBranch: (
       basePath: string,
@@ -105,13 +110,47 @@ function makeDeps(
     autoWorktreeBranch: (mid: string) => `milestone/${mid}`,
     teardownAutoWorktree: () => {},
     mergeMilestoneToMain: () => ({ pushed: false, codeFilesChanged: true }),
-    getCurrentBranch: () => "main",
-    checkoutBranch: () => {},
     resolveMilestoneFile: () => null,
-    readFileSync: () => "",
     ...overrides,
   };
   return deps;
+}
+
+/**
+ * Create a real temporary git repo for tests that exercise the inlined
+ * worktree-manager primitives (post-C2). Returns the realpath of the new
+ * repo. Tests that previously relied on `deps.createAutoWorktree`,
+ * `deps.enterAutoWorktree`, etc. now drive Lifecycle through these
+ * fixtures.
+ */
+function makeGitRepoBase(opts?: {
+  isolation?: "worktree" | "branch" | "none";
+}): string {
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "gsd-lifecycle-git-")));
+  const git = (args: string[]): void => {
+    execFileSync("git", args, { cwd: base, stdio: "pipe" });
+  };
+  git(["init", "-b", "main"]);
+  git(["config", "user.email", "test@test.com"]);
+  git(["config", "user.name", "Test"]);
+  writeFileSync(join(base, "README.md"), "# test\n");
+  writeFileSync(join(base, ".gitignore"), ".gsd/worktrees/\n");
+  mkdirSync(join(base, ".gsd"), { recursive: true });
+  if (opts?.isolation && opts.isolation !== "none") {
+    writeFileSync(
+      join(base, ".gsd", "preferences.md"),
+      `## Git\n- isolation: ${opts.isolation}\n`,
+    );
+  }
+  git(["add", "."]);
+  git(["commit", "-m", "init"]);
+  return base;
+}
+
+function cleanupRepoBase(base: string, previousCwd?: string): void {
+  try { closeDatabase(); } catch { /* noop */ }
+  try { if (previousCwd) process.chdir(previousCwd); } catch { /* noop */ }
+  try { rmSync(base, { recursive: true, force: true }); } catch { /* noop */ }
 }
 
 function makeCtx(): NotifyCtx & {
@@ -139,41 +178,61 @@ function cleanupDbBase(base: string): void {
 
 // ─── enterMilestone — typed-result contract ──────────────────────────────────
 
-test("enterMilestone returns ok:true mode:worktree on successful create", () => {
-  const s = makeSession();
+test("enterMilestone returns ok:true mode:worktree on successful create", (t) => {
+  // ADR-016 phase 2 / C2 (#5625): the worktree-manager primitives are
+  // inlined, so the success path needs a real git repo. The test exercises
+  // Lifecycle.enterMilestone end-to-end against `createAutoWorktree`'s
+  // real implementation in `auto-worktree.ts`.
+  const previousCwd = process.cwd();
+  const base = makeGitRepoBase({ isolation: "worktree" });
+  t.after(() => cleanupRepoBase(base, previousCwd));
+
+  const s = makeSession({ basePath: base, originalBasePath: base });
   const deps = makeDeps();
   const ctx = makeCtx();
   const lifecycle = new WorktreeLifecycle(s, deps);
 
   const result = lifecycle.enterMilestone("M001", ctx);
 
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, true, `expected ok:true, got: ${JSON.stringify(result)}`);
   if (result.ok) {
     assert.equal(result.mode, "worktree");
-    assert.equal(result.path, "/project/.gsd/worktrees/M001");
+    assert.ok(
+      result.path.endsWith("/.gsd/worktrees/M001"),
+      `expected path to end with /.gsd/worktrees/M001, got ${result.path}`,
+    );
   }
-  assert.equal(s.basePath, "/project/.gsd/worktrees/M001");
+  assert.ok(
+    s.basePath.endsWith("/.gsd/worktrees/M001"),
+    `expected s.basePath to end with /.gsd/worktrees/M001, got ${s.basePath}`,
+  );
   assert.equal(
     deps.calls.filter((c) => c.fn === "invalidateAllCaches").length,
     1,
   );
 });
 
-test("enterMilestone returns ok:true mode:branch on successful branch fallback", () => {
-  const s = makeSession();
+test("enterMilestone returns ok:true mode:branch on successful branch fallback", (t) => {
+  // Real fixture with isolation:branch — `enterBranchModeForMilestone`'s
+  // real implementation runs against the temp repo.
+  const previousCwd = process.cwd();
+  const base = makeGitRepoBase({ isolation: "branch" });
+  t.after(() => cleanupRepoBase(base, previousCwd));
+
+  const s = makeSession({ basePath: base, originalBasePath: base });
   const deps = makeDeps({ getIsolationMode: () => "branch" });
   const ctx = makeCtx();
   const lifecycle = new WorktreeLifecycle(s, deps);
 
   const result = lifecycle.enterMilestone("M001", ctx);
 
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, true, `expected ok:true, got: ${JSON.stringify(result)}`);
   if (result.ok) {
     assert.equal(result.mode, "branch");
-    assert.equal(result.path, "/project");
+    assert.equal(result.path, base);
   }
   // Branch mode does not mutate s.basePath
-  assert.equal(s.basePath, "/project");
+  assert.equal(s.basePath, base);
 });
 
 test("enterMilestone returns ok:true mode:none when isolation disabled", () => {
@@ -204,66 +263,92 @@ test("enterMilestone returns ok:false reason:isolation-degraded when session deg
   if (!result.ok) {
     assert.equal(result.reason, "isolation-degraded");
   }
-  // No worktree primitives invoked
-  assert.equal(deps.calls.filter((c) => c.fn === "createAutoWorktree").length, 0);
-  assert.equal(deps.calls.filter((c) => c.fn === "enterAutoWorktree").length, 0);
+  assert.equal(s.basePath, "/project");
+  assert.equal(s.milestoneLeaseToken, null);
+  assert.equal(deps.calls.filter((c) => c.fn === "getIsolationMode").length, 0);
 });
 
-test("enterMilestone returns ok:false reason:creation-failed and degrades session on worktree throw", () => {
-  const s = makeSession();
-  const deps = makeDeps({
-    createAutoWorktree: () => {
-      throw new Error("boom");
-    },
-  });
+test("enterMilestone returns ok:false reason:creation-failed and degrades session on worktree throw", (t) => {
+  // After C2 the worktree-manager primitives are inlined. Use a real
+  // fixture and break the repo by deleting `.git` so any git op throws.
+  const previousCwd = process.cwd();
+  const base = makeGitRepoBase({ isolation: "worktree" });
+  t.after(() => cleanupRepoBase(base, previousCwd));
+  rmSync(join(base, ".git"), { recursive: true, force: true });
+
+  const s = makeSession({ basePath: base, originalBasePath: base });
+  const deps = makeDeps();
   const ctx = makeCtx();
   const lifecycle = new WorktreeLifecycle(s, deps);
 
   const result = lifecycle.enterMilestone("M001", ctx);
 
-  assert.equal(result.ok, false);
+  assert.equal(result.ok, false, `expected ok:false, got: ${JSON.stringify(result)}`);
   if (!result.ok) {
     assert.equal(result.reason, "creation-failed");
     assert.ok(result.cause instanceof Error);
   }
   assert.equal(s.isolationDegraded, true);
   // s.basePath unchanged on failure
-  assert.equal(s.basePath, "/project");
+  assert.equal(s.basePath, base);
 });
 
-test("enterMilestone returns ok:false reason:creation-failed when branch mode throws", () => {
-  const s = makeSession();
-  const deps = makeDeps({
-    getIsolationMode: () => "branch",
-    enterBranchModeForMilestone: () => {
-      throw new Error("branch checkout failed");
-    },
-  });
+test("enterMilestone returns ok:false reason:creation-failed when branch mode throws", (t) => {
+  // Branch-mode failure scenario: real fixture with isolation:branch, but
+  // delete the `.git` directory so any branch operation throws.
+  const previousCwd = process.cwd();
+  const base = makeGitRepoBase({ isolation: "branch" });
+  t.after(() => cleanupRepoBase(base, previousCwd));
+  rmSync(join(base, ".git"), { recursive: true, force: true });
+
+  const s = makeSession({ basePath: base, originalBasePath: base });
+  const deps = makeDeps({ getIsolationMode: () => "branch" });
   const ctx = makeCtx();
   const lifecycle = new WorktreeLifecycle(s, deps);
 
   const result = lifecycle.enterMilestone("M001", ctx);
 
-  assert.equal(result.ok, false);
+  assert.equal(result.ok, false, `expected ok:false, got: ${JSON.stringify(result)}`);
   if (!result.ok) {
     assert.equal(result.reason, "creation-failed");
   }
   assert.equal(s.isolationDegraded, true);
 });
 
-test("enterMilestone enters existing worktree when path resolves", () => {
-  const s = makeSession();
-  const deps = makeDeps({
-    getAutoWorktreePath: () => "/project/.gsd/worktrees/M001",
+test("enterMilestone enters existing worktree when path resolves", (t) => {
+  // After C2, `getAutoWorktreePath` runs against real git. To exercise the
+  // "existing worktree" branch we pre-create the worktree on disk so
+  // git's worktree list includes it.
+  const previousCwd = process.cwd();
+  const base = makeGitRepoBase({ isolation: "worktree" });
+  t.after(() => cleanupRepoBase(base, previousCwd));
+  const wt = join(base, ".gsd", "worktrees", "M001");
+  execFileSync("git", ["checkout", "-b", "milestone/M001"], {
+    cwd: base,
+    stdio: "pipe",
   });
+  execFileSync("git", ["checkout", "main"], { cwd: base, stdio: "pipe" });
+  execFileSync(
+    "git",
+    ["worktree", "add", wt, "milestone/M001"],
+    { cwd: base, stdio: "pipe" },
+  );
+
+  const s = makeSession({ basePath: base, originalBasePath: base });
+  const deps = makeDeps();
   const ctx = makeCtx();
   const lifecycle = new WorktreeLifecycle(s, deps);
 
   const result = lifecycle.enterMilestone("M001", ctx);
 
-  assert.equal(result.ok, true);
-  assert.equal(deps.calls.filter((c) => c.fn === "enterAutoWorktree").length, 1);
-  assert.equal(deps.calls.filter((c) => c.fn === "createAutoWorktree").length, 0);
+  assert.equal(result.ok, true, `expected ok:true, got: ${JSON.stringify(result)}`);
+  if (result.ok) {
+    assert.equal(result.mode, "worktree");
+    assert.ok(
+      result.path.endsWith("/.gsd/worktrees/M001"),
+      `expected path to end with /.gsd/worktrees/M001, got ${result.path}`,
+    );
+  }
 });
 
 test("enterMilestone returns ok:false reason:lease-conflict when another worker holds the lease", (t) => {
@@ -288,14 +373,26 @@ test("enterMilestone returns ok:false reason:lease-conflict when another worker 
     assert.equal(result.reason, "lease-conflict");
   }
   assert.equal(s.isolationDegraded, false);
-  assert.equal(deps.calls.filter((c) => c.fn === "createAutoWorktree").length, 0);
-  assert.equal(deps.calls.filter((c) => c.fn === "enterAutoWorktree").length, 0);
+  assert.equal(s.basePath, base);
+  assert.equal(s.milestoneLeaseToken, null);
+  assert.equal(deps.calls.filter((c) => c.fn === "getIsolationMode").length, 0);
+  assert.equal(ctx.messages.length, 1);
+  assert.equal(ctx.messages[0]?.level, "error");
 });
 
-test("enterMilestone is idempotent when already in the milestone worktree", () => {
+test("enterMilestone is idempotent when already in the milestone worktree", (t) => {
+  // Real-fixture variant after C2/C3. The session is already pointing at
+  // the worktree path with currentMilestoneId set, so the idempotency
+  // early-return inside `_enterMilestoneCore` fires without invoking the
+  // inlined worktree primitives.
+  const previousCwd = process.cwd();
+  const base = makeGitRepoBase({ isolation: "worktree" });
+  t.after(() => cleanupRepoBase(base, previousCwd));
+  const wt = join(base, ".gsd", "worktrees", "M001");
+
   const s = makeSession({
-    basePath: "/project/.gsd/worktrees/M001",
-    originalBasePath: "/project",
+    basePath: wt,
+    originalBasePath: base,
     currentMilestoneId: "M001",
   });
   const deps = makeDeps();
@@ -304,14 +401,12 @@ test("enterMilestone is idempotent when already in the milestone worktree", () =
 
   const result = lifecycle.enterMilestone("M001", ctx);
 
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, true, `expected ok:true, got: ${JSON.stringify(result)}`);
   if (result.ok) {
     assert.equal(result.mode, "worktree");
-    assert.equal(result.path, "/project/.gsd/worktrees/M001");
+    assert.equal(result.path, wt);
   }
-  assert.equal(s.basePath, "/project/.gsd/worktrees/M001");
-  assert.equal(deps.calls.filter((c) => c.fn === "createAutoWorktree").length, 0);
-  assert.equal(deps.calls.filter((c) => c.fn === "enterAutoWorktree").length, 0);
+  assert.equal(s.basePath, wt);
 });
 
 test("enterMilestone returns ok:false reason:invalid-milestone-id on path traversal", () => {
@@ -375,8 +470,15 @@ test("getCurrentMilestoneIfAny returns the active milestone id or null", () => {
 
 // ─── degradeToBranchMode (issue #5587) ────────────────────────────────────────
 
-test("degradeToBranchMode sets isolationDegraded and invokes branch-mode helper", () => {
-  const s = makeSession();
+test("degradeToBranchMode sets isolationDegraded and runs branch-mode setup", (t) => {
+  // After C2, `enterBranchModeForMilestone` runs against real git. Use a
+  // real fixture so the branch checkout succeeds and we can observe the
+  // session's isolationDegraded flag flip.
+  const previousCwd = process.cwd();
+  const base = makeGitRepoBase({ isolation: "branch" });
+  t.after(() => cleanupRepoBase(base, previousCwd));
+
+  const s = makeSession({ basePath: base, originalBasePath: base });
   const deps = makeDeps();
   const ctx = makeCtx();
   const lifecycle = new WorktreeLifecycle(s, deps);
@@ -384,10 +486,6 @@ test("degradeToBranchMode sets isolationDegraded and invokes branch-mode helper"
   lifecycle.degradeToBranchMode("M001", ctx);
 
   assert.equal(s.isolationDegraded, true);
-  assert.equal(
-    deps.calls.filter((c) => c.fn === "enterBranchModeForMilestone").length,
-    1,
-  );
   assert.equal(deps.calls.filter((c) => c.fn === "invalidateAllCaches").length, 1);
 });
 
@@ -400,19 +498,16 @@ test("degradeToBranchMode is no-op when isolationDegraded is already true", () =
 
   lifecycle.degradeToBranchMode("M001", ctx);
 
-  assert.equal(
-    deps.calls.filter((c) => c.fn === "enterBranchModeForMilestone").length,
-    0,
-  );
+  // No git/cache invocation when already degraded — pre-check returns early.
+  assert.equal(deps.calls.filter((c) => c.fn === "invalidateAllCaches").length, 0);
 });
 
 test("degradeToBranchMode marks degraded and notifies on branch-mode failure", () => {
+  // Synthetic /project causes the real `enterBranchModeForMilestone` to
+  // throw — same shape as the original mock-throws test but exercises the
+  // production error path against the inlined helper.
   const s = makeSession();
-  const deps = makeDeps({
-    enterBranchModeForMilestone: () => {
-      throw new Error("checkout failed");
-    },
-  });
+  const deps = makeDeps({});
   const ctx = makeCtx();
   const lifecycle = new WorktreeLifecycle(s, deps);
 
@@ -514,26 +609,27 @@ test("adoptSessionRoot does not chdir, rebuild git service, or invalidate caches
 
 // ─── resumeFromPausedSession (ADR-016 phase 2 / B3, issue #5621) ──────────────
 
-test("resumeFromPausedSession adopts the persisted worktree path when it exists", () => {
+test("resumeFromPausedSession adopts the persisted worktree path when it exists", (t) => {
+  // Use a real temp directory so the existsSync check inside the verb
+  // succeeds. Earlier `process.cwd()` ran into ENOENT after sibling tests
+  // deleted their basePaths and left cwd dangling.
+  const wtDir = realpathSync(mkdtempSync(join(tmpdir(), "gsd-resume-test-")));
+  t.after(() => { try { rmSync(wtDir, { recursive: true, force: true }); } catch { /* */ } });
+
   const s = makeSession();
   s.basePath = "/some/old/path";
   const lifecycle = new WorktreeLifecycle(s, makeDeps());
 
-  // Inject a pathExists stub via the pure helper export so the verb's
-  // existence check returns true without touching the filesystem.
-  // The verb doesn't accept a stub directly, so we exercise it through
-  // the pure helper to keep the test free of disk side effects.
-  const wt = "/persisted/worktree/M001";
   // Verify the pure helper's contract first (folded in from the legacy
   // _resolvePausedResumeBasePathForTest)
   assert.equal(
-    resolvePausedResumeBasePath("/project", wt, () => true),
-    wt,
+    resolvePausedResumeBasePath("/project", "/persisted/worktree/M001", () => true),
+    "/persisted/worktree/M001",
   );
 
-  // Now exercise the verb with a real path that exists (the test cwd).
-  lifecycle.resumeFromPausedSession("/project", process.cwd());
-  assert.equal(s.basePath, process.cwd());
+  // Exercise the verb with a real path that exists.
+  lifecycle.resumeFromPausedSession("/project", wtDir);
+  assert.equal(s.basePath, wtDir);
 });
 
 test("resumeFromPausedSession falls back to base when persisted worktree is null", () => {
@@ -570,85 +666,103 @@ test("resumeFromPausedSession does not chdir, rebuild git service, or invalidate
 
 // ─── adoptOrphanWorktree (ADR-016 phase 2 / B4, issue #5622) ──────────────────
 
-test("adoptOrphanWorktree swaps to worktree path and reverts to base on !merged", () => {
+// After C2 (#5625) the `getAutoWorktreePath` primitive is inlined, so these
+// tests use a real-git fixture with a pre-created worktree to exercise the
+// swap-run-revert protocol. The "fall back when getAutoWorktreePath returns
+// null" test uses a fixture WITHOUT a worktree so the real call returns null.
+
+test("adoptOrphanWorktree swaps to worktree path and reverts to base on !merged", (t) => {
+  const previousCwd = process.cwd();
+  const base = makeGitRepoBase({ isolation: "worktree" });
+  t.after(() => cleanupRepoBase(base, previousCwd));
+  const wt = join(base, ".gsd", "worktrees", "M001");
+  execFileSync("git", ["checkout", "-b", "milestone/M001"], { cwd: base, stdio: "pipe" });
+  execFileSync("git", ["checkout", "main"], { cwd: base, stdio: "pipe" });
+  execFileSync("git", ["worktree", "add", wt, "milestone/M001"], { cwd: base, stdio: "pipe" });
+
   const s = makeSession();
   s.basePath = "/old";
   s.originalBasePath = "/old";
   s.active = true;
-  const deps = makeDeps({
-    getAutoWorktreePath: () => "/project/.gsd/worktrees/M001",
-  });
-  const lifecycle = new WorktreeLifecycle(s, deps);
+  const lifecycle = new WorktreeLifecycle(s, makeDeps());
 
   let basePathInsideCallback = "";
-  const result = lifecycle.adoptOrphanWorktree("M001", "/project", () => {
+  const result = lifecycle.adoptOrphanWorktree("M001", base, () => {
     basePathInsideCallback = s.basePath;
     return { merged: false as const, reason: "synthetic" };
   });
 
-  // Inside callback: swap was applied
-  assert.equal(basePathInsideCallback, "/project/.gsd/worktrees/M001");
-  // After failed merge: reverted to base
-  assert.equal(s.basePath, "/project");
-  assert.equal(s.originalBasePath, "/project");
+  assert.equal(basePathInsideCallback, wt);
+  assert.equal(s.basePath, base);
+  assert.equal(s.originalBasePath, base);
   assert.equal(result.merged, false);
 });
 
-test("adoptOrphanWorktree holds the swap on merged && active", () => {
+test("adoptOrphanWorktree holds the swap on merged && active", (t) => {
+  const previousCwd = process.cwd();
+  const base = makeGitRepoBase({ isolation: "worktree" });
+  t.after(() => cleanupRepoBase(base, previousCwd));
+  const wt = join(base, ".gsd", "worktrees", "M001");
+  execFileSync("git", ["checkout", "-b", "milestone/M001"], { cwd: base, stdio: "pipe" });
+  execFileSync("git", ["checkout", "main"], { cwd: base, stdio: "pipe" });
+  execFileSync("git", ["worktree", "add", wt, "milestone/M001"], { cwd: base, stdio: "pipe" });
+
   const s = makeSession();
   s.basePath = "/old";
   s.originalBasePath = "/old";
   s.active = true;
-  const deps = makeDeps({
-    getAutoWorktreePath: () => "/project/.gsd/worktrees/M001",
-  });
-  const lifecycle = new WorktreeLifecycle(s, deps);
+  const lifecycle = new WorktreeLifecycle(s, makeDeps());
 
-  lifecycle.adoptOrphanWorktree("M001", "/project", () => ({
+  lifecycle.adoptOrphanWorktree("M001", base, () => ({
     merged: true as const,
   }));
 
-  // Merged && active — swap held
-  assert.equal(s.basePath, "/project/.gsd/worktrees/M001");
-  assert.equal(s.originalBasePath, "/project");
+  assert.equal(s.basePath, wt);
+  assert.equal(s.originalBasePath, base);
 });
 
-test("adoptOrphanWorktree restores prior paths on merged && !active", () => {
+test("adoptOrphanWorktree restores prior paths on merged && !active", (t) => {
+  const previousCwd = process.cwd();
+  const base = makeGitRepoBase({ isolation: "worktree" });
+  t.after(() => cleanupRepoBase(base, previousCwd));
+  const wt = join(base, ".gsd", "worktrees", "M001");
+  execFileSync("git", ["checkout", "-b", "milestone/M001"], { cwd: base, stdio: "pipe" });
+  execFileSync("git", ["checkout", "main"], { cwd: base, stdio: "pipe" });
+  execFileSync("git", ["worktree", "add", wt, "milestone/M001"], { cwd: base, stdio: "pipe" });
+
   const s = makeSession();
   s.basePath = "/prior";
   s.originalBasePath = "/prior-original";
   s.active = false;
-  const deps = makeDeps({
-    getAutoWorktreePath: () => "/project/.gsd/worktrees/M001",
-  });
-  const lifecycle = new WorktreeLifecycle(s, deps);
+  const lifecycle = new WorktreeLifecycle(s, makeDeps());
 
-  lifecycle.adoptOrphanWorktree("M001", "/project", () => ({
+  lifecycle.adoptOrphanWorktree("M001", base, () => ({
     merged: true as const,
   }));
 
-  // Merged but session inactive — restore the snapshotted prior paths
   assert.equal(s.basePath, "/prior");
   assert.equal(s.originalBasePath, "/prior-original");
 });
 
-test("adoptOrphanWorktree falls back to base when getAutoWorktreePath returns null", () => {
+test("adoptOrphanWorktree falls back to base when getAutoWorktreePath returns null", (t) => {
+  // Real fixture with isolation:worktree but NO worktree pre-created — the
+  // real `getAutoWorktreePath` returns null so the verb falls back to base.
+  const previousCwd = process.cwd();
+  const base = makeGitRepoBase({ isolation: "worktree" });
+  t.after(() => cleanupRepoBase(base, previousCwd));
+
   const s = makeSession();
   s.basePath = "/old";
   s.active = true;
-  const deps = makeDeps({
-    getAutoWorktreePath: () => null,
-  });
-  const lifecycle = new WorktreeLifecycle(s, deps);
+  const lifecycle = new WorktreeLifecycle(s, makeDeps());
 
   let basePathInsideCallback = "";
-  lifecycle.adoptOrphanWorktree("M001", "/project", () => {
+  lifecycle.adoptOrphanWorktree("M001", base, () => {
     basePathInsideCallback = s.basePath;
     return { merged: true as const };
   });
 
-  // Inside callback: basePath is project root (no worktree available)
-  assert.equal(basePathInsideCallback, "/project");
+  assert.equal(basePathInsideCallback, base);
 });
 
 test("adoptOrphanWorktree restores prior paths and cwd when the callback throws", () => {
@@ -716,15 +830,17 @@ test("adoptOrphanWorktree rejects traversal-style milestone ids before path reso
   );
 });
 
-test("adoptOrphanWorktree forwards the callback's return value", () => {
+test("adoptOrphanWorktree forwards the callback's return value", (t) => {
+  const previousCwd = process.cwd();
+  const base = makeGitRepoBase({ isolation: "worktree" });
+  t.after(() => cleanupRepoBase(base, previousCwd));
+
+
   const s = makeSession();
   s.active = true;
-  const lifecycle = new WorktreeLifecycle(
-    s,
-    makeDeps({ getAutoWorktreePath: () => null }),
-  );
+  const lifecycle = new WorktreeLifecycle(s, makeDeps());
 
-  const result = lifecycle.adoptOrphanWorktree("M001", "/project", () => ({
+  const result = lifecycle.adoptOrphanWorktree("M001", base, () => ({
     merged: true as const,
     customField: "preserved",
   }));

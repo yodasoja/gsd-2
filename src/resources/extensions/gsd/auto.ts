@@ -1026,18 +1026,27 @@ export async function cleanupAfterLoopExit(ctx: ExtensionContext): Promise<void>
   if (s.originalBasePath) {
     try {
       buildLifecycle().restoreToProjectRoot();
-      process.chdir(s.basePath);
+    } catch (err) {
+      logWarning(
+        "engine",
+        `restore project root failed: ${err instanceof Error ? err.message : String(err)}`,
+        { file: "auto.ts" },
+      );
+      s.basePath = s.originalBasePath;
+    }
+    try {
+      process.chdir(s.originalBasePath);
     } catch (err) {
       logWarning("engine", `basePath restore/chdir failed: ${err instanceof Error ? err.message : String(err)}`, { file: "auto.ts" });
     }
   }
 
   if (s.originalBasePath && s.cmdCtx) {
-    const result = await rerootCommandSession(s.cmdCtx, s.basePath);
+    const result = await rerootCommandSession(s.cmdCtx, s.originalBasePath);
     if (result.status === "cancelled") {
-      logWarning("engine", "post-loop session re-root was cancelled", { file: "auto.ts", basePath: s.basePath });
+      logWarning("engine", "post-loop session re-root was cancelled", { file: "auto.ts", basePath: s.originalBasePath });
     } else if (result.status === "failed") {
-      logWarning("engine", `post-loop session re-root failed: ${result.error ?? "unknown"}`, { file: "auto.ts", basePath: s.basePath });
+      logWarning("engine", `post-loop session re-root failed: ${result.error ?? "unknown"}`, { file: "auto.ts", basePath: s.originalBasePath });
     }
   }
 }
@@ -1343,18 +1352,19 @@ export async function stopAuto(
     }
 
     // ── Step 7: Restore basePath and chdir (ADR-016 phase 2 / B5, #5623) ──
-    try {
-      if (s.originalBasePath) {
+    if (s.originalBasePath) {
+      try {
         buildLifecycle().restoreToProjectRoot();
-        try {
-          process.chdir(s.basePath);
-        } catch (err) {
-          /* best-effort */
-          logWarning("engine", `chdir failed: ${err instanceof Error ? err.message : String(err)}`, { file: "auto.ts" });
-        }
+      } catch (e) {
+        debugLog("stop-cleanup-basepath", { error: e instanceof Error ? e.message : String(e) });
+        s.basePath = s.originalBasePath;
       }
-    } catch (e) {
-      debugLog("stop-cleanup-basepath", { error: e instanceof Error ? e.message : String(e) });
+      try {
+        process.chdir(s.basePath);
+      } catch (err) {
+        /* best-effort */
+        logWarning("engine", `chdir failed: ${err instanceof Error ? err.message : String(err)}`, { file: "auto.ts" });
+      }
     }
 
     // Re-root the active command session/tool runtime after worktree teardown.
@@ -1698,26 +1708,24 @@ export async function pauseAuto(
  * Lifecycle Module instead of bypassing it (ADR-016 phase 2 / A2).
  */
 export function buildWorktreeLifecycleDeps(): WorktreeLifecycleDeps {
-  // ADR-016 phase 2 / C1 (#5624): readFileSync, getCurrentBranch,
-  // checkoutBranch, and autoCommitCurrentBranch are no longer injected —
-  // worktree-lifecycle.ts imports them directly. The dep bag is shrinking
-  // toward the ADR's envisioned ≤6-field shape.
-  return {
-    enterAutoWorktree,
-    createAutoWorktree,
-    enterBranchModeForMilestone,
-    getAutoWorktreePath,
+  // ADR-016 phase 2 / C1 + C2:
+  //   C1 (#5624) inlined readFileSync, getCurrentBranch, checkoutBranch,
+  //   autoCommitCurrentBranch.
+  //   C2 (#5625) inlined enterAutoWorktree, createAutoWorktree,
+  //   enterBranchModeForMilestone, getAutoWorktreePath,
+  //   teardownAutoWorktree, isInAutoWorktree, autoWorktreeBranch.
+  // Dep bag is now 7 fields. C3 (#5626) and C4 (#5627) close out the
+  // remaining four leaf primitives + the GitServiceImpl shape.
+  const deps: WorktreeLifecycleDeps = {
     getIsolationMode,
     invalidateAllCaches,
     GitServiceImpl,
     loadEffectiveGSDPreferences,
     worktreeProjection: new WorktreeStateProjection(),
-    isInAutoWorktree,
-    autoWorktreeBranch,
-    teardownAutoWorktree,
     mergeMilestoneToMain,
     resolveMilestoneFile,
-  } as unknown as WorktreeLifecycleDeps;
+  };
+  return deps;
 }
 
 function buildLifecycle(): WorktreeLifecycle {

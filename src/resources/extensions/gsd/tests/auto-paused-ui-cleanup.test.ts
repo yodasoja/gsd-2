@@ -110,7 +110,9 @@ test("cleanupAfterLoopExit keeps cleanup best-effort when lifecycle restore thro
   const base = mkdtempSync(join(tmpdir(), "gsd-cleanup-restore-throw-"));
   const worktree = join(base, ".gsd", "worktrees", "M001");
   const previousCwd = process.cwd();
+  let restoreCalls = 0;
   t.mock.method(WorktreeLifecycle.prototype, "restoreToProjectRoot", () => {
+    restoreCalls += 1;
     throw new Error("restore failed");
   });
 
@@ -129,8 +131,9 @@ test("cleanupAfterLoopExit keeps cleanup best-effort when lifecycle restore thro
       },
     } as any);
 
-    assert.equal(autoSession.basePath, worktree);
-    assert.equal(realpathSync(process.cwd()), realpathSync(previousCwd));
+    assert.equal(restoreCalls, 1);
+    assert.equal(autoSession.basePath, base);
+    assert.equal(realpathSync(process.cwd()), realpathSync(base));
   } finally {
     autoSession.reset();
     process.chdir(previousCwd);
