@@ -233,6 +233,66 @@ function invalidMilestoneIdError(milestoneId: string): Error {
   );
 }
 
+type WorktreeLifecyclePrimitiveOverrides = {
+  readFileSync?: (path: string, encoding: BufferEncoding) => string;
+  getCurrentBranch?: (basePath: string) => string;
+  checkoutBranch?: (basePath: string, branch: string) => void;
+  autoCommitCurrentBranch?: (
+    basePath: string,
+    unitType: string,
+    unitId: string,
+    taskContext?: unknown,
+  ) => string | null;
+};
+
+function primitiveOverrides(
+  deps: WorktreeLifecycleDeps,
+): WorktreeLifecyclePrimitiveOverrides {
+  return deps as WorktreeLifecycleDeps & WorktreeLifecyclePrimitiveOverrides;
+}
+
+function readLifecycleFile(
+  deps: WorktreeLifecycleDeps,
+  path: string,
+): string {
+  return primitiveOverrides(deps).readFileSync?.(path, "utf-8") ??
+    readFileSync(path, "utf-8");
+}
+
+function currentLifecycleBranch(
+  deps: WorktreeLifecycleDeps,
+  basePath: string,
+): string {
+  return primitiveOverrides(deps).getCurrentBranch?.(basePath) ??
+    getCurrentBranch(basePath);
+}
+
+function checkoutLifecycleBranch(
+  deps: WorktreeLifecycleDeps,
+  basePath: string,
+  branch: string,
+): void {
+  const checkoutBranch = primitiveOverrides(deps).checkoutBranch;
+  if (checkoutBranch) {
+    checkoutBranch(basePath, branch);
+    return;
+  }
+  nativeCheckoutBranch(basePath, branch);
+}
+
+function autoCommitLifecycleBranch(
+  deps: WorktreeLifecycleDeps,
+  basePath: string,
+  unitType: string,
+  unitId: string,
+): string | null {
+  return primitiveOverrides(deps).autoCommitCurrentBranch?.(
+    basePath,
+    unitType,
+    unitId,
+  ) ?? autoCommitCurrentBranch(basePath, unitType, unitId);
+}
+
 /**
  * Throwing variant used by the merge/exit paths that surface failures via
  * the typed `ExitResult` (callers wrap the throw → cause). The enter path
@@ -698,7 +758,7 @@ function _mergeWorktreeModeImpl(
       };
     }
 
-    const roadmapContent = readFileSync(roadmapPath, "utf-8");
+    const roadmapContent = readLifecycleFile(deps, roadmapPath);
     const mergeResult = deps.mergeMilestoneToMain(
       originalBasePath,
       milestoneId,
@@ -807,7 +867,7 @@ function _mergeBranchModeImpl(
 ): MergeStandaloneResult {
   const { worktreeBasePath, milestoneId, notify } = mctx;
   try {
-    const currentBranch = getCurrentBranch(worktreeBasePath);
+    const currentBranch = currentLifecycleBranch(deps, worktreeBasePath);
     const milestoneBranch = deps.autoWorktreeBranch(milestoneId);
 
     if (currentBranch !== milestoneBranch) {
@@ -826,7 +886,7 @@ function _mergeBranchModeImpl(
         milestoneBranch,
       });
       try {
-        nativeCheckoutBranch(worktreeBasePath, milestoneBranch);
+        checkoutLifecycleBranch(deps, worktreeBasePath, milestoneBranch);
       } catch (checkoutErr) {
         const checkoutMsg =
           checkoutErr instanceof Error
@@ -839,7 +899,7 @@ function _mergeBranchModeImpl(
         throw new UserNotifiedError(checkoutMsg, checkoutErr);
       }
 
-      const reverify = getCurrentBranch(worktreeBasePath);
+      const reverify = currentLifecycleBranch(deps, worktreeBasePath);
       if (reverify !== milestoneBranch) {
         const reverifyMsg = `branch checkout to ${milestoneBranch} reported success but current branch is ${reverify}`;
         notify(
@@ -871,7 +931,7 @@ function _mergeBranchModeImpl(
       };
     }
 
-    const roadmapContent = readFileSync(roadmapPath, "utf-8");
+    const roadmapContent = readLifecycleFile(deps, roadmapPath);
     const mergeResult = deps.mergeMilestoneToMain(
       worktreeBasePath,
       milestoneId,
@@ -1212,7 +1272,7 @@ export class WorktreeLifecycle {
     });
 
     try {
-      autoCommitCurrentBranch(this.s.basePath, "stop", milestoneId);
+      autoCommitLifecycleBranch(this.deps, this.s.basePath, "stop", milestoneId);
     } catch (err) {
       debugLog("WorktreeLifecycle", {
         action: "exitMilestone",
