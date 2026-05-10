@@ -83,6 +83,7 @@ import {
   finalizeProjectResearchTimeout,
 } from "./project-research-policy.js";
 import { validateArtifact } from "./schemas/validate.js";
+import { verificationRetryKey } from "./auto/verification-retry-policy.js";
 
 // ─── Path Comparison Helper ───────────────────────────────────────────────
 /** Compare two paths for physical identity, tolerating trailing slashes and symlinks. */
@@ -1016,6 +1017,7 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
         );
         s.pendingVerificationRetry = null;
         s.verificationRetryCount.delete(retryKey);
+        s.verificationRetryFailureHashes.delete(retryKey);
         triggerArtifactVerified = verifyExpectedArtifact(s.currentUnit.type, s.currentUnit.id, s.basePath);
         if (triggerArtifactVerified) {
           invalidateAllCaches();
@@ -1074,6 +1076,7 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
         s.lastToolInvocationError = null;
         s.pendingVerificationRetry = null;
         s.verificationRetryCount.delete(retryKey);
+        s.verificationRetryFailureHashes.delete(retryKey);
         writeBlockerPlaceholder(s.currentUnit.type, s.currentUnit.id, s.basePath, reason);
         ctx.ui.notify(
           `${s.currentUnit.type} ${s.currentUnit.id} — deterministic policy rejection, wrote blocker placeholder (no retries) (#4973)`,
@@ -1111,6 +1114,7 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
           );
           if (attempt > MAX_ARTIFACT_VERIFICATION_RETRIES) {
             s.verificationRetryCount.delete(retryKey);
+            s.verificationRetryFailureHashes.delete(retryKey);
             debugLog("postUnit", { phase: "artifact-verify-exhausted", unitType: s.currentUnit.type, unitId: s.currentUnit.id, attempt });
             ctx.ui.notify(
               `${failureDetails} Pausing auto-mode after ${MAX_ARTIFACT_VERIFICATION_RETRIES} retries.`,
@@ -1137,7 +1141,9 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
       // Verification succeeded — clear the retry counter so a future failure
       // of the same unit gets a full retry budget instead of the stale count.
       if (triggerArtifactVerified) {
-        s.verificationRetryCount.delete(`${s.currentUnit.type}:${s.currentUnit.id}`);
+        const retryKey = verificationRetryKey(s.currentUnit.type, s.currentUnit.id);
+        s.verificationRetryCount.delete(retryKey);
+        s.verificationRetryFailureHashes.delete(retryKey);
       }
     } else {
       // Hook unit completed — no additional processing needed

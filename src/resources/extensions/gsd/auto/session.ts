@@ -158,6 +158,7 @@ export class AutoSession {
   pendingCrashRecovery: string | null = null;
   pendingVerificationRetry: PendingVerificationRetry | null = null;
   readonly verificationRetryCount = new Map<string, number>();
+  readonly verificationRetryFailureHashes = new Map<string, string>();
   pausedSessionFile: string | null = null;
   pausedUnitType: string | null = null;
   pausedUnitId: string | null = null;
@@ -334,6 +335,7 @@ export class AutoSession {
     this.pendingCrashRecovery = null;
     this.pendingVerificationRetry = null;
     this.verificationRetryCount.clear();
+    this.verificationRetryFailureHashes.clear();
     this.pausedSessionFile = null;
     this.pausedUnitType = null;
     this.pausedUnitId = null;

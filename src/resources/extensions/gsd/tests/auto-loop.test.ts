@@ -784,6 +784,7 @@ function makeLoopSession(overrides?: Partial<Record<string, unknown>>) {
     lastBudgetAlertLevel: 0,
     pendingVerificationRetry: null,
     pendingCrashRecovery: null,
+    verificationRetryFailureHashes: new Map<string, string>(),
     pendingQuickTasks: [],
     sidecarQueue: [],
     autoModeStartModel: null,
@@ -1403,86 +1404,152 @@ test("crash lock records session file from AFTER newSession, not before (#1710)"
 
 test("autoLoop handles verification retry by continuing loop", async (t) => {
   _resetPendingResolve();
+  mock.timers.enable({ apis: ["Date", "setTimeout"], now: 10_000 });
 
-  const ctx = makeMockCtx();
-  ctx.ui.setStatus = () => {};
-  ctx.sessionManager = { getSessionFile: () => "/tmp/session.json" };
-  const pi = makeMockPi();
+  try {
+    const ctx = makeMockCtx();
+    ctx.ui.setStatus = () => {};
+    ctx.sessionManager = { getSessionFile: () => "/tmp/session.json" };
+    const pi = makeMockPi();
 
-  let verifyCallCount = 0;
-  let deriveCallCount = 0;
-  const s = makeLoopSession();
+    let verifyCallCount = 0;
+    let deriveCallCount = 0;
+    const s = makeLoopSession();
 
-  // Pre-queued verification actions: each entry provides a side-effect + return value
-  type VerifyAction = { sideEffect?: () => void; response: "retry" | "continue" };
-  const verificationActions: VerifyAction[] = [
-    {
-      sideEffect: () => {
-        // Simulate retry — set pendingVerificationRetry on session
+    // Pre-queued verification actions: each entry provides a side-effect + return value
+    type VerifyAction = { sideEffect?: () => void; response: "retry" | "continue" };
+    const verificationActions: VerifyAction[] = [
+      {
+        sideEffect: () => {
+          // Simulate retry — set pendingVerificationRetry on session
+          s.pendingVerificationRetry = {
+            unitId: "M001/S01/T01",
+            failureContext: "test failed: expected X got Y",
+            attempt: 1,
+          };
+        },
+        response: "retry",
+      },
+      { response: "continue" },
+    ];
+
+    const deps = makeMockDeps({
+      deriveState: async () => {
+        deriveCallCount++;
+        deps.callLog.push("deriveState");
+        return {
+          phase: "executing",
+          activeMilestone: { id: "M001", title: "Test", status: "active" },
+          activeSlice: { id: "S01", title: "Slice 1" },
+          activeTask: { id: "T01" },
+          registry: [{ id: "M001", status: "active" }],
+          blockers: [],
+        } as any;
+      },
+      runPostUnitVerification: async () => {
+        const action = verificationActions[verifyCallCount] ?? { response: "continue" as const };
+        verifyCallCount++;
+        deps.callLog.push("runPostUnitVerification");
+        action.sideEffect?.();
+        return action.response;
+      },
+      postUnitPostVerification: async () => {
+        deps.callLog.push("postUnitPostVerification");
+        // After the retry cycle completes, deactivate
+        s.active = false;
+        return "continue" as const;
+      },
+    });
+
+    const loopPromise = autoLoop(ctx, pi, s, deps);
+
+    // First iteration: runUnit → verification returns "retry" → loop continues
+    await waitForMicrotasks(() => pi.calls.length === 1, "first dispatch");
+    resolveAgentEnd(makeEvent()); // resolve first unit
+
+    await drainMicrotasks(100);
+    mock.timers.tick(30_000);
+    await waitForMicrotasks(() => pi.calls.length === 2, "retry dispatch");
+    resolveAgentEnd(makeEvent()); // resolve retry unit
+
+    await loopPromise;
+
+    // Verify deriveState was called twice (two iterations)
+    const deriveCount = deps.callLog.filter((c) => c === "deriveState").length;
+    assert.ok(
+      deriveCount >= 2,
+      `deriveState should be called at least 2 times (got ${deriveCount})`,
+    );
+
+    // Verify verification was called twice
+    assert.equal(
+      verifyCallCount,
+      2,
+      "verification should have been called twice (once retry, once pass)",
+    );
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("autoLoop pauses instead of redispatching identical verification failure context", async () => {
+  _resetPendingResolve();
+  mock.timers.enable({ apis: ["Date", "setTimeout"], now: 15_000 });
+
+  try {
+    const ctx = makeMockCtx();
+    ctx.ui.setStatus = () => {};
+    ctx.ui.notify = () => {};
+    ctx.sessionManager = { getSessionFile: () => "/tmp/session.json" };
+    const pi = makeMockPi();
+    const s = makeLoopSession();
+    let verifyCallCount = 0;
+    let pauseCallCount = 0;
+
+    const deps = makeMockDeps({
+      deriveState: async () =>
+        ({
+          phase: "executing",
+          activeMilestone: { id: "M001", title: "Test", status: "active" },
+          activeSlice: { id: "S01", title: "Slice 1" },
+          activeTask: { id: "T01" },
+          registry: [{ id: "M001", status: "active" }],
+          blockers: [],
+        }) as any,
+      runPostUnitVerification: async () => {
+        verifyCallCount++;
+        deps.callLog.push("runPostUnitVerification");
         s.pendingVerificationRetry = {
           unitId: "M001/S01/T01",
           failureContext: "test failed: expected X got Y",
-          attempt: 1,
+          attempt: verifyCallCount,
         };
+        return "retry" as const;
       },
-      response: "retry",
-    },
-    { response: "continue" },
-  ];
+      pauseAuto: async () => {
+        pauseCallCount++;
+        s.active = false;
+      },
+    });
 
-  const deps = makeMockDeps({
-    deriveState: async () => {
-      deriveCallCount++;
-      deps.callLog.push("deriveState");
-      return {
-        phase: "executing",
-        activeMilestone: { id: "M001", title: "Test", status: "active" },
-        activeSlice: { id: "S01", title: "Slice 1" },
-        activeTask: { id: "T01" },
-        registry: [{ id: "M001", status: "active" }],
-        blockers: [],
-      } as any;
-    },
-    runPostUnitVerification: async () => {
-      const action = verificationActions[verifyCallCount] ?? { response: "continue" as const };
-      verifyCallCount++;
-      deps.callLog.push("runPostUnitVerification");
-      action.sideEffect?.();
-      return action.response;
-    },
-    postUnitPostVerification: async () => {
-      deps.callLog.push("postUnitPostVerification");
-      // After the retry cycle completes, deactivate
-      s.active = false;
-      return "continue" as const;
-    },
-  });
+    const loopPromise = autoLoop(ctx, pi, s, deps);
 
-  const loopPromise = autoLoop(ctx, pi, s, deps);
+    await waitForMicrotasks(() => pi.calls.length === 1, "first dispatch");
+    resolveAgentEnd(makeEvent());
+    await drainMicrotasks(100);
+    mock.timers.tick(30_000);
 
-  // First iteration: runUnit → verification returns "retry" → loop continues
-  await new Promise((r) => setTimeout(r, 50));
-  resolveAgentEnd(makeEvent()); // resolve first unit
+    await waitForMicrotasks(() => pi.calls.length === 2, "retry dispatch");
+    resolveAgentEnd(makeEvent());
 
-  // Second iteration: runUnit → verification returns "continue"
-  await new Promise((r) => setTimeout(r, 50));
-  resolveAgentEnd(makeEvent()); // resolve retry unit
+    await loopPromise;
 
-  await loopPromise;
-
-  // Verify deriveState was called twice (two iterations)
-  const deriveCount = deps.callLog.filter((c) => c === "deriveState").length;
-  assert.ok(
-    deriveCount >= 2,
-    `deriveState should be called at least 2 times (got ${deriveCount})`,
-  );
-
-  // Verify verification was called twice
-  assert.equal(
-    verifyCallCount,
-    2,
-    "verification should have been called twice (once retry, once pass)",
-  );
+    assert.equal(verifyCallCount, 2);
+    assert.equal(pi.calls.length, 2, "duplicate failure should not be redispatched a third time");
+    assert.equal(pauseCallCount, 1, "duplicate failure should pause auto-mode");
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test("autoLoop handles dispatch stop action", async (t) => {
@@ -1871,74 +1938,83 @@ test("stuck detection: window resets recovery when deriveState returns a differe
 
 test("stuck detection: does not push to window during verification retry", async () => {
   _resetPendingResolve();
+  mock.timers.enable({ apis: ["Date", "setTimeout"], now: 20_000 });
 
-  const ctx = makeMockCtx();
-  ctx.ui.setStatus = () => {};
-  ctx.ui.notify = () => {};
-  const pi = makeMockPi();
-  const s = makeLoopSession();
+  try {
+    const ctx = makeMockCtx();
+    ctx.ui.setStatus = () => {};
+    ctx.ui.notify = () => {};
+    const pi = makeMockPi();
+    const s = makeLoopSession();
 
-  let verifyCallCount = 0;
-  let stopReason = "";
+    let verifyCallCount = 0;
+    let stopReason = "";
 
-  // Pre-queued responses: 3 retries then a continue (exit)
-  const verifyActions: Array<() => "retry" | "continue"> = [
-    () => { s.pendingVerificationRetry = { unitId: "M001/S01/T01", failureContext: "test failed", attempt: 1 }; return "retry"; },
-    () => { s.pendingVerificationRetry = { unitId: "M001/S01/T01", failureContext: "test failed", attempt: 2 }; return "retry"; },
-    () => { s.pendingVerificationRetry = { unitId: "M001/S01/T01", failureContext: "test failed", attempt: 3 }; return "retry"; },
-    () => { s.active = false; return "continue"; },
-  ];
+    // Pre-queued responses: 3 retries then a continue (exit). Failure
+    // contexts differ so this test exercises stuck-window behavior without
+    // tripping duplicate-failure suppression.
+    const verifyActions: Array<() => "retry" | "continue"> = [
+      () => { s.pendingVerificationRetry = { unitId: "M001/S01/T01", failureContext: "test failed: 1", attempt: 1 }; return "retry"; },
+      () => { s.pendingVerificationRetry = { unitId: "M001/S01/T01", failureContext: "test failed: 2", attempt: 2 }; return "retry"; },
+      () => { s.pendingVerificationRetry = { unitId: "M001/S01/T01", failureContext: "test failed: 3", attempt: 3 }; return "retry"; },
+      () => { s.active = false; return "continue"; },
+    ];
 
-  const deps = makeMockDeps({
-    deriveState: async () =>
-      ({
-        phase: "executing",
-        activeMilestone: { id: "M001", title: "Test", status: "active" },
-        activeSlice: { id: "S01", title: "Slice 1" },
-        activeTask: { id: "T01" },
-        registry: [{ id: "M001", status: "active" }],
-        blockers: [],
-      }) as any,
-    resolveDispatch: async () => ({
-      action: "dispatch" as const,
-      unitType: "execute-task",
-      unitId: "M001/S01/T01",
-      prompt: "do the thing",
-    }),
-    runPostUnitVerification: async () => {
-      const action = verifyActions[verifyCallCount] ?? (() => { s.active = false; return "continue" as const; });
-      verifyCallCount++;
-      deps.callLog.push("runPostUnitVerification");
-      return action();
-    },
-    stopAuto: async (_ctx?: any, _pi?: any, reason?: string) => {
-      deps.callLog.push("stopAuto");
-      stopReason = reason ?? "";
-      s.active = false;
-    },
-  });
+    const deps = makeMockDeps({
+      deriveState: async () =>
+        ({
+          phase: "executing",
+          activeMilestone: { id: "M001", title: "Test", status: "active" },
+          activeSlice: { id: "S01", title: "Slice 1" },
+          activeTask: { id: "T01" },
+          registry: [{ id: "M001", status: "active" }],
+          blockers: [],
+        }) as any,
+      resolveDispatch: async () => ({
+        action: "dispatch" as const,
+        unitType: "execute-task",
+        unitId: "M001/S01/T01",
+        prompt: "do the thing",
+      }),
+      runPostUnitVerification: async () => {
+        const action = verifyActions[verifyCallCount] ?? (() => { s.active = false; return "continue" as const; });
+        verifyCallCount++;
+        deps.callLog.push("runPostUnitVerification");
+        return action();
+      },
+      stopAuto: async (_ctx?: any, _pi?: any, reason?: string) => {
+        deps.callLog.push("stopAuto");
+        stopReason = reason ?? "";
+        s.active = false;
+      },
+    });
 
-  const loopPromise = autoLoop(ctx, pi, s, deps);
+    const loopPromise = autoLoop(ctx, pi, s, deps);
 
-  // Resolve agent_end for 4 iterations (1 initial + 3 retries)
-  for (let i = 0; i < 4; i++) {
-    await new Promise((r) => setTimeout(r, 30));
-    resolveAgentEnd(makeEvent());
+    // Resolve agent_end for 4 iterations (1 initial + 3 retries)
+    for (let i = 1; i <= 4; i++) {
+      await waitForMicrotasks(() => pi.calls.length === i, `dispatch ${i}`);
+      resolveAgentEnd(makeEvent());
+      await drainMicrotasks(100);
+      mock.timers.tick(30_000);
+    }
+
+    await loopPromise;
+
+    // Even though same unit was derived 4 times, verification retries should
+    // not push to the sliding window, so stuck detection should not have fired
+    assert.ok(
+      !stopReason.includes("Stuck"),
+      `stuck detection should not fire during verification retries, got: ${stopReason}`,
+    );
+    assert.equal(
+      verifyCallCount,
+      4,
+      "verification should have been called 4 times (1 initial + 3 retries)",
+    );
+  } finally {
+    mock.timers.reset();
   }
-
-  await loopPromise;
-
-  // Even though same unit was derived 4 times, verification retries should
-  // not push to the sliding window, so stuck detection should not have fired
-  assert.ok(
-    !stopReason.includes("Stuck"),
-    `stuck detection should not fire during verification retries, got: ${stopReason}`,
-  );
-  assert.equal(
-    verifyCallCount,
-    4,
-    "verification should have been called 4 times (1 initial + 3 retries)",
-  );
 });
 
 // ── detectStuck unit tests ────────────────────────────────────────────────────
@@ -2315,60 +2391,75 @@ test("session-switch abort grace window is short-lived and resettable", () => {
 
 test("autoLoop re-iterates when postUnitPreVerification returns retry (#1571)", async () => {
   _resetPendingResolve();
+  mock.timers.enable({ apis: ["Date", "setTimeout"], now: 30_000 });
 
-  const ctx = makeMockCtx();
-  ctx.ui.setStatus = () => {};
-  const pi = makeMockPi();
-  const s = makeLoopSession();
+  try {
+    const ctx = makeMockCtx();
+    ctx.ui.setStatus = () => {};
+    const pi = makeMockPi();
+    const s = makeLoopSession();
 
-  let preVerifyCallCount = 0;
-  // Pre-queued responses: first call returns "retry", second returns "continue"
-  const preVerifyResponses = ["retry", "continue"] as const;
+    let preVerifyCallCount = 0;
+    // Pre-queued responses: first call returns "retry", second returns "continue"
+    const preVerifyResponses = ["retry", "continue"] as const;
 
-  const deps = makeMockDeps({
-    deriveState: async () => {
-      deps.callLog.push("deriveState");
-      return {
-        phase: "executing",
-        activeMilestone: { id: "M001", title: "Test", status: "active" },
-        activeSlice: { id: "S01", title: "Slice 1" },
-        activeTask: { id: "T01" },
-        registry: [{ id: "M001", status: "active" }],
-        blockers: [],
-      } as any;
-    },
-    postUnitPreVerification: async () => {
-      deps.callLog.push("postUnitPreVerification");
-      return preVerifyResponses[preVerifyCallCount++] ?? "continue";
-    },
-    postUnitPostVerification: async () => {
-      deps.callLog.push("postUnitPostVerification");
-      s.active = false;
-      return "continue" as const;
-    },
-  });
+    const deps = makeMockDeps({
+      deriveState: async () => {
+        deps.callLog.push("deriveState");
+        return {
+          phase: "executing",
+          activeMilestone: { id: "M001", title: "Test", status: "active" },
+          activeSlice: { id: "S01", title: "Slice 1" },
+          activeTask: { id: "T01" },
+          registry: [{ id: "M001", status: "active" }],
+          blockers: [],
+        } as any;
+      },
+      postUnitPreVerification: async () => {
+        deps.callLog.push("postUnitPreVerification");
+        const response = preVerifyResponses[preVerifyCallCount++] ?? "continue";
+        if (response === "retry") {
+          s.pendingVerificationRetry = {
+            unitId: "M001/S01/T01",
+            failureContext: "missing artifact",
+            attempt: 1,
+          };
+        }
+        return response;
+      },
+      postUnitPostVerification: async () => {
+        deps.callLog.push("postUnitPostVerification");
+        s.active = false;
+        return "continue" as const;
+      },
+    });
 
-  const loopPromise = autoLoop(ctx, pi, s, deps);
+    const loopPromise = autoLoop(ctx, pi, s, deps);
 
-  await new Promise((r) => setTimeout(r, 50));
-  resolveAgentEnd(makeEvent());
+    await waitForMicrotasks(() => pi.calls.length === 1, "first dispatch");
+    resolveAgentEnd(makeEvent());
 
-  await new Promise((r) => setTimeout(r, 50));
-  resolveAgentEnd(makeEvent());
+    await drainMicrotasks(100);
+    mock.timers.tick(30_000);
+    await waitForMicrotasks(() => pi.calls.length === 2, "retry dispatch");
+    resolveAgentEnd(makeEvent());
 
-  await loopPromise;
+    await loopPromise;
 
-  assert.equal(preVerifyCallCount, 2, "preVerification should be called twice");
+    assert.equal(preVerifyCallCount, 2, "preVerification should be called twice");
 
-  const postVerifyCalls = deps.callLog.filter(
-    (c: string) => c === "runPostUnitVerification",
-  );
-  const postPostVerifyCalls = deps.callLog.filter(
-    (c: string) => c === "postUnitPostVerification",
-  );
+    const postVerifyCalls = deps.callLog.filter(
+      (c: string) => c === "runPostUnitVerification",
+    );
+    const postPostVerifyCalls = deps.callLog.filter(
+      (c: string) => c === "postUnitPostVerification",
+    );
 
-  assert.equal(postVerifyCalls.length, 1, "runPostUnitVerification should only be called once");
-  assert.equal(postPostVerifyCalls.length, 1, "postUnitPostVerification should only be called once");
+    assert.equal(postVerifyCalls.length, 1, "runPostUnitVerification should only be called once");
+    assert.equal(postPostVerifyCalls.length, 1, "postUnitPostVerification should only be called once");
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 // ─── stopAuto unitPromise leak regression (#1799) ────────────────────────────

@@ -74,11 +74,62 @@ import {
 } from "../workflow-mcp.js";
 import { resolveManifest } from "../unit-context-manifest.js";
 import { createWorktreeSafetyModule, type WorktreeSafetyResult } from "../worktree-safety.js";
+import { decideVerificationRetry, verificationRetryKey } from "./verification-retry-policy.js";
 
 // ─── Path Comparison Helper ───────────────────────────────────────────────
 /** Compare two paths for physical identity, tolerating trailing slashes and symlinks. */
 function isSamePathLocal(a: string, b: string): boolean {
   return normalizeWorktreePathForCompare(a) === normalizeWorktreePathForCompare(b);
+}
+
+async function applyVerificationRetryPolicy(
+  ic: IterationContext,
+  unitType: string | undefined,
+  phase: "artifact-verification-retry" | "verification-retry",
+): Promise<PhaseResult | null> {
+  const { ctx, pi, s, deps } = ic;
+  const retryInfo = s.pendingVerificationRetry;
+  const key = unitType && retryInfo
+    ? verificationRetryKey(unitType, retryInfo.unitId)
+    : undefined;
+  const decision = decideVerificationRetry({
+    unitType,
+    retryInfo,
+    previousFailureHash: key ? s.verificationRetryFailureHashes.get(key) : undefined,
+  });
+
+  if (decision.action === "pause") {
+    s.pendingVerificationRetry = null;
+    debugLog("autoLoop", {
+      phase: `${phase}-paused`,
+      reason: decision.reason,
+      unitType,
+      unitId: retryInfo?.unitId,
+      failureHash: decision.failureHash,
+    });
+    ctx.ui.notify(
+      decision.reason === "duplicate-failure-context"
+        ? `Verification retry for ${unitType ?? "unit"} ${retryInfo?.unitId ?? "unknown"} produced the same failure context. Pausing auto-mode instead of re-dispatching.`
+        : "Verification retry requested without retry context. Pausing auto-mode instead of re-dispatching.",
+      "warning",
+    );
+    await deps.pauseAuto(ctx, pi);
+    return { action: "break", reason: decision.reason };
+  }
+
+  s.verificationRetryFailureHashes.set(decision.key, decision.failureHash);
+  debugLog("autoLoop", {
+    phase: `${phase}-backoff`,
+    iteration: ic.iteration,
+    unitType,
+    unitId: retryInfo?.unitId,
+    attempt: retryInfo?.attempt,
+    delayMs: decision.delayMs,
+    baseDelayMs: decision.baseDelayMs,
+    failureHash: decision.failureHash,
+  });
+  await new Promise<void>((resolve) => setTimeout(resolve, decision.delayMs));
+  return null;
 }
 
 export function shouldDegradeEmptyWorktreeToProjectRoot(
@@ -2386,6 +2437,14 @@ export async function runFinalize(
           attempt: retryInfo?.attempt,
         },
       });
+      const retryPolicyResult = await applyVerificationRetryPolicy(
+        ic,
+        preUnitSnapshot?.type,
+        "artifact-verification-retry",
+      );
+      if (retryPolicyResult) {
+        return retryPolicyResult;
+      }
       // Continue the loop — next iteration will inject the retry context into the prompt.
       debugLog("autoLoop", { phase: "artifact-verification-retry", iteration: ic.iteration });
       return { action: "continue" };
@@ -2423,6 +2482,14 @@ export async function runFinalize(
         debugLog("autoLoop", { phase: "sidecar-verification-retry-skipped", iteration: ic.iteration });
       } else {
         // s.pendingVerificationRetry was set by runPostUnitVerification.
+        const retryPolicyResult = await applyVerificationRetryPolicy(
+          ic,
+          iterData.unitType,
+          "verification-retry",
+        );
+        if (retryPolicyResult) {
+          return retryPolicyResult;
+        }
         // Continue the loop — next iteration will inject the retry context into the prompt.
         debugLog("autoLoop", { phase: "verification-retry", iteration: ic.iteration });
         return { action: "continue" };
