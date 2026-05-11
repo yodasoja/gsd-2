@@ -1050,13 +1050,11 @@ export async function cleanupAfterLoopExit(ctx: ExtensionContext): Promise<void>
     initHealthWidget(ctx);
   }
 
-  // ADR-016 phase 3 (#5693): the stop-path basePath restore routes through
-  // `Lifecycle.restoreToProjectRoot()`, the sole owner of `s.basePath`
-  // mutation. The verb assigns `s.basePath` before any throwable work
-  // (rebuildGitService, cache invalidation), so a thrown error still leaves
-  // basePath restored — no fallback assignment needed at the call site.
-  // The chdir stays here because `restoreToProjectRoot` is a pure
-  // session-state mutation.
+  // ADR-016 phase 3 (#5693): the stop-path basePath restore + chdir routes
+  // through `Lifecycle.restoreToProjectRoot()`, the sole owner of both
+  // `s.basePath` mutation and the paired `process.chdir` for auto-loop
+  // transitions. The verb assigns `s.basePath` before any throwable work, so
+  // a thrown error still leaves basePath restored.
   if (s.originalBasePath) {
     try {
       buildLifecycle().restoreToProjectRoot();
@@ -1066,11 +1064,6 @@ export async function cleanupAfterLoopExit(ctx: ExtensionContext): Promise<void>
         `restore project root failed: ${err instanceof Error ? err.message : String(err)}`,
         { file: "auto.ts" },
       );
-    }
-    try {
-      process.chdir(s.originalBasePath);
-    } catch (err) {
-      logWarning("engine", `basePath restore/chdir failed: ${err instanceof Error ? err.message : String(err)}`, { file: "auto.ts" });
     }
   }
 
@@ -1386,19 +1379,13 @@ export async function stopAuto(
     }
 
     // ── Step 7: Restore basePath and chdir (ADR-016 phase 3, #5693) ──
-    // `restoreToProjectRoot` assigns s.basePath before any throwable work;
-    // no fallback assignment is needed at the call site.
+    // `restoreToProjectRoot` owns both s.basePath restore and process.chdir;
+    // no paired chdir is needed at the call site.
     if (s.originalBasePath) {
       try {
         buildLifecycle().restoreToProjectRoot();
       } catch (e) {
         debugLog("stop-cleanup-basepath", { error: e instanceof Error ? e.message : String(e) });
-      }
-      try {
-        process.chdir(s.basePath);
-      } catch (err) {
-        /* best-effort */
-        logWarning("engine", `chdir failed: ${err instanceof Error ? err.message : String(err)}`, { file: "auto.ts" });
       }
     }
 

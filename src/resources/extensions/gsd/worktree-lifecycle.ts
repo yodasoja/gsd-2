@@ -1702,18 +1702,34 @@ export class WorktreeLifecycle {
   }
 
   /**
-   * Restore `s.basePath` to `s.originalBasePath` and rebuild `s.gitService`.
+   * Restore `s.basePath` to `s.originalBasePath`, rebuild `s.gitService`, and
+   * chdir process cwd to the restored project root.
    * No-op when `originalBasePath` is empty (fresh sessions).
    *
    * Used by error/cleanup paths that need the session to behave as if the
    * worktree was never entered. Does NOT teardown the worktree directory —
    * callers that need teardown go through `exitMilestone({ merge: false })`.
+   *
+   * ADR-016 phase 3 (#5693): chdir lives inside the verb so callers do not
+   * have to pair `restoreToProjectRoot()` with a redundant `process.chdir`.
+   * The chdir is best-effort; failure is logged via debugLog and swallowed so
+   * cleanup paths always complete the session-state restore.
    */
   restoreToProjectRoot(): void {
     if (!this.s.originalBasePath) return;
     this.s.basePath = this.s.originalBasePath;
     rebuildGitService(this.s, this.deps);
     invalidateAllCaches();
+    try {
+      process.chdir(this.s.basePath);
+    } catch (err) {
+      debugLog("WorktreeLifecycle", {
+        action: "restoreToProjectRoot",
+        result: "chdir-failed",
+        basePath: this.s.basePath,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   /**
