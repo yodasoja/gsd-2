@@ -157,7 +157,12 @@ function renderRoadmapMarkdown(milestone: MilestoneRow, slices: SliceRow[]): str
   for (const slice of slices) {
     const done = isClosedStatus(slice.status) ? "x" : " ";
     const depends = `[${(slice.depends ?? []).join(",")}]`;
-    lines.push(`- [${done}] **${slice.id}: ${slice.title}** \`risk:${slice.risk}\` \`depends:${depends}\``);
+    // ADR-011: sketch slices get a `[sketch]` badge so the roadmap shows at a
+    // glance which slices are still pending refine-slice expansion. The badge
+    // sits in front of `risk:` so it's visible in narrow terminals that may
+    // truncate the line.
+    const sketchBadge = slice.is_sketch === 1 ? "`[sketch]` " : "";
+    lines.push(`- [${done}] **${slice.id}: ${slice.title}** ${sketchBadge}\`risk:${slice.risk}\` \`depends:${depends}\``);
     lines.push(`  > After this: ${slice.demo}`);
     lines.push("");
   }
