@@ -173,6 +173,13 @@ test("queryDecisionsFromMemories filters by milestoneId (substring match on when
       choice: "C",
       rationale: "z",
     });
+    await seedDecision(base, {
+      when_context: "M003 plan",
+      scope: "M003",
+      decision: "Use M001 as precedent",
+      choice: "D",
+      rationale: "Mentions M001 outside when_context",
+    });
 
     const m001 = queryDecisionsFromMemories({ milestoneId: "M001" });
     assert.equal(m001.length, 2, "two decisions reference M001 in when_context");

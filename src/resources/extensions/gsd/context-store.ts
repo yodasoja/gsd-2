@@ -93,8 +93,6 @@ export function queryDecisionsFromMemories(opts?: DecisionQueryOpts): Decision[]
   if (!adapter) return [];
 
   try {
-    // Anchor each pattern with the closing `"` so prefix collisions don't
-    // produce false matches (e.g. scope=M001 must not match "scope":"M001-S01").
     const clauses: string[] = [
       "category = 'architecture'",
       "structured_fields LIKE '%\"sourceDecisionId\":\"%'",
@@ -105,13 +103,13 @@ export function queryDecisionsFromMemories(opts?: DecisionQueryOpts): Decision[]
     if (opts?.milestoneId) {
       // when_context is a free-text JSON value; substring match preserves the
       // semantics of `when_context LIKE '%milestoneId%'` on the legacy table.
-      clauses.push("structured_fields LIKE :milestone_pattern");
-      params[':milestone_pattern'] = `%"when_context":"%${opts.milestoneId}%"%`;
+      clauses.push("json_extract(structured_fields, '$.when_context') LIKE :milestone_pattern");
+      params[':milestone_pattern'] = `%${opts.milestoneId}%`;
     }
 
     if (opts?.scope) {
-      clauses.push("structured_fields LIKE :scope_pattern");
-      params[':scope_pattern'] = `%"scope":"${opts.scope}"%`;
+      clauses.push("json_extract(structured_fields, '$.scope') = :scope");
+      params[':scope'] = opts.scope;
     }
 
     const sql = `SELECT seq, structured_fields FROM memories WHERE ${clauses.join(' AND ')} ORDER BY seq`;
