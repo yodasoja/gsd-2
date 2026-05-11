@@ -16,7 +16,8 @@
 | 1 | `structuredFields` JSON column on `memories` table | ✅ | Schema present in `src/resources/extensions/gsd/gsd-db.ts` (memories table definition) |
 | 2 | Register `capture_thought`, `memory_query`, `gsd_graph` | ✅ | `src/resources/extensions/gsd/bootstrap/memory-tools.ts` |
 | 3 | Auto-injection of relevant memories at session start | ✅ | `src/resources/extensions/gsd/bootstrap/system-context.ts:213,329` — `loadMemoryBlock` (covered by `src/resources/extensions/gsd/tests/load-memory-block.test.ts`) |
-| 4 | Researcher agent frontmatter updated with write-capable memory tools; scout unchanged | ✅ | `src/resources/agents/researcher.md:4` includes `capture_thought` / `memory_query` / `gsd_graph`; scout intentionally remains read-only per scope |
+| 4a | Researcher agent frontmatter updated to include write-capable memory tools (`capture_thought`, `memory_query`, `gsd_graph`) | ✅ | `src/resources/agents/researcher.md:4` |
+| 4b | Scout agent frontmatter intentionally kept read-only — memory tools excluded per scope | ✅ | `src/resources/agents/scout.md:4` (no change; read-only contract preserved) |
 | 5 | Idempotent `decisions → memories` backfill on session start | ✅ | `src/resources/extensions/gsd/memory-backfill.ts` — `backfillDecisionsToMemories`; wired from `system-context.ts:159` |
 | 6 preflight | Cutover gap scanner (read-only, warns on unmigrated rows) | ⏳ | Outstanding — tracked on #5751 / PR #5765. No scanner module is present in this branch. |
 | 6 cutover | Stop dual-write, memories canonical, `decisions` table read-only | ⏳ | Outstanding — tracked on #5755. Destructive; blocked on scanner reading clean. |
