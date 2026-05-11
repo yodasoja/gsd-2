@@ -2,6 +2,7 @@
 // File Purpose: Auto Orchestration module interfaces and ADR-015 invariant adapter contracts.
 
 import type { GSDState } from "../types.js";
+import type { MinimalModelRegistry } from "../context-budget.js";
 
 export interface AutoSessionContext {
   basePath: string;
@@ -36,7 +37,17 @@ export interface AutoOrchestrationModule {
 }
 
 export interface DispatchAdapter {
-  decideNextUnit(input: { stateSnapshot: GSDState }): Promise<{
+  decideNextUnit(input: {
+    stateSnapshot: GSDState;
+    /** Mirrors `DispatchContext.structuredQuestionsAvailable` — "true"/"false" string per the dispatch contract. */
+    structuredQuestionsAvailable?: "true" | "false";
+    /** Session model context window in tokens, forwarded to the budget engine. */
+    sessionContextWindow?: number;
+    /** Session model provider, used for provider-specific effective context windows. */
+    sessionProvider?: string;
+    /** Model registry for executor-model lookups inside the budget engine. */
+    modelRegistry?: MinimalModelRegistry;
+  }): Promise<{
     unitType: string;
     unitId: string;
     reason: string;

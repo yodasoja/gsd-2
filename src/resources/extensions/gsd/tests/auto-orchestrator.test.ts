@@ -7,6 +7,11 @@ import assert from "node:assert/strict";
 import { createAutoOrchestrator, STUCK_WINDOW_SIZE } from "../auto/orchestrator.js";
 import type { AutoOrchestratorDeps } from "../auto/contracts.js";
 import type { GSDState } from "../types.js";
+import { createWiredDispatchAdapter } from "../auto.js";
+import { resolveDispatch, type DispatchContext } from "../auto-dispatch.js";
+import { RuleRegistry, setRegistry, resetRegistry } from "../rule-registry.js";
+import type { UnifiedRule } from "../rule-types.js";
+import { supportsStructuredQuestions } from "../workflow-mcp.js";
 
 function makeState(): GSDState {
   return {
@@ -623,4 +628,113 @@ test("stuck-loop: journal records the stuck-loop reason on advance-blocked", asy
   }
 
   assert.ok(calls.includes("journal:advance-blocked"));
+});
+
+// ─── #5789 parity: wired dispatch adapter mirrors runDispatch's resolveDispatch call ───
+
+test("wired DispatchAdapter forwards session-derived dispatch inputs identically to runDispatch", async () => {
+  const stateSnapshot = makeState();
+
+  // Install a capturing registry so we observe the DispatchContext both code paths
+  // build, and force a deterministic dispatch action so the parity assertion is
+  // about *inputs*, not rule evaluation.
+  const captured: DispatchContext[] = [];
+  const captureRule: UnifiedRule = {
+    name: "test-capture",
+    when: "dispatch",
+    evaluation: "first-match",
+    where: async (ctx: DispatchContext) => {
+      captured.push(ctx);
+      return {
+        action: "dispatch" as const,
+        unitType: "execute-task",
+        unitId: "T01",
+        prompt: "parity-fixture",
+      };
+    },
+    then: (r: unknown) => r,
+  };
+  setRegistry(new RuleRegistry([captureRule]));
+
+  try {
+    // Mock ExtensionContext + ExtensionAPI with the surface the wired adapter touches.
+    const fakeModelRegistry = {
+      getAll: () => [],
+      getProviderAuthMode: (_provider: string) => "apiKey" as const,
+    };
+    const ctx = {
+      model: {
+        provider: "anthropic",
+        baseUrl: "https://api.anthropic.com",
+        contextWindow: 200_000,
+      },
+      modelRegistry: fakeModelRegistry,
+    } as any;
+    const pi = {
+      getActiveTools: () => ["read_file", "write_file"],
+    } as any;
+    const basePath = "/tmp/parity-fixture";
+
+    // Path A — wired adapter (what createWiredAutoOrchestrationModule uses).
+    const adapter = createWiredDispatchAdapter(ctx, pi, basePath);
+    const adapterResult = await adapter.decideNextUnit({ stateSnapshot });
+
+    // Path B — direct resolveDispatch call mirroring phases.ts:runDispatch.
+    // Inline the same derivations runDispatch uses so any drift here is a parity break.
+    const prefs = undefined; // loadEffectiveGSDPreferences returns null for /tmp/parity-fixture.
+    const provider = ctx.model?.provider;
+    const authMode = provider && typeof ctx.modelRegistry?.getProviderAuthMode === "function"
+      ? ctx.modelRegistry.getProviderAuthMode(provider)
+      : undefined;
+    const activeTools = typeof pi.getActiveTools === "function" ? pi.getActiveTools() : [];
+    const structuredQuestionsAvailable: "true" | "false" =
+      prefs !== undefined && (prefs as { planning_depth?: string }).planning_depth === "deep"
+        ? "false"
+        : supportsStructuredQuestions(activeTools, {
+            authMode,
+            baseUrl: ctx.model?.baseUrl,
+          })
+          ? "true"
+          : "false";
+
+    const builtDirectCtx: DispatchContext = {
+      basePath,
+      mid: stateSnapshot.activeMilestone!.id,
+      midTitle: stateSnapshot.activeMilestone!.title,
+      state: stateSnapshot,
+      prefs,
+      structuredQuestionsAvailable,
+      sessionContextWindow: ctx.model?.contextWindow,
+      sessionProvider: ctx.model?.provider,
+      modelRegistry: ctx.modelRegistry,
+    };
+    const directAction = await resolveDispatch(builtDirectCtx);
+
+    // Two contexts captured: one per resolveDispatch call.
+    assert.equal(captured.length, 2, "expected two captured dispatch contexts");
+    const [adapterCtx, directCtx] = captured;
+
+    // Parity assertion: session-derived fields are identical.
+    assert.equal(adapterCtx.structuredQuestionsAvailable, directCtx.structuredQuestionsAvailable);
+    assert.equal(adapterCtx.sessionContextWindow, directCtx.sessionContextWindow);
+    assert.equal(adapterCtx.sessionProvider, directCtx.sessionProvider);
+    assert.equal(adapterCtx.modelRegistry, directCtx.modelRegistry);
+    assert.equal(adapterCtx.basePath, directCtx.basePath);
+    assert.equal(adapterCtx.mid, directCtx.mid);
+    assert.equal(adapterCtx.midTitle, directCtx.midTitle);
+
+    // Dispatch action equality: both flows reach the same dispatch decision.
+    assert.ok(adapterResult);
+    assert.equal(adapterResult.unitType, "execute-task");
+    assert.equal(adapterResult.unitId, "T01");
+    assert.equal(adapterResult.reason, "test-capture");
+    assert.equal(directAction.action, "dispatch");
+    if (directAction.action === "dispatch") {
+      assert.equal(directAction.unitType, adapterResult.unitType);
+      assert.equal(directAction.unitId, adapterResult.unitId);
+      assert.equal(directAction.matchedRule, adapterResult.reason);
+    }
+  } finally {
+    resetRegistry();
+  }
 });
