@@ -741,6 +741,12 @@ export class TUI extends Container {
 			return;
 		}
 
+		if (newLines.length < this.previousLines.length && newLines.length > height) {
+			logRedraw(`bottom-anchored tall block shrunk (${this.previousLines.length} -> ${newLines.length})`);
+			fullRender(true);
+			return;
+		}
+
 		// Content shrunk below the working area and no overlays - re-render to clear empty rows
 		// (overlays need the padding, so only do this when no overlays are active)
 		// Configurable via setClearOnShrink() or PI_CLEAR_ON_SHRINK=0 env var

@@ -162,6 +162,36 @@ describe("TUI pin-to-bottom on clear", () => {
     );
   });
 
+  it("re-anchors tall shrinks so the latest turn end remains visible", () => {
+    const terminal = new ResizableMockTerminal(20);
+    const tui = new TUI(terminal, false);
+    const lines = Array.from({ length: 60 }, (_, i) => `line ${i + 1}`);
+    const component = new StaticLinesComponent(lines);
+    tui.addChild(component);
+
+    (tui as any).doRender();
+    terminal.writtenData = [];
+
+    component.lines = lines.slice(0, 40);
+    (tui as any).doRender();
+
+    const frame = terminal.writtenData.join("");
+    assert.ok(
+      frame.includes("\x1b[2J\x1b[1;1H"),
+      `expected tall shrink to force a bottom-visible redraw, got ${JSON.stringify(frame.slice(0, 120))}`,
+    );
+    assert.strictEqual(
+      (tui as any).previousViewportTop,
+      20,
+      "tall shrink should reset the viewport baseline to the new rendered bottom",
+    );
+    assert.strictEqual(
+      (tui as any).maxLinesRendered,
+      40,
+      "tall shrink should reset the working area to the new content height",
+    );
+  });
+
   it("uses differential render for same-line-count edit on short content", () => {
     // Gap C: verify the negative-viewport coordinate math is correct when a
     // same-length edit reaches the differential path (no line count change →
