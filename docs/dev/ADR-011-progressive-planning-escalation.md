@@ -16,7 +16,7 @@
 | Schema: `is_sketch` + `sketch_scope` columns | ✅ | `src/resources/extensions/gsd/db-base-schema.ts:172-173` |
 | Prompt: progressive-planning section in plan-milestone | ✅ | `src/resources/extensions/gsd/prompts/plan-milestone.md:84-94` ("Progressive Planning (ADR-011)") |
 | Executor: 3-valued `isSketch` ON CONFLICT semantics | ✅ | `src/resources/extensions/gsd/tools/plan-milestone.ts:136-184` |
-| Preference: `phases.progressive_planning` | ✅ | `src/resources/extensions/gsd/types.ts:358`, validated in `preferences-validation.ts:352-354` |
+| Preference: `phases.progressive_planning` | ✅ | `src/resources/extensions/gsd/types.ts:358`, validated in `src/resources/extensions/gsd/preferences-validation.ts:352-354` |
 | State derivation: `is_sketch=1` → `phase: 'refining'` | ✅ | `src/resources/extensions/gsd/state.ts:737-744`; phase union in `types.ts:14` |
 | ROADMAP sketch badge | ✅ | `src/resources/extensions/gsd/markdown-renderer.ts:160` — `[sketch]` backtick badge (PR #5763) |
 
@@ -26,7 +26,7 @@
 |---|---|---|
 | Escalation artifact type | ✅ | `src/resources/extensions/gsd/types.ts:372` |
 | Escalation artifact I/O | ✅ | `src/resources/extensions/gsd/escalation.ts` |
-| Gate-plane `manual-attention` wiring | ✅ | UOK gate runner |
+| Gate-plane `manual-attention` wiring | ✅ | `src/resources/extensions/gsd/uok/gate-runner.ts:16-24`, fallback outcome in `src/resources/extensions/gsd/uok/gate-runner.ts:195-204` |
 | `refine-slice` prompt + builder | ✅ | `src/resources/extensions/gsd/prompts/refine-slice.md`; `auto-prompts.ts:2192-2225` (`buildRefineSlicePrompt`) |
 | Dispatch: `refining` → `refine-slice` (or fallback to `plan-slice`) | ✅ | `src/resources/extensions/gsd/auto-dispatch.ts:880-928` |
 | `is_sketch` auto-clear after PLAN written | ✅ | `src/resources/extensions/gsd/state-reconciliation/drift/sketch-flag.ts` — `sketchFlagHandler` registered in DRIFT_REGISTRY |
