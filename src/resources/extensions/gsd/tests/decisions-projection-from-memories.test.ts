@@ -370,3 +370,27 @@ test("saveDecisionToDb writes a DECISIONS.md projection sourced from memories th
     cleanup(base);
   }
 });
+
+test("saveDecisionToDb injects a projection fallback when memory mirror is absent", async () => {
+  const base = makeTmpBase();
+  try {
+    const result = await saveDecisionToDb(
+      {
+        when_context: "M001 fallback",
+        scope: "M001",
+        decision: "",
+        choice: "",
+        rationale: "",
+      },
+      base,
+    );
+
+    assert.equal(result.id, "D001");
+    assert.equal(getAllDecisionsFromMemories().some((d) => d.id === "D001"), false);
+
+    const md = readFileSync(join(base, ".gsd", "DECISIONS.md"), "utf-8");
+    assert.match(md, /\| D001 \| M001 fallback \| M001 \|  \|  \|  \| Yes \| agent \|/);
+  } finally {
+    cleanup(base);
+  }
+});

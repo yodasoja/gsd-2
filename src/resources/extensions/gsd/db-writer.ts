@@ -471,7 +471,15 @@ export async function saveDecisionToDb(
     // happen before the projection regen below, because the regen now sources
     // from memories. If the dual-write ran after, the just-saved decision
     // would be missing from its own projection.
-    await mirrorDecisionToMemory(id, fields);
+    try {
+      await mirrorDecisionToMemory(id, fields);
+    } catch (mirrorErr) {
+      logWarning('projection', 'decision memory mirror failed; projection fallback will use the committed decision row', {
+        fn: 'saveDecisionToDb',
+        decisionId: id,
+        error: String((mirrorErr as Error).message),
+      });
+    }
 
     // Fetch all decisions (including superseded for the full register).
     // ADR-013 Stage 2a: source from the `memories` table. The Phase 5
@@ -480,6 +488,26 @@ export async function saveDecisionToDb(
     // superseded_by on every session start.
     const { getAllDecisionsFromMemories } = await import('./context-store.js');
     let allDecisions: Decision[] = getAllDecisionsFromMemories();
+    if (!allDecisions.some(d => d.id === id)) {
+      logWarning('projection', 'just-saved decision missing from memories after mirror; injecting fallback for projection', {
+        fn: 'saveDecisionToDb',
+        decisionId: id,
+      });
+      const nextSeq = allDecisions.reduce((max, d) => Math.max(max, d.seq ?? 0), 0) + 1;
+      const fallback: Decision = {
+        seq: nextSeq,
+        id,
+        when_context: fields.when_context ?? '',
+        scope: fields.scope,
+        decision: fields.decision,
+        choice: fields.choice,
+        rationale: fields.rationale,
+        revisable: fields.revisable ?? 'Yes',
+        made_by: fields.made_by ?? 'agent',
+        superseded_by: null,
+      };
+      allDecisions = [...allDecisions, fallback];
+    }
 
     const filePath = resolveGsdRootFile(basePath, 'DECISIONS');
 
