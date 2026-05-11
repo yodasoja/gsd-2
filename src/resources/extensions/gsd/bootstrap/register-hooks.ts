@@ -484,6 +484,8 @@ export function registerHooks(
     }
     await loadToolApiKeysForSession();
     if (!isAutoActive()) {
+      ctx.ui.setWidget("gsd-progress", undefined);
+      ctx.ui.setWidget("gsd-outcome", undefined);
       const { initHealthWidget } = await import("../health-widget.js");
       initHealthWidget(ctx);
     } else {
