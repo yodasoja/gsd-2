@@ -159,14 +159,15 @@ test("cleanupAfterLoopExit keeps cleanup best-effort when lifecycle restore thro
   const previousCwd = process.cwd();
   let restoreCalls = 0;
   // ADR-016 phase 3 (#5693): the real `restoreToProjectRoot` assigns
-  // `s.basePath = s.originalBasePath` BEFORE any throwable work
+  // `s.basePath = s.originalBasePath` AND chdir's BEFORE any throwable work
   // (rebuildGitService, cache invalidation). Mirror that ordering in the
-  // mock so the throw scenario reflects production: basePath is restored
-  // even when the verb throws partway through.
+  // mock so the throw scenario reflects production: basePath and cwd are
+  // restored even when the verb throws partway through.
   t.mock.method(WorktreeLifecycle.prototype, "restoreToProjectRoot", function (this: WorktreeLifecycle) {
     restoreCalls += 1;
-    (this as unknown as { s: { basePath: string; originalBasePath: string } })
-      .s.basePath = (this as unknown as { s: { originalBasePath: string } }).s.originalBasePath;
+    const sRef = this as unknown as { s: { basePath: string; originalBasePath: string } };
+    sRef.s.basePath = sRef.s.originalBasePath;
+    try { process.chdir(sRef.s.basePath); } catch { /* mirror real verb's best-effort */ }
     throw new Error("restore failed");
   });
 
