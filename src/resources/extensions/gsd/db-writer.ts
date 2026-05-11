@@ -597,12 +597,12 @@ export async function saveDecisionToDb(
 async function mirrorDecisionToMemory(
   id: string,
   normalizedFields: NormalizedSaveDecisionFields,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const { createMemory } = await import('./memory-store.js');
     const { synthesizeDecisionMemoryContent } = await import('./memory-backfill.js');
     const content = synthesizeDecisionMemoryContent(normalizedFields);
-    if (!content) return;
+    if (!content) return false;
 
     createMemory({
       category: 'architecture',

@@ -131,7 +131,10 @@ export async function buildBeforeAgentStartResult(
     logWarning("bootstrap", `cmux prompt setup skipped: ${(e as Error).message}`);
   }
 
-  const basePath = process.cwd();
+  const ctxProjectRoot = (ctx as { projectRoot?: unknown }).projectRoot;
+  const basePath = typeof ctxProjectRoot === "string" && ctxProjectRoot.length > 0
+    ? ctxProjectRoot
+    : process.cwd();
 
   let preferenceBlock = "";
   if (loadedPreferences) {
@@ -163,10 +166,6 @@ export async function buildBeforeAgentStartResult(
   // re-render the hybrid projection (manual Rules + projected Patterns +
   // projected Lessons). Both are idempotent and best-effort — failures here
   // can't block agent startup.
-  const ctxProjectRoot = (ctx as { projectRoot?: unknown }).projectRoot;
-  const basePath = typeof ctxProjectRoot === "string" && ctxProjectRoot.length > 0
-    ? ctxProjectRoot
-    : process.cwd();
   try {
     const { backfillKnowledgeToMemories } = await import("../knowledge-backfill.js");
     const writtenK = backfillKnowledgeToMemories(basePath);
