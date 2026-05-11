@@ -198,7 +198,7 @@ describe("ADR-008 parity: gsd_task_complete native vs MCP", () => {
       assert.ok(taskTool, "gsd_task_complete must be registered on the MCP surface");
 
       const mcpResult = await taskTool.handler({ projectDir: baseMcp, ...COMPLETION_ARGS });
-      assert.equal((mcpResult as { isError?: boolean }).isError, undefined, "mcp completion must succeed");
+      assert.ok(!mcpResult.isError, "mcp completion must succeed");
 
       const snapshotMcp = snapshotState(baseMcp, "M001", "S01", "T01");
 
