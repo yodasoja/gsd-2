@@ -32,7 +32,7 @@ export interface ContextManagementConfig {
 /**
  * Opt-in tool-output sandboxing for sub-sessions. When enabled, the gsd_exec
  * MCP tool runs scripts in an isolated subprocess and returns only a short
- * digest to the calling agent's context window; full stdout/stderr persist
+ * digest to the calling agent's context window; capped stdout/stderr persist
  * in the project memory store and can be retrieved by id later.
  *
  * Inspired by mksglu/context-mode (Elastic License 2.0). This is an

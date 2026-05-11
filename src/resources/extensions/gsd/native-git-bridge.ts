@@ -705,20 +705,21 @@ export function nativeAddTracked(basePath: string): void {
   gitFileExec(basePath, ["add", "-u"]);
 }
 
-function isDotGsdIgnored(basePath: string): boolean {
-  for (const path of [".gsd", ".gsd/"]) {
-    try {
-      execFileSync("git", ["check-ignore", "-q", path], {
-        cwd: basePath,
-        stdio: "pipe",
-        env: GIT_NO_PROMPT_ENV,
-      });
-      return true;
-    } catch {
-      // exit 1 means this form is not ignored; try the next variant
-    }
+export function nativeIsIgnored(basePath: string, path: string): boolean {
+  try {
+    execFileSync("git", ["check-ignore", "-q", "--", path], {
+      cwd: basePath,
+      stdio: "pipe",
+      env: GIT_NO_PROMPT_ENV,
+    });
+    return true;
+  } catch {
+    return false;
   }
-  return false;
+}
+
+function isDotGsdIgnored(basePath: string): boolean {
+  return [".gsd", ".gsd/"].some(path => nativeIsIgnored(basePath, path));
 }
 
 /**
@@ -1183,6 +1184,33 @@ export function nativeRmForce(basePath: string, paths: string[]): void {
   }
 }
 
+function runGitWorktreeAdd(
+  basePath: string,
+  wtPath: string,
+  branch: string,
+  createBranch?: boolean,
+  startPoint?: string,
+): void {
+  if (createBranch) {
+    const branchRef = gitExec(basePath, ["show-ref", "--verify", `refs/heads/${branch}`], true);
+    if (branchRef) {
+      gitExec(basePath, ["worktree", "add", wtPath, branch]);
+      return;
+    }
+    gitExec(basePath, ["worktree", "add", "-b", branch, wtPath, startPoint ?? "HEAD"]);
+  } else {
+    gitExec(basePath, ["worktree", "add", wtPath, branch]);
+  }
+}
+
+export function assertWorktreeMaterialized(wtPath: string): void {
+  if (existsSync(join(wtPath, ".git"))) return;
+  throw new GSDError(
+    GSD_GIT_ERROR,
+    `git worktree add did not materialize a valid worktree at ${wtPath}: missing .git file`,
+  );
+}
+
 /**
  * Add a new git worktree.
  * Native: libgit2 worktree API.
@@ -1198,14 +1226,20 @@ export function nativeWorktreeAdd(
   const native = loadNative();
   if (native) {
     native.gitWorktreeAdd(basePath, wtPath, branch, createBranch, startPoint);
-    return;
+    try {
+      assertWorktreeMaterialized(wtPath);
+      return;
+    } catch {
+      rmSync(wtPath, { recursive: true, force: true });
+      gitExec(basePath, ["worktree", "prune"], true);
+      runGitWorktreeAdd(basePath, wtPath, branch, createBranch, startPoint);
+      assertWorktreeMaterialized(wtPath);
+      return;
+    }
   }
 
-  if (createBranch) {
-    gitExec(basePath, ["worktree", "add", "-b", branch, wtPath, startPoint ?? "HEAD"]);
-  } else {
-    gitExec(basePath, ["worktree", "add", wtPath, branch]);
-  }
+  runGitWorktreeAdd(basePath, wtPath, branch, createBranch, startPoint);
+  assertWorktreeMaterialized(wtPath);
 }
 
 /**

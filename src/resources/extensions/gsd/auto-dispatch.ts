@@ -1,3 +1,6 @@
+// Project/App: GSD-2
+// File Purpose: Declarative auto-mode dispatch rules and dispatch resolver.
+
 /**
  * Auto-mode Dispatch Table — declarative phase → unit mapping.
  *
@@ -209,6 +212,23 @@ export function getDeepStageGate(prefs: GSDPreferences | undefined, basePath: st
 export function hasPendingDeepStage(prefs: GSDPreferences | undefined, basePath: string): boolean {
   const gate = getDeepStageGate(prefs, basePath);
   return gate.status === "pending" || gate.status === "blocked";
+}
+
+export function shouldRunDeepProjectSetup(
+  state: Pick<GSDState, "phase">,
+  prefs: GSDPreferences | undefined,
+  basePath: string,
+  options: { hasSurvivorBranch?: boolean } = {},
+): boolean {
+  if (options.hasSurvivorBranch === true) return false;
+  if (
+    state.phase !== "pre-planning" &&
+    state.phase !== "needs-discussion" &&
+    state.phase !== "planning"
+  ) {
+    return false;
+  }
+  return hasPendingDeepStage(prefs, basePath);
 }
 
 function missingSliceStop(mid: string, phase: string): DispatchAction {
@@ -921,6 +941,22 @@ export const DISPATCH_RULES: DispatchRule[] = [
       const unitId = `${mid}/${sid}`;
       let priorPreExecFailure: { blockingFindings: string[]; verdictExcerpt: string } | undefined;
       if (session?.lastPreExecFailure?.unitId === unitId) {
+        // Circuit breaker: stop re-dispatching after 2 failed retries. The
+        // planner has had multiple attempts with injected failure context and
+        // still cannot produce a valid plan — human review is required.
+        const MAX_PRE_EXEC_RETRIES = 2;
+        const retryCount = session.preExecRetryCount?.get(unitId) ?? 0;
+        if (retryCount >= MAX_PRE_EXEC_RETRIES) {
+          const findings = session.lastPreExecFailure.blockingFindings.join("; ");
+          session.lastPreExecFailure = null;
+          session.preExecRetryCount?.delete(unitId);
+          return {
+            action: "stop",
+            reason: `Pre-execution checks failed ${retryCount} times for ${unitId} — manual intervention required. Blocking findings: ${findings}. Fix the plan manually, then run /gsd auto to resume.`,
+            level: "error",
+            matchedRule: "planning → plan-slice",
+          };
+        }
         priorPreExecFailure = {
           blockingFindings: session.lastPreExecFailure.blockingFindings,
           verdictExcerpt: session.lastPreExecFailure.verdictExcerpt,
@@ -1385,8 +1421,19 @@ export const DISPATCH_RULES: DispatchRule[] = [
   },
   {
     name: "complete → stop",
-    match: async ({ state }) => {
+    match: async ({ state, mid, midTitle, basePath }) => {
       if (state.phase !== "complete") return null;
+      if (mid && isDbAvailable()) {
+        const milestone = getMilestone(mid);
+        if (milestone && !isClosedStatus(milestone.status)) {
+          return {
+            action: "dispatch",
+            unitType: "complete-milestone",
+            unitId: mid,
+            prompt: await buildCompleteMilestonePrompt(mid, midTitle, basePath),
+          };
+        }
+      }
       return {
         action: "stop",
         reason: "All milestones complete.",

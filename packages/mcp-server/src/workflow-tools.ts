@@ -578,6 +578,17 @@ async function importLocalModule<T>(relativePath: string): Promise<T> {
   throw lastErr;
 }
 
+async function loadProjectPreferences(projectDir: string): Promise<unknown | null> {
+  const { loadEffectiveGSDPreferences } = await importLocalModule<any>(
+    "../../../src/resources/extensions/gsd/preferences.js",
+  );
+  try {
+    return loadEffectiveGSDPreferences(projectDir).preferences;
+  } catch {
+    return null;
+  }
+}
+
 function getWorkflowExecutorModuleCandidates(env: NodeJS.ProcessEnv = process.env): string[] {
   const candidates: string[] = [];
   const explicitModule = env.GSD_WORKFLOW_EXECUTORS_MODULE?.trim();
@@ -1395,7 +1406,7 @@ const execRuntimeSchema = z.enum(["bash", "node", "python"]);
 const execParams = {
   projectDir: projectDirParam,
   runtime: execRuntimeSchema.describe("Interpreter: bash (-c), node (-e), or python3 (-c)."),
-  script: nonEmptyString("script").describe("Script body. Keep output small; full stdout/stderr are persisted under .gsd/exec."),
+  script: nonEmptyString("script").describe("Script body. Keep output small; capped stdout/stderr are persisted under .gsd/exec."),
   purpose: z.string().optional().describe("Short label recorded in meta.json for later review."),
   timeout_ms: z.number().int().min(1_000).max(600_000).optional().describe("Per-invocation timeout in milliseconds."),
 };
@@ -1873,26 +1884,19 @@ export function registerWorkflowTools(realServer: McpToolServer): void {
 
   server.tool(
     "gsd_exec",
-    "Run a short bash/node/python script in the project directory. Full stdout/stderr persist under .gsd/exec; only a digest returns to MCP.",
+    "Run a short bash/node/python script in the project directory. Capped stdout/stderr and metadata persist under .gsd/exec; only a digest returns to MCP.",
     execParams,
     async (args: Record<string, unknown>) => {
       const { projectDir, ...params } = parseWorkflowArgs(execSchema, args);
       await enforceWorkflowWriteGate("gsd_exec", projectDir);
-      const [{ executeGsdExec }, { loadEffectiveGSDPreferences }] = await Promise.all([
-        importLocalModule<any>("../../../src/resources/extensions/gsd/tools/exec-tool.js"),
-        importLocalModule<any>("../../../src/resources/extensions/gsd/preferences.js"),
-      ]);
-      let prefs: { preferences?: unknown } | null = null;
-      try {
-        prefs = loadEffectiveGSDPreferences(projectDir);
-      } catch {
-        prefs = null;
-      }
+      const { executeGsdExec } = await importLocalModule<any>(
+        "../../../src/resources/extensions/gsd/tools/exec-tool.js",
+      );
       return adaptExecutorResult(
-        await runSerializedWorkflowOperation(() =>
+        await runSerializedWorkflowOperation(async () =>
           executeGsdExec(params, {
             baseDir: projectDir,
-            preferences: (prefs?.preferences ?? null) as unknown,
+            preferences: await loadProjectPreferences(projectDir),
           }),
         ),
       );
@@ -1908,7 +1912,12 @@ export function registerWorkflowTools(realServer: McpToolServer): void {
       const { executeExecSearch } = await importLocalModule<any>(
         "../../../src/resources/extensions/gsd/tools/exec-search-tool.js",
       );
-      return adaptExecutorResult(executeExecSearch(params, { baseDir: projectDir }));
+      return adaptExecutorResult(
+        executeExecSearch(params, {
+          baseDir: projectDir,
+          preferences: await loadProjectPreferences(projectDir),
+        }),
+      );
     },
   );
 
@@ -1921,7 +1930,12 @@ export function registerWorkflowTools(realServer: McpToolServer): void {
       const { executeResume } = await importLocalModule<any>(
         "../../../src/resources/extensions/gsd/tools/resume-tool.js",
       );
-      return adaptExecutorResult(executeResume(params, { baseDir: projectDir }));
+      return adaptExecutorResult(
+        executeResume(params, {
+          baseDir: projectDir,
+          preferences: await loadProjectPreferences(projectDir),
+        }),
+      );
     },
   );
 

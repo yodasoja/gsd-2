@@ -20,6 +20,7 @@ import {
   clearPendingAutoStart,
   checkDeepProjectSetupAfterTurn,
   clearPendingDeepProjectSetup,
+  FOREGROUND_DEEP_SETUP_RULE_NAMES,
   showSmartEntry,
   startDeepProjectSetupForeground,
 } from "../guided-flow.ts";
@@ -272,7 +273,16 @@ test("deep project setup: bootstrap can start auto-mode without an active milest
         shouldUseWorktreeIsolation: () => false,
         registerSigtermHandler: () => {},
         lockBase: () => base,
-        buildResolver: () => ({}) as any,
+        buildLifecycle: () => ({
+          adoptSessionRoot: (sessionBase: string, originalBase?: string) => {
+            s.basePath = sessionBase;
+            if (originalBase !== undefined) {
+              s.originalBasePath = originalBase;
+            } else if (!s.originalBasePath) {
+              s.originalBasePath = sessionBase;
+            }
+          },
+        }) as any,
       },
       {
         classification: "none",
@@ -377,7 +387,16 @@ test("deep project setup: bootstrap continues queued M002 without milestone cont
         shouldUseWorktreeIsolation: () => false,
         registerSigtermHandler: () => {},
         lockBase: () => base,
-        buildResolver: () => ({}) as any,
+        buildLifecycle: () => ({
+          adoptSessionRoot: (sessionBase: string, originalBase?: string) => {
+            s.basePath = sessionBase;
+            if (originalBase !== undefined) {
+              s.originalBasePath = originalBase;
+            } else if (!s.originalBasePath) {
+              s.originalBasePath = sessionBase;
+            }
+          },
+        }) as any,
       },
       {
         classification: "none",
@@ -1013,15 +1032,9 @@ test("deep project setup: same project advances when agent_end session id change
 });
 
 test("deep project setup: foreground dispatcher does not probe research-project rule", () => {
-  const source = readFileSync(new URL("../guided-flow.ts", import.meta.url), "utf-8");
-  const match = source.match(/const FOREGROUND_DEEP_SETUP_RULE_NAMES = new Set\(\[([\s\S]*?)\]\);/);
-  assert.ok(match, "foreground deep setup rule allowlist should be present");
-  assert.doesNotMatch(
-    match![1]!,
-    /research-project/,
-    "foreground setup must not evaluate research-project because that rule claims the inflight marker",
-  );
-  assert.match(source, /research-project have dispatch-time side effects/);
+  assert.equal(FOREGROUND_DEEP_SETUP_RULE_NAMES.has("deep: pre-planning (no PROJECT) → discuss-project"), true);
+  assert.equal(FOREGROUND_DEEP_SETUP_RULE_NAMES.has("deep: pre-planning (no research decision) → research-decision"), true);
+  assert.equal(FOREGROUND_DEEP_SETUP_RULE_NAMES.has("deep: pre-planning (no PROJECT research) → research-project"), false);
 });
 
 test("deep project setup: project-level units verify their real artifacts", () => {

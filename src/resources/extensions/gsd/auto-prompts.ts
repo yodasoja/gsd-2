@@ -8,7 +8,7 @@
 
 import { loadFile, parseContinue, parseSummary, loadActiveOverrides, formatOverridesSection, parseTaskPlanFile } from "./files.js";
 import type { Override, UatType } from "./files.js";
-import { hasVerdict, getUatType } from "./verdict-parser.js";
+import { hasVerdict, getUatType, extractVerdict } from "./verdict-parser.js";
 import { loadPrompt, inlineTemplate } from "./prompt-loader.js";
 import {
   resolveMilestoneFile, resolveSliceFile, resolveSlicePath,
@@ -35,20 +35,22 @@ import {
 import { formatDecisionsCompact, formatRequirementsCompact } from "./structured-data-formatter.js";
 import { readPhaseAnchor, formatAnchorForPrompt } from "./phase-anchor.js";
 import { composeContextModeInstructions, composeInlinedContext, type ArtifactResolver, type ContextModeRenderMode } from "./unit-context-composer.js";
+import { readCompactionSnapshot } from "./compaction-snapshot.js";
 import { logWarning } from "./workflow-logger.js";
 import { inlineGraphSubgraph } from "./graph-context.js";
 import { buildExtractionStepsBlock } from "./commands-extract-learnings.js";
 import { resolveSkillManifest, warnIfManifestHasMissingSkills } from "./skill-manifest.js";
+import { classifyProject, type ProjectClassification } from "./detection.js";
 
 // ─── Preamble Cap ─────────────────────────────────────────────────────────────
 
 /**
- * Historical static ceiling for the preamble cap. Kept as an upper bound even
+ * Static ceiling for the preamble cap. Kept as an upper bound even
  * after context-window-aware sizing so large-window users don't suddenly see
- * 10× looser caps than before. Small-window users get a tighter cap derived
+ * 10× looser caps than needed. Small-window users get a tighter cap derived
  * from their configured executor window.
  */
-const MAX_PREAMBLE_CHARS = 30_000;
+const MAX_PREAMBLE_CHARS = 20_000;
 
 /**
  * Resolve prompt budgets from the configured executor context window.
@@ -80,9 +82,111 @@ function resolveSummaryBudgetChars(): number {
   return resolvePromptBudgets().summaryBudgetChars;
 }
 
+function formatProjectClassificationForPlanning(classification: ProjectClassification): string {
+  const sampleFiles = classification.contentFiles.slice(0, 8);
+  const sample = sampleFiles.length > 0 ? sampleFiles.map((file) => `\`${file}\``).join(", ") : "(none)";
+  const lines = [
+    "### Project Classification",
+    "",
+    `- **Kind:** ${classification.kind}`,
+    `- **Content files:** ${classification.contentFiles.length}`,
+    `- **Sample files:** ${sample}`,
+    `- **Reason:** ${classification.reason}`,
+    "",
+  ];
+
+  if (classification.kind === "untyped-existing") {
+    if (classification.contentFiles.length <= 2) {
+      lines.push(
+        "**Workflow sizing:** This is a tiny existing untyped project. Prefer exactly one slice unless the milestone request clearly spans multiple independent user-visible capabilities.",
+      );
+    } else if (classification.contentFiles.length <= 5) {
+      lines.push(
+        "**Workflow sizing:** This is a small existing untyped project. Prefer 1-2 slices unless the milestone request clearly spans multiple independent user-visible capabilities.",
+      );
+    } else {
+      lines.push(
+        "**Workflow sizing:** Existing untyped project. Use generic file-level workflow guidance and size slices by real capability boundaries, not by missing tooling markers.",
+      );
+    }
+  } else if (classification.kind === "greenfield") {
+    lines.push("**Workflow sizing:** No project content exists yet. Use normal greenfield sizing for the requested scope.");
+  } else if (classification.kind === "typed-existing") {
+    lines.push("**Workflow sizing:** Known project markers exist. Use normal ecosystem-aware planning guidance.");
+  } else {
+    lines.push("**Workflow sizing:** Invalid repository state. Planning should surface this as a blocker rather than inventing project structure.");
+  }
+
+  return lines.join("\n");
+}
+
+function normalizeArtifactRef(value: string): string {
+  return value.trim().replace(/^[-\s]+/, "").replace(/^["'`]+|["'`]+$/g, "").replaceAll("\\", "/").replace(/^\.\//, "");
+}
+
+function parseCoveredArtifacts(validationContent: string): Set<string> {
+  const covered = new Set<string>();
+  const lines = validationContent.split(/\r?\n/);
+  let inCoveredArtifacts = false;
+  for (const line of lines) {
+    if (/^\s*covered[-_]?artifacts\s*:/i.test(line)) {
+      inCoveredArtifacts = true;
+      const inline = line.split(/covered[-_]?artifacts\s*:/i)[1]?.trim();
+      if (inline && inline !== "[]") {
+        inline.replace(/^\[|\]$/g, "").split(",").map(normalizeArtifactRef).filter(Boolean).forEach((item) => covered.add(item));
+      }
+      continue;
+    }
+    if (!inCoveredArtifacts) continue;
+    if (/^\S/.test(line) && !/^\s*-/.test(line)) break;
+    const item = line.match(/^\s*-\s*(.+)$/)?.[1];
+    if (item) covered.add(normalizeArtifactRef(item));
+  }
+  return covered;
+}
+
+function isValidationFreshOrApplicable(validationContent: string | null, currentArtifacts: string[]): boolean {
+  if (!validationContent) return false;
+  if (!/validation_metadata:/i.test(validationContent)) return false;
+  const coveredArtifacts = parseCoveredArtifacts(validationContent);
+  if (coveredArtifacts.size === 0) return false;
+  return currentArtifacts
+    .map(normalizeArtifactRef)
+    .filter(Boolean)
+    .every((artifact) => coveredArtifacts.has(artifact));
+}
+
+function formatCloseoutReviewInstructions(validationContent: string | null, validationRel: string, currentArtifacts: string[]): string {
+  const verdict = validationContent ? extractVerdict(validationContent) : null;
+  const validationFresh = isValidationFreshOrApplicable(validationContent, currentArtifacts);
+  if (verdict === "pass" && validationFresh) {
+    return [
+      "### Passing Validation Artifact",
+      "",
+      `A passing validation artifact is present at \`${validationRel}\`. Treat it as authoritative for success criteria, requirement coverage, verification classes, and cross-slice integration.`,
+      "",
+      "Do not delegate fresh reviewer/security/tester audits and do not redo the validation evidence review unless the artifact is internally inconsistent with the inlined summaries. Focus this unit on final milestone narrative, learnings, PROJECT/requirements updates, and `gsd_complete_milestone`.",
+    ].join("\n");
+  }
+
+  if (verdict) {
+    return [
+      "### Validation Requires Attention",
+      "",
+      `A validation artifact is present at \`${validationRel}\` with verdict \`${verdict}\`, but it is missing freshness metadata or does not cover current milestone artifacts. Do not treat the milestone as complete unless the issues are resolved and evidence supports completion.`,
+    ].join("\n");
+  }
+
+  return [
+    "### No Passing Validation Artifact",
+    "",
+    `No passing validation artifact was found at \`${validationRel}\`. Use the full closeout review path before completion.`,
+  ].join("\n");
+}
+
 function capPreamble(preamble: string): string {
-  // Cap inlined context at min(historical 30K ceiling, scaled inline budget).
-  // The ceiling preserves pre-fix behavior for large-window users; the scaled
+  // Cap inlined context at min(static ceiling, scaled inline budget).
+  // The ceiling bounds repeated auto prompt payloads; the scaled
   // budget tightens the cap for small-window users whose true safe limit is
   // below 30K. `computeBudgets` allocates 40% of total chars to inline context.
   const budget = Math.min(MAX_PREAMBLE_CHARS, resolvePromptBudgets().inlineContextBudgetChars);
@@ -102,13 +206,28 @@ function renderContextModeForPrompt(
   });
 }
 
+function renderContextModeBlockForPrompt(
+  unitType: string,
+  base: string,
+  renderMode: ContextModeRenderMode = "standalone",
+): string {
+  const contextMode = renderContextModeForPrompt(unitType, base, renderMode);
+  if (!contextMode) return "";
+  if (renderMode === "nested") return contextMode;
+
+  const snapshot = readCompactionSnapshot(base);
+  if (!snapshot?.trim()) return contextMode;
+
+  return `${contextMode}\n\n## Context Snapshot\nSource: \`.gsd/last-snapshot.md\`\n\n${snapshot.trimEnd()}`;
+}
+
 function prependContextModeToBlock(
   unitType: string,
   base: string,
   block: string,
   renderMode: ContextModeRenderMode = "standalone",
 ): string {
-  const contextMode = renderContextModeForPrompt(unitType, base, renderMode);
+  const contextMode = renderContextModeBlockForPrompt(unitType, base, renderMode);
   if (!contextMode) return block;
   if (!block.trim()) return contextMode;
   return `${contextMode}\n\n${block}`;
@@ -517,8 +636,81 @@ export async function buildSliceSummaryExcerpt(
     return lines.join("\n");
   } catch {
     // Defensive — any parse failure falls back to full inline.
-    return `### ${sid} Summary\nSource: \`${relPath}\`\n\n${content.trim()}`;
+    return `### ${sid} Summary\nSource: \`${relPath}\`\n\n${capMalformedSummary(content, relPath)}`;
   }
+}
+
+export async function buildTaskSummaryExcerpt(
+  absPath: string | null, relPath: string, tid: string, options?: { blocker?: boolean },
+): Promise<string> {
+  const label = options?.blocker ? "Blocker Task Summary" : "Task Summary";
+  const header = `### ${label}: ${tid} (excerpt)\nSource: \`${relPath}\``;
+  const content = absPath ? await loadFile(absPath) : null;
+  if (!content) {
+    return `${header}\n\n_(not found — file does not exist yet)_`;
+  }
+
+  try {
+    const s = parseSummary(content);
+    if (!s.frontmatter.id) {
+      return `### ${label}: ${tid}\nSource: \`${relPath}\`\n\n${capMalformedSummary(content, relPath)}`;
+    }
+
+    const lines: string[] = [header, ""];
+    if (s.title) lines.push(`**Title:** ${s.title}`);
+    if (s.oneLiner) lines.push(`**One-liner:** ${s.oneLiner}`);
+    if (s.frontmatter.verification_result) {
+      lines.push(`**Verification:** \`${s.frontmatter.verification_result}\``);
+    }
+    lines.push(`**Blocker discovered:** ${s.frontmatter.blocker_discovered ? "yes — read full summary if blocker details are insufficient" : "no"}`);
+    if (s.frontmatter.provides.length > 0) lines.push(`**Provides:** ${s.frontmatter.provides.slice(0, 4).join("; ")}`);
+    if (s.frontmatter.key_decisions.length > 0) lines.push(`**Key decisions:** ${s.frontmatter.key_decisions.slice(0, 4).join("; ")}`);
+    if (s.frontmatter.patterns_established.length > 0) lines.push(`**Patterns established:** ${s.frontmatter.patterns_established.slice(0, 4).join("; ")}`);
+    if (s.frontmatter.key_files.length > 0) {
+      const files = s.frontmatter.key_files.slice(0, 6);
+      const more = s.frontmatter.key_files.length > files.length ? ` (+${s.frontmatter.key_files.length - files.length} more)` : "";
+      lines.push(`**Key files:** ${files.join(", ")}${more}`);
+    }
+
+    const SECTION_CAP_CHARS = 500;
+    const capSection = (body: string): string => {
+      const trimmed = body.trim();
+      if (trimmed.length <= SECTION_CAP_CHARS) return trimmed;
+      return `${trimmed.slice(0, SECTION_CAP_CHARS)}\n… (truncated — see full \`${relPath}\`)`;
+    };
+
+    const verification = extractMarkdownSection(content, "Verification");
+    const diagnostics = extractMarkdownSection(content, "Diagnostics");
+    const knownIssues = extractMarkdownSection(content, "Known Issues");
+
+    if (verification && verification.trim()) {
+      lines.push("", "#### Verification", capSection(verification));
+    }
+    if (diagnostics && diagnostics.trim()) {
+      lines.push("", "#### Diagnostics", capSection(diagnostics));
+    }
+    if (s.deviations && s.deviations.trim()) {
+      lines.push("", "#### Deviations", capSection(s.deviations));
+    }
+    if (knownIssues && knownIssues.trim()) {
+      lines.push("", "#### Known issues", capSection(knownIssues));
+    }
+
+    lines.push(
+      "",
+      `> **On-demand:** read \`${relPath}\` only when this excerpt is absent/truncated or you need fuller blocker, implementation, or file-change evidence.`,
+    );
+    return lines.join("\n");
+  } catch {
+    return `### ${label}: ${tid}\nSource: \`${relPath}\`\n\n${capMalformedSummary(content, relPath)}`;
+  }
+}
+
+function capMalformedSummary(content: string, relPath: string): string {
+  const trimmed = content.trim();
+  const limit = 1_500;
+  if (trimmed.length <= limit) return trimmed;
+  return `${trimmed.slice(0, limit).trimEnd()}\n\n[Truncated malformed summary — read \`${relPath}\` for full details.]`;
 }
 
 /**
@@ -614,14 +806,22 @@ export async function inlineDecisionsFromDb(
   try {
     const { isDbAvailable } = await import("./gsd-db.js");
     if (isDbAvailable()) {
-      const { queryDecisions, formatDecisionsForPrompt } = await import("./context-store.js");
+      // ADR-013 Phase 6 cutover (Stage 1): read decisions from the `memories`
+      // table. Both `queryDecisions` (legacy) and `queryDecisionsFromMemories`
+      // return identical Decision[] for active rows once Phase 5 dual-write is
+      // caught up. Switching the read here lets the destructive Phase 6 step
+      // (#5755) retire the legacy `decisions` table without changing prompt
+      // contents. Projection regen (`DECISIONS.md`) still sources from the
+      // legacy table — that switch lands separately to handle superseded
+      // history cleanly.
+      const { queryDecisionsFromMemories, formatDecisionsForPrompt } = await import("./context-store.js");
 
       // First query: try with both milestoneId and scope (if scope provided)
-      let decisions = queryDecisions({ milestoneId, scope });
+      let decisions = queryDecisionsFromMemories({ milestoneId, scope });
 
       // Cascade: if empty AND scope was provided, retry without scope
       if (decisions.length === 0 && scope) {
-        decisions = queryDecisions({ milestoneId });
+        decisions = queryDecisionsFromMemories({ milestoneId });
       }
 
       if (decisions.length > 0) {
@@ -795,7 +995,7 @@ export async function inlineKnowledgeScoped(
  * plan-milestone, complete-slice, complete-milestone, validate-milestone,
  * reassess-roadmap) previously injected the full KNOWLEDGE.md (~226KB for a
  * real project) on every invocation. This helper scopes by caller-supplied
- * keywords and caps the payload at `maxChars` (default 30,000 chars).
+ * keywords and caps the payload at `maxChars` (default 12,000 chars).
  *
  * Returns null when no KNOWLEDGE.md exists or no entries match any keyword.
  */
@@ -804,7 +1004,7 @@ export async function inlineKnowledgeBudgeted(
   keywords: string[],
   options?: { maxChars?: number },
 ): Promise<string | null> {
-  const DEFAULT_MAX_CHARS = 30_000;
+  const DEFAULT_MAX_CHARS = 12_000;
   const HARD_MAX_CHARS = 100_000;
   const raw = Number(options?.maxChars ?? DEFAULT_MAX_CHARS);
   const maxChars = Number.isFinite(raw)
@@ -1658,6 +1858,8 @@ export async function buildPlanMilestonePrompt(mid: string, midTitle: string, ba
   const researchAnchor = readPhaseAnchor(base, mid, "research-milestone");
   if (researchAnchor) inlined.push(formatAnchorForPrompt(researchAnchor));
 
+  inlined.push(formatProjectClassificationForPlanning(classifyProject(base)));
+
   inlined.push(await inlineFile(contextPath, contextRel, "Milestone Context"));
   const researchInline = await inlineFileOptional(researchPath, researchRel, "Milestone Research");
   if (researchInline) inlined.push(researchInline);
@@ -1964,8 +2166,17 @@ export async function buildPlanSlicePrompt(
       `The previous plan-slice attempt was blocked by pre-execution validation.\n` +
       `Gate verdict: ${verdictExcerpt}\n\n` +
       `Blocked references that must be resolved in this plan:\n${findingsList}\n\n` +
-      `Revise the plan so that every reference listed above is satisfied before execution begins. ` +
-      `Do not reproduce the same file paths, package names, or task ordering that caused these failures.`,
+      `**How to fix each type of issue:**\n` +
+      `- **"[file] X doesn't exist and isn't created by prior or same-task outputs"**: ` +
+      `Either (a) add an earlier task that creates X on disk before the task that needs it, ` +
+      `or (b) if this task IS the one that creates X, move X from inputs to expected_output. ` +
+      `Do NOT put X in a task's expected_output if that task only reads or verifies X — only tasks that actually write X to disk should list it in expected_output.\n` +
+      `- **"[file] X: Task T_early reads X but it's created by task T_late (sequence violation)"**: ` +
+      `Either (a) reorder tasks so T_late (the creator) runs before T_early (the reader), ` +
+      `or (b) if T_late doesn't actually create X (it only reads/tests it), remove X from T_late's expected_output entirely.\n` +
+      `- **"[package] P not found on npm"**: Either remove the npm install for P, or use the correct package name.\n\n` +
+      `Every file listed in a task's inputs must either exist on disk already or appear in an earlier task's expected_output. ` +
+      `A task's expected_output must only list files it actually writes to disk.`,
     );
   }
   return renderSlicePrompt({
@@ -2248,10 +2459,9 @@ export async function buildCompleteSlicePrompt(
         const blocks: string[] = [];
         for (const file of summaryFiles) {
           const absPath = join(tDir, file);
-          const content = await loadFile(absPath);
-          if (!content) continue;
           const relPath = `${sRel}/tasks/${file}`;
-          blocks.push(`### Task Summary: ${file.replace(/-SUMMARY\.md$/i, "")}\nSource: \`${relPath}\`\n\n${content.trim()}`);
+          const taskId = file.replace(/-SUMMARY\.md$/i, "");
+          blocks.push(await buildTaskSummaryExcerpt(absPath, relPath, taskId));
         }
         return blocks.length > 0 ? blocks.join("\n\n---\n\n") : null;
       }
@@ -2348,6 +2558,9 @@ export async function buildCompleteMilestonePrompt(
   const inlineLevel = level ?? resolveInlineLevel();
   const roadmapPath = resolveMilestoneFile(base, mid, "ROADMAP");
   const roadmapRel = relMilestoneFile(base, mid, "ROADMAP");
+  const validationPath = resolveMilestoneFile(base, mid, "VALIDATION");
+  const validationRel = relMilestoneFile(base, mid, "VALIDATION");
+  const validationContent = validationPath ? await loadFile(validationPath) : null;
 
   const inlined: string[] = [];
   inlined.push(await inlineFile(roadmapPath, roadmapRel, "Milestone Roadmap"));
@@ -2389,6 +2602,13 @@ export async function buildCompleteMilestonePrompt(
       `### On-demand Slice Summaries\n\nExcerpted above. Read the full file for any slice when the excerpt's section heads don't carry enough narrative for the milestone summary you're drafting:\n\n${pathList}`,
     );
   }
+  const validationContext = [
+    formatCloseoutReviewInstructions(validationContent, validationRel, [validationRel, roadmapRel, ...summaryRelPaths]),
+  ];
+  if (validationContent) {
+    validationContext.push(`### Milestone Validation\nSource: \`${validationRel}\`\n\n${validationContent.trim()}`);
+  }
+  inlined.unshift(...validationContext);
 
   // Inline root GSD files (skip for minimal — completion can read these if needed)
   if (inlineLevel !== "minimal") {
@@ -2618,7 +2838,7 @@ export async function buildReplanSlicePrompt(
       const relPath = `${sRel}/tasks/${file}`;
       if (summary.frontmatter.blocker_discovered) {
         blockerTaskId = summary.frontmatter.id || file.replace(/-SUMMARY\.md$/i, "");
-        inlined.push(`### Blocker Task Summary: ${blockerTaskId}\nSource: \`${relPath}\`\n\n${content.trim()}`);
+        inlined.push(await buildTaskSummaryExcerpt(absPath, relPath, blockerTaskId, { blocker: true }));
       }
     }
   }

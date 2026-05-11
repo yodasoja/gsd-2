@@ -39,6 +39,7 @@ import type { VerificationResult as VerificationGateResult } from "./types.js";
 import { join } from "node:path";
 import { resolveUokFlags } from "./uok/flags.js";
 import { UokGateRunner } from "./uok/gate-runner.js";
+import { verificationRetryKey } from "./auto/verification-retry-policy.js";
 
 export interface VerificationContext {
   s: AutoSession;
@@ -331,7 +332,8 @@ export async function runPostUnitVerification(
     }
 
     // Write verification evidence JSON
-    const attempt = s.verificationRetryCount.get(s.currentUnit.id) ?? 0;
+    const retryKey = verificationRetryKey(s.currentUnit.type, s.currentUnit.id);
+    const attempt = s.verificationRetryCount.get(retryKey) ?? 0;
     if (mid && sid && tid) {
       try {
         const sDir = resolveSlicePath(s.basePath, mid, sid);
@@ -364,7 +366,8 @@ export async function runPostUnitVerification(
         ));
 
     if (advisoryFailure) {
-      s.verificationRetryCount.delete(s.currentUnit.id);
+      s.verificationRetryCount.delete(retryKey);
+      s.verificationRetryFailureHashes.delete(retryKey);
       s.pendingVerificationRetry = null;
       ctx.ui.notify(
         result.discoverySource === "package-json"
@@ -565,13 +568,15 @@ export async function runPostUnitVerification(
 
     // ── Auto-fix retry logic ──
     if (result.passed) {
-      s.verificationRetryCount.delete(s.currentUnit.id);
+      s.verificationRetryCount.delete(retryKey);
+      s.verificationRetryFailureHashes.delete(retryKey);
       s.pendingVerificationRetry = null;
       return "continue";
     } else if (postExecBlockingFailure) {
       // Post-execution failures are cross-task consistency issues — retrying the same task won't fix them.
       // Skip retry and pause immediately for human review.
-      s.verificationRetryCount.delete(s.currentUnit.id);
+      s.verificationRetryCount.delete(retryKey);
+      s.verificationRetryFailureHashes.delete(retryKey);
       s.pendingVerificationRetry = null;
       ctx.ui.notify(
         `Post-execution checks failed — cross-task consistency issue detected, pausing for human review`,
@@ -581,7 +586,7 @@ export async function runPostUnitVerification(
       return "pause";
     } else if (autoFixEnabled && attempt + 1 <= maxRetries) {
       const nextAttempt = attempt + 1;
-      s.verificationRetryCount.set(s.currentUnit.id, nextAttempt);
+      s.verificationRetryCount.set(retryKey, nextAttempt);
       s.pendingVerificationRetry = {
         unitId: s.currentUnit.id,
         failureContext: formatFailureContext(result),
@@ -601,7 +606,8 @@ export async function runPostUnitVerification(
       return "retry";
     } else {
       // Gate failed, retries exhausted
-      s.verificationRetryCount.delete(s.currentUnit.id);
+      s.verificationRetryCount.delete(retryKey);
+      s.verificationRetryFailureHashes.delete(retryKey);
       s.pendingVerificationRetry = null;
       const exhaustedFails = result.checks
         .filter((c) => c.exitCode !== 0)

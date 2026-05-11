@@ -30,7 +30,7 @@
 | `/gsd export --html` | 为当前或已完成的 milestone 生成自包含 HTML 报告 |
 | `/gsd export --html --all` | 一次性为所有 milestones 生成回顾报告 |
 | `/gsd update` | 在会话内更新到最新版本 |
-| `/gsd knowledge` | 添加持久化项目知识（规则、模式或经验） |
+| `/gsd knowledge` | 添加持久化项目知识。Rules 仍手动维护在 `KNOWLEDGE.md` 中；patterns 和 lessons 由 memories 承载，并投影回文件。 |
 | `/gsd fast` | 为支持的模型切换 service tier（优先级 API 路由） |
 | `/gsd rate` | 评价上一个单元所用模型层级（over / ok / under），帮助改进自适应路由 |
 | `/gsd changelog` | 查看分类后的发行说明 |

@@ -22,13 +22,17 @@ Plan (with integrated research) → Execute (per task) → Complete → Reassess
 - **Reassess** — checks if the roadmap still makes sense
 - **Validate Milestone** — reconciliation gate after all slices complete; compares roadmap success criteria against actual results, catches gaps before sealing the milestone
 
+When progressive planning is enabled, GSD fully plans the first slice and may leave later slices as sketches. Those slices render in `M###-ROADMAP.md` with a `` `[sketch]` `` badge, meaning the slice has an approved scope boundary but has not yet been expanded into task plans. Auto mode runs `refine-slice` just before execution to convert the sketch into a full slice plan using the current codebase and prior slice summaries.
+
 ### Idempotent Milestone Completion
 
 Milestone completion is safe to retry. If a `complete-milestone` unit is redispatched after the database already marks the milestone as closed, GSD treats the call as successful instead of returning an error. The existing summary projection is left intact, no duplicate completion event is appended, and the tool response includes `alreadyComplete: true` in its details so operators and integrations can distinguish a retry from the first completion.
 
 ### State Authority
 
-The SQLite database is the runtime source of truth for milestones, slices, tasks, requirements, decisions, summaries, and completion status. Markdown files in `.gsd/` are rendered projections for review, prompts, and git-friendly history; editing a projection does not override the database unless a command imports or saves that change through GSD.
+The SQLite database is the runtime source of truth for milestones, slices, tasks, requirements, summaries, and completion status. Durable decisions and project knowledge use the same database through the `memories` table: decisions are stored as `architecture` memories, and KNOWLEDGE patterns/lessons are stored as `pattern`/`gotcha` memories.
+
+Markdown files in `.gsd/` are rendered projections for review, prompts, and git-friendly history. `.gsd/DECISIONS.md` is projected from architecture memories, and the Patterns/Lessons sections of `.gsd/KNOWLEDGE.md` are projected from memory rows; editing those projections does not override the database unless a command imports or saves the change through GSD. The Rules section of `KNOWLEDGE.md` remains manually authored and is preserved separately.
 
 In worktree mode, the project-root database and project-root `.gsd/` state remain authoritative. Worktree markdown projections are useful diagnostics, but they are not synced back as runtime state. If the database is unavailable, runtime state derivation refuses to silently rebuild from markdown. The legacy markdown derivation path is only enabled when `GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK=1`, which exists for tests and explicit recovery scenarios.
 
@@ -61,7 +65,7 @@ Workflow Preferences -> Project Context -> Requirements -> Research Decision -> 
 | `.gsd/REQUIREMENTS.md` | `discuss-requirements` | Capability contract using `R###` requirements grouped by Active, Validated, Deferred, and Out of Scope |
 | `.gsd/runtime/research-decision.json` | `research-decision` | Records `research` or `skip`; this unit only asks the question and writes the marker |
 | `.gsd/research/STACK.md`, `FEATURES.md`, `ARCHITECTURE.md`, `PITFALLS.md` | `research-project`, only when the decision is `research` | Four parallel project-level research outputs for stack, feature norms, architecture, and pitfalls |
-| `.gsd/milestones/<MID>/M###-CONTEXT.md` and `M###-ROADMAP.md` | Normal milestone discussion/planning | Milestone-specific context and executable roadmap |
+| `.gsd/milestones/<MID>/M###-CONTEXT.md` and `M###-ROADMAP.md` | Normal milestone discussion/planning | Milestone-specific context and executable roadmap; `` `[sketch]` `` marks slices awaiting `refine-slice` |
 
 `REQUIREMENTS.md` is rendered from the requirements stored in the GSD database. Agents should save individual requirements with `gsd_requirement_save`; a final `gsd_summary_save` for `REQUIREMENTS` will fail if no active requirement rows exist instead of treating caller-supplied markdown as canonical.
 
@@ -78,6 +82,22 @@ Every task, research phase, and planning step gets a clean context window. No ac
 Each auto-mode unit has a `UnitContextManifest` with a `ToolsPolicy`, and GSD enforces that policy before tool calls execute. Execution units use `all` mode and may edit project files, run shell commands, and dispatch subagents. Most planning and discussion units use `planning` mode: they can read broadly, write planning artifacts under `.gsd/`, run only read-only shell commands, and cannot dispatch subagents. Selected planning and closeout units use `planning-dispatch` mode, which keeps the same source-write and bash restrictions but allows `subagent` dispatch for isolated recon, planning, or review work. Documentation units use `docs` mode, which keeps the same restrictions but also allows writes to the manifest's explicit documentation globs such as `docs/**`, top-level `README*.md`, `CHANGELOG.md`, and top-level `*.md`.
 
 Writes outside those allowed paths, unsafe bash commands, and subagent dispatch from non-dispatch planning units are blocked with a hard policy error instead of relying on prompt compliance. In `planning-dispatch` units, prompts steer the parent agent toward read-only specialists such as `scout`, `planner`, `researcher`, `reviewer`, `security`, or `tester`; implementation-tier agents still belong in `execute-task`.
+
+### Pre-Dispatch Runtime Blocks
+
+Before auto mode launches a unit, the orchestration pipeline now enforces runtime invariants in this order: reconcile state, choose the next unit, compile the unit tool contract, validate the worktree or unit root, then persist the runtime transition. A failure in any pre-dispatch step returns a `blocked` result and records the block before a worker session starts.
+
+Common block reasons and operator actions:
+
+| Block reason | What it means | Remediation |
+|--------------|---------------|-------------|
+| State reconciliation blocker | The authoritative database snapshot is already blocked, or state derivation found existing blockers. | Inspect `/gsd status`, `STATE.md`, and the database-backed blocker message; resolve the blocker or run the appropriate GSD recovery command before retrying `/gsd auto`. |
+| `unknown-unit-type` | The dispatch decision selected a unit with no registered `UnitContextManifest`. | Fix the unit registration or manifest mapping. Retrying without a code/config fix will select the same invalid unit. |
+| `missing-closeout-tool` | A closeout unit such as task, slice, milestone, UAT, or gate completion has no required workflow tool available. | Restore the missing `gsd_*` workflow tool registration or update the unit manifest/tool contract so the unit can durably save its result. |
+| `root-missing` / `root-not-directory` | A source-writing unit would run from a missing or invalid unit root. | Recreate or repair the milestone worktree/root, or clear an incorrect `GSD_UNIT_ROOT`, before launching another source-writing unit. |
+| `git-metadata-missing` | A source-writing unit root exists but is not a git worktree or repository root. | Run the unit from the project root or milestone worktree with valid `.git` metadata; recreate the worktree if it was deleted or partially copied. |
+
+Recovery classification now treats deterministic policy, tool-schema, stale-worker, and invalid-worktree failures as non-transient stops. Provider failures still use provider-specific transient classification and may retry automatically, while verification drift and unknown runtime failures escalate for inspection because repeating the same dispatch can preserve the drift.
 
 ### Context Pre-Loading
 
@@ -96,16 +116,16 @@ The amount of context inlined is controlled by your [token profile](./token-opti
 
 ### Context Mode
 
-Context Mode is enabled by default for auto-mode runs. Each unit receives manifest-driven guidance to preserve the conversation window: use `gsd_exec` for noisy codebase scans, builds, tests, and diagnostics; use `gsd_exec_search` before repeating a prior sandboxed run; and use `gsd_resume` after compaction or session resume to read `.gsd/last-snapshot.md`.
+Context Mode is enabled by default for auto-mode runs. Eligible auto-mode units receive manifest-driven guidance to preserve the conversation window: use `gsd_exec` for noisy codebase scans, builds, tests, and diagnostics; use `gsd_exec_search` before repeating a prior sandboxed run; and use `gsd_resume` after compaction or session resume to read a prior compaction snapshot from `.gsd/last-snapshot.md` when one exists.
 
-`gsd_exec` writes full stdout/stderr and metadata under `.gsd/exec/`, then returns only a short digest to the agent. This keeps large command output out of the LLM context while preserving exact evidence on disk. To opt out, set:
+`gsd_exec` writes capped stdout/stderr and metadata under `.gsd/exec/`; output may be truncated. It then returns only a short digest to the agent. This keeps large command output out of the LLM context while preserving exact evidence on disk. To opt out of Context Mode guidance, snapshot injection, `gsd_exec`, `gsd_exec_search`, and `gsd_resume`, set:
 
 ```yaml
 context_mode:
   enabled: false
 ```
 
-You can also tune sandbox behavior with `context_mode.exec_timeout_ms`, `context_mode.exec_stdout_cap_bytes`, and `context_mode.exec_digest_chars`.
+You can also tune sandbox behavior with `context_mode.exec_timeout_ms`, `context_mode.exec_stdout_cap_bytes`, `context_mode.exec_digest_chars`, and `context_mode.exec_env_allowlist`.
 
 ### Git Isolation
 
@@ -141,7 +161,9 @@ No manual intervention needed for transient errors — the session pauses briefl
 
 ### Incremental Memory (v2.26)
 
-GSD maintains a `KNOWLEDGE.md` file — an append-only register of project-specific rules, patterns, and lessons learned. The agent reads it at the start of every unit and appends to it when discovering recurring issues, non-obvious patterns, or rules that future sessions should follow. This gives auto-mode cross-session memory that survives context window boundaries.
+GSD maintains durable project memory in the `memories` table and projects selected knowledge back into `.gsd/KNOWLEDGE.md` for review. `KNOWLEDGE.md` keeps manual Rules as file-canonical entries, while Patterns and Lessons are captured as memories, backfilled from existing rows, and rendered into the file on session start.
+
+At the start of each unit, GSD injects the manual Rules from project `KNOWLEDGE.md`; Patterns and Lessons reach the agent through the memory block. Global `~/.gsd/agent/KNOWLEDGE.md` remains user-maintained and is injected unchanged.
 
 ### Context Pressure Monitor (v2.26)
 
@@ -171,6 +193,7 @@ Artifact verification retries are capped at 3 attempts. If the expected artifact
 - **Unit traces** — last 10 unit executions with error details and execution times
 - **Metrics analysis** — cost, token counts, and execution time breakdowns
 - **Doctor integration** — includes structural health issues from `/gsd doctor`
+- **Journal correlation** — uses `.gsd/journal/` events such as `unit-start`, `unit-end`, `post-unit-finalize-start`, `post-unit-finalize-end`, and `iteration-end` to show where the loop stopped
 - **LLM-guided investigation** — an agent session with full tool access to investigate root causes
 
 ```
@@ -187,9 +210,15 @@ Three timeout tiers prevent runaway sessions:
 |---------|---------|----------|
 | Soft | 20 min | Warns the LLM to wrap up |
 | Idle | 10 min | Detects stalls, intervenes |
-| Hard | 30 min | Pauses auto mode |
+| Hard | 30 min | Starts timeout recovery; pauses auto mode only if recovery cannot make durable progress |
 
-Recovery steering nudges the LLM to finish durable output before timing out. Configure in preferences:
+Recovery steering nudges the LLM to finish durable output before timing out. When idle or hard timeout recovery is actively writing durable progress, the unit failsafe records fresh runtime progress in `.gsd/runtime/` and defers its final cancellation check for another short recheck window. This prevents auto mode from pausing while a recovered unit is finalizing, but future-dated or stale runtime timestamps are ignored so clock skew cannot keep the unit alive forever.
+
+For operator forensics, timeout recovery updates the unit runtime record with fields such as `phase`, `timeoutAt`, `lastProgressAt`, `lastProgressKind`, `recoveryAttempts`, and `lastRecoveryReason`. Finalize timeouts are recorded with `lastProgressKind` values like `finalize-pre-timeout` or `finalize-post-timeout`; successful finalization records `finalize-success`.
+
+The journal also closes every iteration explicitly. After a unit ends, auto mode emits `post-unit-finalize-start` before closeout and `post-unit-finalize-end` with a `status`, `action`, and optional `reason`. Every loop iteration then emits `iteration-end` with the final status and, when available, the failure class, unit type, unit id, and reason. Use these events to distinguish "agent never returned" from "agent returned but finalize/closeout stopped the loop."
+
+Configure in preferences:
 
 ```yaml
 auto_supervisor:

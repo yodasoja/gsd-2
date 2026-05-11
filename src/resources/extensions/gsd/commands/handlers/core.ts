@@ -96,7 +96,7 @@ export function showHelp(ctx: ExtensionCommandContext, args = ""): void {
     "  /gsd unpark [id]    Reactivate a parked milestone",
     "",
     "PROJECT KNOWLEDGE",
-    "  /gsd knowledge <type> <text>   Add rule, pattern, or lesson to KNOWLEDGE.md",
+    "  /gsd knowledge <type> <text>   Add a rule to KNOWLEDGE.md or capture a pattern/lesson to memories",
     "  /gsd codebase [generate|update|stats]   Manage the CODEBASE.md cache used in prompt context",
     "",
     "SHIPPING & BACKLOG",

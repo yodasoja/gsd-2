@@ -1,8 +1,21 @@
+// Project/App: GSD-2
+// File Purpose: Auto Orchestration module implementation and ADR-015 invariant pipeline owner.
+
 import type { AutoAdvanceResult, AutoOrchestrationModule, AutoOrchestratorDeps, AutoSessionContext, AutoStatus } from "./contracts.js";
 
 function now(): number {
   return Date.now();
 }
+
+/**
+ * Size of the dispatch-decision ring buffer used by the Auto Orchestration
+ * module's stuck-loop detector. When the same `${unitType}:${unitId}` key
+ * fills the window, advance() blocks with `action: "stop"`.
+ *
+ * Mirrors the legacy `STUCK_WINDOW_SIZE` in auto/phases.ts so behaviour is
+ * preserved across the eventual cutover (issue #5791).
+ */
+export const STUCK_WINDOW_SIZE = 6;
 
 export class AutoOrchestrator implements AutoOrchestrationModule {
   private status: AutoStatus = {
@@ -11,6 +24,7 @@ export class AutoOrchestrator implements AutoOrchestrationModule {
   };
   private readonly deps: AutoOrchestratorDeps;
   private lastAdvanceKey: string | null = null;
+  private dispatchKeyWindow: string[] = [];
 
   public constructor(deps: AutoOrchestratorDeps) {
     this.deps = deps;
@@ -18,6 +32,7 @@ export class AutoOrchestrator implements AutoOrchestrationModule {
 
   public async start(_sessionContext: AutoSessionContext): Promise<AutoAdvanceResult> {
     this.lastAdvanceKey = null;
+    this.dispatchKeyWindow = [];
     this.status.phase = "running";
     this.bumpTransition();
     await this.deps.runtime.journalTransition({ name: "start" });
@@ -30,18 +45,32 @@ export class AutoOrchestrator implements AutoOrchestrationModule {
       await this.deps.runtime.ensureLockOwnership();
       const gate = await this.deps.health.preAdvanceGate();
       if (!gate.allow) {
-        const blocked: AutoAdvanceResult = { kind: "blocked", reason: gate.reason ?? "health gate blocked" };
+        const blocked: AutoAdvanceResult = { kind: "blocked", reason: gate.reason ?? "health gate blocked", action: "pause" };
         await this.deps.runtime.journalTransition({ name: "advance-blocked", reason: blocked.reason });
         await this.deps.health.postAdvanceRecord(blocked);
         return blocked;
       }
 
-      const decision = await this.deps.dispatch.decideNextUnit();
+      const reconciliation = await this.deps.stateReconciliation.reconcileBeforeDispatch();
+      if (!reconciliation.ok || !reconciliation.stateSnapshot) {
+        const blocked: AutoAdvanceResult = {
+          kind: "blocked",
+          reason: reconciliation.reason ?? "state reconciliation produced no snapshot",
+          action: "pause",
+          stateSnapshot: reconciliation.stateSnapshot,
+        };
+        await this.deps.runtime.journalTransition({ name: "advance-blocked", reason: blocked.reason });
+        await this.deps.health.postAdvanceRecord(blocked);
+        return blocked;
+      }
+
+      const decision = await this.deps.dispatch.decideNextUnit({ stateSnapshot: reconciliation.stateSnapshot });
       if (!decision) {
-        const stopped: AutoAdvanceResult = { kind: "stopped", reason: "no remaining units" };
+        const stopped: AutoAdvanceResult = { kind: "stopped", reason: "no remaining units", stateSnapshot: reconciliation.stateSnapshot };
         this.status.phase = "stopped";
         this.status.activeUnit = undefined;
         this.lastAdvanceKey = null;
+        this.dispatchKeyWindow = [];
         this.bumpTransition();
         await this.deps.runtime.journalTransition({ name: "advance-stopped", reason: stopped.reason });
         await this.deps.health.postAdvanceRecord(stopped);
@@ -49,8 +78,81 @@ export class AutoOrchestrator implements AutoOrchestrationModule {
       }
 
       const nextKey = `${decision.unitType}:${decision.unitId}`;
-      if (this.lastAdvanceKey === nextKey) {
-        const blocked: AutoAdvanceResult = { kind: "blocked", reason: "idempotent advance: unit already active" };
+
+      // Record every dispatch decision in the ring buffer before pre-flight
+      // checks so the stuck-loop detector observes the full decision history
+      // (including decisions that idempotency would otherwise short-circuit).
+      // The ring is capped at STUCK_WINDOW_SIZE and evicts oldest-first.
+      this.dispatchKeyWindow.push(nextKey);
+      if (this.dispatchKeyWindow.length > STUCK_WINDOW_SIZE) {
+        this.dispatchKeyWindow.shift();
+      }
+
+      // Idempotency: same key as immediately previous successful advance.
+      // This is the soft, fast-path block kept from #5786. It only fires when
+      // the ring is NOT yet saturated for this key — once the ring is full of
+      // `nextKey`, the stuck-loop verdict takes precedence (see below). Both
+      // checks coexist: idempotency for the common immediate-repeat case,
+      // stuck-loop for the saturated-window case.
+      const matchingCount = this.dispatchKeyWindow.filter((k) => k === nextKey).length;
+      if (this.lastAdvanceKey === nextKey && matchingCount < STUCK_WINDOW_SIZE) {
+        const blocked: AutoAdvanceResult = { kind: "blocked", reason: "idempotent advance: unit already active", action: "stop" };
+        await this.deps.runtime.journalTransition({
+          name: "advance-blocked",
+          reason: blocked.reason,
+          unitType: decision.unitType,
+          unitId: decision.unitId,
+        });
+        await this.deps.health.postAdvanceRecord(blocked);
+        return blocked;
+      }
+
+      // Stuck-loop detection: when the ring is saturated with copies of
+      // `nextKey` (count >= STUCK_WINDOW_SIZE), the orchestrator has been
+      // picking the same unit across the whole window and must hard-stop with
+      // a diagnosable reason.
+      if (matchingCount >= STUCK_WINDOW_SIZE) {
+        const blocked: AutoAdvanceResult = {
+          kind: "blocked",
+          reason: `stuck-loop: ${nextKey} picked ${matchingCount} times`,
+          action: "stop",
+        };
+        await this.deps.runtime.journalTransition({
+          name: "advance-blocked",
+          reason: blocked.reason,
+          unitType: decision.unitType,
+          unitId: decision.unitId,
+        });
+        await this.deps.health.postAdvanceRecord(blocked);
+        return blocked;
+      }
+
+      const contract = await this.deps.toolContract.compileUnitToolContract(decision.unitType, decision.unitId);
+      if (!contract.ok) {
+        const blocked: AutoAdvanceResult = {
+          kind: "blocked",
+          reason: contract.reason,
+          action: "pause",
+          stateSnapshot: reconciliation.stateSnapshot,
+        };
+        await this.deps.runtime.journalTransition({
+          name: "advance-blocked",
+          reason: blocked.reason,
+          unitType: decision.unitType,
+          unitId: decision.unitId,
+        });
+        await this.deps.health.postAdvanceRecord(blocked);
+        return blocked;
+      }
+
+      const worktree = await this.deps.worktree.prepareForUnit(decision.unitType, decision.unitId);
+      if (!worktree.ok) {
+        const blocked: AutoAdvanceResult = {
+          kind: "blocked",
+          reason: worktree.reason,
+          action: "pause",
+          stateSnapshot: reconciliation.stateSnapshot,
+        };
         await this.deps.runtime.journalTransition({
           name: "advance-blocked",
           reason: blocked.reason,
@@ -72,10 +174,13 @@ export class AutoOrchestrator implements AutoOrchestrationModule {
         unitType: decision.unitType,
         unitId: decision.unitId,
       });
-      await this.deps.worktree.prepareForUnit(decision.unitType, decision.unitId);
       await this.deps.worktree.syncAfterUnit(decision.unitType, decision.unitId);
 
-      const advanced: AutoAdvanceResult = { kind: "advanced" };
+      const advanced: AutoAdvanceResult = {
+        kind: "advanced",
+        unit: { unitType: decision.unitType, unitId: decision.unitId },
+        stateSnapshot: reconciliation.stateSnapshot,
+      };
       await this.deps.health.postAdvanceRecord(advanced);
       return advanced;
     } catch (error) {
@@ -100,6 +205,7 @@ export class AutoOrchestrator implements AutoOrchestrationModule {
 
       if (result.kind === "stopped") {
         this.lastAdvanceKey = null;
+        this.dispatchKeyWindow = [];
         this.status.activeUnit = undefined;
       }
       this.bumpTransition();
@@ -125,6 +231,7 @@ export class AutoOrchestrator implements AutoOrchestrationModule {
 
   public async resume(): Promise<AutoAdvanceResult> {
     this.lastAdvanceKey = null;
+    this.dispatchKeyWindow = [];
     this.status.phase = "running";
     this.bumpTransition();
     await this.deps.runtime.journalTransition({ name: "resume" });
@@ -140,6 +247,7 @@ export class AutoOrchestrator implements AutoOrchestrationModule {
     this.status.phase = "stopped";
     this.status.activeUnit = undefined;
     this.lastAdvanceKey = null;
+    this.dispatchKeyWindow = [];
     this.bumpTransition();
     await this.deps.runtime.journalTransition({ name: "stop", reason });
     await this.deps.notifications.notifyLifecycle({ name: "stop", detail: reason });

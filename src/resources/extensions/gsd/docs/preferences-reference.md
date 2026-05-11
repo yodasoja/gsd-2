@@ -100,7 +100,7 @@ Setting `prefer_skills: []` does **not** disable skill discovery — it just mea
 
 - `skill_rules`: situational rules with a human-readable `when` trigger and one or more of `use`, `prefer`, or `avoid`.
 
-- `custom_instructions`: extra durable instructions related to skill use. For operational project knowledge (recurring rules, gotchas, patterns), use `.gsd/KNOWLEDGE.md` instead — it's injected into every agent prompt automatically and agents can append to it during execution.
+- `custom_instructions`: extra durable instructions related to skill use. For operational project knowledge, use `.gsd/KNOWLEDGE.md` instead. Rules are file-canonical; patterns and lessons are persisted to the `memories` table and projected back into `KNOWLEDGE.md` on the next session start.
 
 - `language`: preferred response language for all GSD interactions. Accepts any language name or code — `"Chinese"`, `"zh"`, `"German"`, `"de"`, `"日本語"`, etc. When set, GSD injects "Always respond in \<language\>" into every agent's system prompt, including after `/clear`. Quickest way to set it: `/gsd language <name>`. To clear: `/gsd language off`.
 

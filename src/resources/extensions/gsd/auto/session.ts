@@ -88,6 +88,7 @@ export class AutoSession {
   // ── Lifecycle ────────────────────────────────────────────────────────────
   active = false;
   paused = false;
+  completionStopInProgress = false;
   stepMode = false;
   verbose = false;
   activeEngineId: string | null = null;
@@ -109,7 +110,7 @@ export class AutoSession {
   workerId: string | null = null;
   /**
    * Active milestone lease fencing token, set by claimMilestoneLease() inside
-   * worktree-resolver.enterMilestone(). Threaded into recordDispatchClaim()
+   * WorktreeLifecycle.enterMilestone(). Threaded into recordDispatchClaim()
    * as milestone_lease_token so out-of-band dispatches by a stale worker
    * are detectable.
    */
@@ -158,6 +159,7 @@ export class AutoSession {
   pendingCrashRecovery: string | null = null;
   pendingVerificationRetry: PendingVerificationRetry | null = null;
   readonly verificationRetryCount = new Map<string, number>();
+  readonly verificationRetryFailureHashes = new Map<string, string>();
   pausedSessionFile: string | null = null;
   pausedUnitType: string | null = null;
   pausedUnitId: string | null = null;
@@ -178,6 +180,13 @@ export class AutoSession {
    * stale context bleeding into unrelated slices.
    */
   lastPreExecFailure: PreExecFailure | null = null;
+  /**
+   * Tracks how many consecutive times each slice unit has failed pre-execution
+   * checks. Keyed by unitId (e.g. "M001/S01"). Used to break the infinite
+   * plan-slice → pre-exec fail → re-dispatch loop when the planner cannot fix
+   * the issues after MAX_PRE_EXEC_RETRIES re-attempts.
+   */
+  readonly preExecRetryCount: Map<string, number> = new Map();
 
   // ── Tool invocation errors (#2883) ──────────────────────────────────
   /** Set when a GSD tool execution ends with isError due to malformed/truncated
@@ -279,6 +288,7 @@ export class AutoSession {
     // Lifecycle
     this.active = false;
     this.paused = false;
+    this.completionStopInProgress = false;
     this.stepMode = false;
     this.verbose = false;
     this.activeEngineId = null;
@@ -327,6 +337,7 @@ export class AutoSession {
     this.pendingCrashRecovery = null;
     this.pendingVerificationRetry = null;
     this.verificationRetryCount.clear();
+    this.verificationRetryFailureHashes.clear();
     this.pausedSessionFile = null;
     this.pausedUnitType = null;
     this.pausedUnitId = null;
@@ -343,6 +354,7 @@ export class AutoSession {
     this.rewriteAttemptCount = 0;
     this.consecutiveCompleteBootstraps = 0;
     this.lastPreExecFailure = null;
+    this.preExecRetryCount.clear();
     this.lastToolInvocationError = null;
     this.lastUnitAgentEndMessages = null;
     this.lastGitActionFailure = null;
@@ -362,6 +374,12 @@ export class AutoSession {
     this.orchestration = null;
 
     // Loop promise state lives in auto-loop.ts module scope
+  }
+
+  resetAfterStop(options: { preserveCompletionSurface?: boolean } = {}): void {
+    const completionStopInProgress = options.preserveCompletionSurface ? this.completionStopInProgress : false;
+    this.reset();
+    this.completionStopInProgress = completionStopInProgress;
   }
 
   toJSON(): Record<string, unknown> {

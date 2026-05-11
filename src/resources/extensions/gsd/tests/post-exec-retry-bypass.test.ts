@@ -250,14 +250,14 @@ describe("Post-execution blocking failure retry bypass", () => {
     const s = makeMockSession(tempDir, { type: "execute-task", id: "M001/S01/T01" });
     
     // Pre-set some retry state
-    s.verificationRetryCount.set("M001/S01/T01", 2);
+    s.verificationRetryCount.set("execute-task:M001/S01/T01", 2);
 
     const vctx: VerificationContext = { s, ctx, pi };
     const result = await runPostUnitVerification(vctx, pauseAutoMock);
 
     // On success, retry count should be cleared
     assert.equal(result, "continue");
-    assert.equal(s.verificationRetryCount.has("M001/S01/T01"), false);
+    assert.equal(s.verificationRetryCount.has("execute-task:M001/S01/T01"), false);
   });
 
   test("post-exec failure notification mentions cross-task consistency", async () => {

@@ -23,6 +23,7 @@
 // excluded from this invariant.
 
 import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
 import { existsSync, copyFileSync, mkdirSync, realpathSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Decision, Requirement, GateRow, GateId, GateScope, GateStatus, GateVerdict } from "./types.js";
@@ -78,6 +79,8 @@ import {
   applyMigrationV22QualityGateRepair,
   applyMigrationV23MilestoneQueue,
   applyMigrationV26MilestoneCommitAttributions,
+  applyMigrationV27ArtifactHash,
+  applyMigrationV28MemoryLastHitAt,
 } from "./db-migration-steps.js";
 import { isMemoriesFtsAvailableSchema, tryCreateMemoriesFtsSchema } from "./db-memory-fts-schema.js";
 import { createDbOpenState, type DbOpenPhase } from "./db-open-state.js";
@@ -106,7 +109,7 @@ const providerLoader = createSqliteProviderLoader({
   writeStderr: (message: string) => process.stderr.write(message),
 });
 
-export const SCHEMA_VERSION = 26;
+export const SCHEMA_VERSION = 28;
 
 function initSchema(db: DbAdapter, fileBacked: boolean): void {
   if (fileBacked) db.exec("PRAGMA journal_mode=WAL");
@@ -333,6 +336,16 @@ function migrateSchema(db: DbAdapter): void {
     if (currentVersion < 26) {
       applyMigrationV26MilestoneCommitAttributions(db);
       recordSchemaVersion(db, 26);
+    }
+
+    if (currentVersion < 27) {
+      applyMigrationV27ArtifactHash(db);
+      recordSchemaVersion(db, 27);
+    }
+
+    if (currentVersion < 28) {
+      applyMigrationV28MemoryLastHitAt(db);
+      recordSchemaVersion(db, 28);
     }
 
     db.exec("COMMIT");
@@ -913,9 +926,10 @@ export function insertArtifact(a: {
   full_content: string;
 }): void {
   if (!currentDb) throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
+  const contentHash = createHash("sha256").update(a.full_content).digest("hex");
   currentDb.prepare(
-    `INSERT OR REPLACE INTO artifacts (path, artifact_type, milestone_id, slice_id, task_id, full_content, imported_at)
-     VALUES (:path, :artifact_type, :milestone_id, :slice_id, :task_id, :full_content, :imported_at)`,
+    `INSERT OR REPLACE INTO artifacts (path, artifact_type, milestone_id, slice_id, task_id, full_content, imported_at, content_hash)
+     VALUES (:path, :artifact_type, :milestone_id, :slice_id, :task_id, :full_content, :imported_at, :content_hash)`,
   ).run({
     ":path": a.path,
     ":artifact_type": a.artifact_type,
@@ -924,6 +938,7 @@ export function insertArtifact(a: {
     ":task_id": a.task_id,
     ":full_content": a.full_content,
     ":imported_at": new Date().toISOString(),
+    ":content_hash": contentHash,
   });
 }
 
@@ -1121,33 +1136,17 @@ export function setSliceSketchFlag(milestoneId: string, sliceId: string, isSketc
 }
 
 /**
- * ADR-011 auto-heal: reconcile stale is_sketch=1 rows whose PLAN already exists.
- *
- * Callers pass a predicate that resolves whether a plan file exists for a slice.
- * The predicate MUST use the canonical path resolver (`resolveSliceFile`, etc.)
- * to keep path logic in one place — do not hand-roll the path inside the callback.
- *
- * Recovers from two scenarios:
- *   1. Crash between `gsd_plan_slice` write and the sketch flag flip.
- *   2. Flag-OFF downgrade path: when `progressive_planning` is off, the dispatch
- *      rule routes sketch slices to plan-slice, which writes PLAN.md but leaves
- *      `is_sketch=1` — the next state derivation auto-heals it to 0 here.
- *
- * Not aggressive in practice: PLAN.md is only written via the DB-backed
- * `gsd_plan_slice` tool (which also inserts tasks), so a "stale PLAN.md with
- * is_sketch=1" is extremely unlikely to indicate anything other than the two
- * recovery scenarios above.
+ * ADR-017 raw primitive: returns slice IDs in a milestone whose is_sketch flag
+ * is still 1. The stale-sketch-flag drift handler at
+ * `state-reconciliation/drift/sketch-flag.ts` composes this with PLAN.md
+ * existence checks to detect drift, then writes via `setSliceSketchFlag`.
  */
-export function autoHealSketchFlags(milestoneId: string, hasPlanFile: (sliceId: string) => boolean): void {
-  if (!currentDb) return;
+export function getSketchedSliceIds(milestoneId: string): string[] {
+  if (!currentDb) return [];
   const rows = currentDb.prepare(
     `SELECT id FROM slices WHERE milestone_id = :mid AND is_sketch = 1`,
   ).all({ ":mid": milestoneId }) as Array<{ id: string }>;
-  for (const row of rows) {
-    if (hasPlanFile(row.id)) {
-      setSliceSketchFlag(milestoneId, row.id, false);
-    }
-  }
+  return rows.map((r) => r.id);
 }
 
 export function upsertSlicePlanning(milestoneId: string, sliceId: string, planning: Partial<SlicePlanningRecord>): void {
@@ -1795,6 +1794,13 @@ export function reconcileWorktreeDb(
       const hasEscalationAwaiting = wtTaskInfo.some((col) => col["name"] === "escalation_awaiting_review");
       const hasEscalationArtifact = wtTaskInfo.some((col) => col["name"] === "escalation_artifact_path");
       const hasEscalationOverride = wtTaskInfo.some((col) => col["name"] === "escalation_override_applied_at");
+      const wtArtifactInfo = adapter.prepare("PRAGMA wt.table_info('artifacts')").all();
+      const hasArtifactContentHash = wtArtifactInfo.some((col) => col["name"] === "content_hash");
+      const wtMemoryInfo = adapter.prepare("PRAGMA wt.table_info('memories')").all();
+      const hasMemoryScope = wtMemoryInfo.some((col) => col["name"] === "scope");
+      const hasMemoryTags = wtMemoryInfo.some((col) => col["name"] === "tags");
+      const hasMemoryStructuredFields = wtMemoryInfo.some((col) => col["name"] === "structured_fields");
+      const hasMemoryLastHitAt = wtMemoryInfo.some((col) => col["name"] === "last_hit_at");
 
       const decConf = adapter.prepare(
         `SELECT m.id FROM decisions m INNER JOIN wt.decisions w ON m.id = w.id WHERE m.decision != w.decision OR m.choice != w.choice OR m.rationale != w.rationale OR ${
@@ -1842,12 +1848,17 @@ export function reconcileWorktreeDb(
           FROM wt.requirements
         `).run());
 
+        // V27: preserve content_hash. If the worktree predates V27 (no column),
+        // fall back to the main DB's existing hash so reconcile doesn't null
+        // out integrity fingerprints on artifacts that were unchanged in wt.
         merged.artifacts = countChanges(adapter.prepare(`
           INSERT OR REPLACE INTO artifacts (
-            path, artifact_type, milestone_id, slice_id, task_id, full_content, imported_at
+            path, artifact_type, milestone_id, slice_id, task_id, full_content, imported_at, content_hash
           )
-          SELECT path, artifact_type, milestone_id, slice_id, task_id, full_content, imported_at
-          FROM wt.artifacts
+          SELECT w.path, w.artifact_type, w.milestone_id, w.slice_id, w.task_id, w.full_content, w.imported_at,
+                 ${hasArtifactContentHash ? "w.content_hash" : "m.content_hash"}
+          FROM wt.artifacts w
+          LEFT JOIN artifacts m ON m.path = w.path
         `).run());
 
         // Merge milestones — worktree may have updated status/planning fields.
@@ -1949,15 +1960,25 @@ export function reconcileWorktreeDb(
           LEFT JOIN tasks m ON m.milestone_id = w.milestone_id AND m.slice_id = w.slice_id AND m.id = w.id
         `).run());
 
-        // Merge memories — keep worktree-learned insights
+        // Merge memories — keep worktree-learned insights.
+        // V18 (scope, tags), V21 (structured_fields), V28 (last_hit_at): for each
+        // column the wt may not yet have (older worktree DB), fall back to the
+        // main DB's existing value via LEFT JOIN so reconcile never silently
+        // resets these fields to defaults on rows that already had them.
         merged.memories = countChanges(adapter.prepare(`
           INSERT OR REPLACE INTO memories (
             seq, id, category, content, confidence, source_unit_type, source_unit_id,
-            created_at, updated_at, superseded_by, hit_count
+            created_at, updated_at, superseded_by, hit_count,
+            scope, tags, structured_fields, last_hit_at
           )
-          SELECT seq, id, category, content, confidence, source_unit_type, source_unit_id,
-                 created_at, updated_at, superseded_by, hit_count
-          FROM wt.memories
+          SELECT w.seq, w.id, w.category, w.content, w.confidence, w.source_unit_type, w.source_unit_id,
+                 w.created_at, w.updated_at, w.superseded_by, w.hit_count,
+                 ${hasMemoryScope ? "w.scope" : "COALESCE(m.scope, 'project')"},
+                 ${hasMemoryTags ? "w.tags" : "COALESCE(m.tags, '[]')"},
+                 ${hasMemoryStructuredFields ? "w.structured_fields" : "m.structured_fields"},
+                 ${hasMemoryLastHitAt ? "w.last_hit_at" : "m.last_hit_at"}
+          FROM wt.memories w
+          LEFT JOIN memories m ON m.id = w.id
         `).run());
 
         // Merge verification evidence — append-only, use INSERT OR IGNORE to avoid duplicates
@@ -3062,8 +3083,8 @@ export function updateMemoryContentRow(
 export function incrementMemoryHitCount(id: string, updatedAt: string): void {
   if (!currentDb) throw new GSDError(GSD_STALE_STATE, "gsd-db: No database open");
   currentDb.prepare(
-    "UPDATE memories SET hit_count = hit_count + 1, updated_at = :updated_at WHERE id = :id",
-  ).run({ ":updated_at": updatedAt, ":id": id });
+    "UPDATE memories SET hit_count = hit_count + 1, updated_at = :updated_at, last_hit_at = :last_hit_at WHERE id = :id",
+  ).run({ ":updated_at": updatedAt, ":last_hit_at": updatedAt, ":id": id });
 }
 
 export function supersedeMemoryRow(oldId: string, newId: string, updatedAt: string): void {

@@ -98,6 +98,70 @@ function isAlreadyActiveConstraintError(err: unknown): boolean {
   return /\bUNIQUE\b|\bconstraint failed\b/i.test(msg);
 }
 
+function settleStaleActiveDispatchForUnit(input: RecordClaimInput, now: string): void {
+  const db = _getAdapter()!;
+  const active = db.prepare(
+    `SELECT id, status, worker_id, milestone_lease_token
+     FROM unit_dispatches
+     WHERE unit_id = :unit_id
+       AND status IN ('claimed','running')
+     ORDER BY id DESC
+     LIMIT 1`,
+  ).get({ ":unit_id": input.unitId }) as
+    | { id: number; status: DispatchStatus; worker_id: string; milestone_lease_token: number }
+    | undefined;
+
+  if (!active) return;
+  if (
+    active.worker_id === input.workerId &&
+    active.milestone_lease_token === input.milestoneLeaseToken
+  ) {
+    return;
+  }
+
+  const reason = "stale-dispatch-lease-takeover";
+  const result = db.prepare(
+    `UPDATE unit_dispatches
+     SET status = 'canceled',
+         ended_at = :ended_at,
+         exit_reason = :reason
+     WHERE id = :id
+       AND status IN ('claimed','running')
+       AND (worker_id != :worker_id OR milestone_lease_token != :token)`,
+  ).run({
+    ":id": active.id,
+    ":ended_at": now,
+    ":reason": reason,
+    ":worker_id": input.workerId,
+    ":token": input.milestoneLeaseToken,
+  });
+
+  const changes =
+    typeof (result as { changes?: unknown }).changes === "number"
+      ? (result as { changes: number }).changes
+      : 0;
+  if (changes < 1) return;
+
+  insertAuditEvent({
+    eventId: randomUUID(),
+    traceId: input.traceId,
+    turnId: input.turnId ?? undefined,
+    category: "orchestration",
+    type: "dispatch-stale-canceled",
+    ts: now,
+    payload: {
+      dispatchId: active.id,
+      unitId: input.unitId,
+      priorStatus: active.status,
+      priorWorkerId: active.worker_id,
+      priorMilestoneLeaseToken: active.milestone_lease_token,
+      takeoverWorkerId: input.workerId,
+      takeoverMilestoneLeaseToken: input.milestoneLeaseToken,
+      reason,
+    },
+  });
+}
+
 /**
  * Insert a new dispatch row in `claimed` state. Atomic guard against
  * double-claim (B2): the partial unique index
@@ -134,6 +198,8 @@ export function recordDispatchClaim(input: RecordClaimInput): RecordClaimResult 
         milestoneLeaseToken: input.milestoneLeaseToken,
       };
     }
+
+    settleStaleActiveDispatchForUnit(input, now);
 
     try {
       const result = db.prepare(
@@ -357,6 +423,47 @@ export function markCanceled(dispatchId: number, reason: string): void {
      SET status = 'canceled', ended_at = :ended_at, exit_reason = :reason
      WHERE id = :id AND status IN ('pending','claimed','running')`,
   ).run({ ":id": dispatchId, ":ended_at": now, ":reason": reason });
+}
+
+/**
+ * Best-effort signal/crash cleanup: cancel the latest active dispatch owned by
+ * a worker when the process is exiting before the normal loop can settle it.
+ */
+export function markLatestActiveForWorkerCanceled(workerId: string, reason: string): boolean {
+  if (!isDbAvailable()) return false;
+  const now = new Date().toISOString();
+  const db = _getAdapter()!;
+  const result = transaction(() => {
+    return db.prepare(
+      `UPDATE unit_dispatches
+       SET status = 'canceled', ended_at = :ended_at, exit_reason = :reason
+       WHERE id = (
+         SELECT id FROM unit_dispatches
+         WHERE worker_id = :worker_id
+           AND status IN ('pending','claimed','running')
+         ORDER BY id DESC
+         LIMIT 1
+       )`,
+    ).run({
+      ":ended_at": now,
+      ":reason": reason,
+      ":worker_id": workerId,
+    });
+  });
+  const changes =
+    typeof (result as { changes?: unknown }).changes === "number"
+      ? (result as { changes: number }).changes
+      : 0;
+  if (changes <= 0) return false;
+  insertAuditEvent({
+    eventId: randomUUID(),
+    traceId: workerId,
+    category: "orchestration",
+    type: "dispatch-canceled",
+    ts: now,
+    payload: { workerId, reason },
+  });
+  return true;
 }
 
 /**

@@ -2,6 +2,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
 
+import type { AgentEndEvent, ErrorContext } from "../auto/types.js";
 import { logWarning } from "../workflow-logger.js";
 import {
   checkDeepProjectSetupAfterTurn,
@@ -11,10 +12,23 @@ import {
   resetEmptyTurnCounter,
 } from "../guided-flow.js";
 import { clearPathCache } from "../paths.js";
-import { getAutoDashboardData, getAutoModeStartModel, isAutoActive, pauseAuto, setCurrentDispatchedModelId } from "../auto.js";
+import {
+  getAutoDashboardData,
+  getAutoModeStartModel,
+  isAutoActive,
+  isAutoCompletionStopInProgress,
+  pauseAuto,
+  setCurrentDispatchedModelId,
+} from "../auto.js";
 import { getNextFallbackModel, resolveModelWithFallbacksForUnit } from "../preferences.js";
 import { pauseAutoForProviderError } from "../provider-error-pause.js";
-import { isSessionSwitchInFlight, resolveAgentEnd, resolveAgentEndCancelled } from "../auto/resolve.js";
+import {
+  isSessionSwitchAbortGraceActive,
+  isSessionSwitchInFlight,
+  resolveAgentEnd,
+  resolveAgentEndCancelled,
+} from "../auto/resolve.js";
+import { shouldIgnoreAgentEndForActiveUnit } from "../auto/unit-runner-events.js";
 import { resolveModelId } from "../auto-model-selection.js";
 import { resolveProjectRoot } from "../worktree.js";
 import { clearDiscussionFlowState } from "./write-gate.js";
@@ -30,6 +44,10 @@ import { blockModel, isModelBlocked } from "../blocked-models.js";
 
 const retryState = createRetryState();
 const MAX_NETWORK_RETRIES = 2;
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object";
+}
 /**
  * Cap on auto-resume attempts for sustained transient-provider errors.
  *
@@ -76,6 +94,108 @@ export function isUserInitiatedAbortMessage(message: string | undefined | null):
   return /\b(?:claude code process aborted by user|request aborted by user|process aborted by user)\b/i.test(message);
 }
 
+function isBareClaudeCodeSessionSwitchAbortMarker(message: string | undefined | null): boolean {
+  if (!message) return false;
+  const normalized = message.trim().replace(/\s+/g, " ").toLowerCase();
+  return normalized === "claude code process aborted by user"
+    || normalized === "request aborted by user"
+    || normalized === "process aborted by user"
+    || normalized === "claude code stream aborted by caller";
+}
+
+function readAssistantTextContent(content: unknown): string {
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((block) => {
+      if (!block || typeof block !== "object") return "";
+      const text = (block as { text?: unknown }).text;
+      return typeof text === "string" ? text : "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+export function isClaudeCodeSessionSwitchAbortMessage(lastMsg: unknown): boolean {
+  if (!lastMsg || typeof lastMsg !== "object") return false;
+  const m = lastMsg as { stopReason?: unknown; errorMessage?: unknown; content?: unknown };
+  const carriers = [
+    m.errorMessage ? String(m.errorMessage) : "",
+    readAssistantTextContent(m.content),
+  ].filter((value) => value.trim().length > 0);
+
+  if ((m.stopReason === "error" || m.stopReason === "aborted") && carriers.length > 0) {
+    return carriers.every(isBareClaudeCodeSessionSwitchAbortMarker);
+  }
+
+  return false;
+}
+
+export function isBareClaudeCodeStreamAbortPlaceholder(lastMsg: unknown): boolean {
+  if (!lastMsg || typeof lastMsg !== "object") return false;
+  const m = lastMsg as { stopReason?: unknown; errorMessage?: unknown; content?: unknown };
+  if (m.stopReason !== "aborted" || m.errorMessage) return false;
+  const text = readAssistantTextContent(m.content).trim().replace(/\s+/g, " ").toLowerCase();
+  return text === "claude code stream aborted by caller";
+}
+
+/**
+ * Resolve an agent_end event observed while a session switch is in flight.
+ *
+ * #5538-followup: When `newSession()` aborts an in-flight stream as part of a
+ * session transition (run-unit.ts:63 → _settleCurrentTurnForSessionTransition
+ * → agent.abort()), the SDK emits "Claude Code process aborted by user" or
+ * "Request aborted by user" against the previous unit's turn. The previous
+ * code path treated that as a user cancellation and propagated it to the next
+ * unit via the pending-switch-cancellation queue, killing auto-mode with
+ * "Auto-mode stopped — Unit aborted: Claude Code process aborted by user"
+ * even though no user input occurred.
+ *
+ * Claude Code abort markers are intentionally ignored when the abort fires
+ * while the session-switch is in flight: the abort is the expected side-effect
+ * of the transition, not a user signal. Other branches (genuine `stopReason
+ * === "aborted"` with explicit errorMessage) preserve the prior behavior.
+ */
+export function _handleSessionSwitchAgentEnd(
+  lastMsg: unknown,
+  resolveCancelled: (ctx: ErrorContext) => boolean,
+): void {
+  if (!lastMsg || typeof lastMsg !== "object") return;
+  const m = lastMsg as { stopReason?: unknown; errorMessage?: unknown; content?: unknown };
+
+  if (isClaudeCodeSessionSwitchAbortMessage(m)) {
+    // Internal abort from in-flight session transition — drop on the floor.
+    return;
+  }
+
+  if (m.stopReason === "error") {
+    const rawErrorMsg = m.errorMessage ? String(m.errorMessage) : "";
+    if (isBareClaudeCodeSessionSwitchAbortMarker(rawErrorMsg)) {
+      // Internal abort from in-flight session transition — drop on the floor.
+      return;
+    }
+    return;
+  }
+
+  if (m.stopReason === "aborted") {
+    const hasErrorMessage = !!m.errorMessage;
+    if (hasErrorMessage) {
+      resolveCancelled(_buildAbortedPauseContext(m as { errorMessage?: unknown }));
+    }
+  }
+}
+
+export function resolveAgentEndErrorDisplay(
+  rawErrorMsg: string,
+  content: unknown,
+): string {
+  const isUseless = !rawErrorMsg || /^(success|ok|true|error|unknown)$/i.test(rawErrorMsg.trim());
+  if (isUseless && Array.isArray(content)) {
+    const textBlock = content.find((b: any) => b.type === "text" && b.text);
+    if (textBlock) return (textBlock as any).text.slice(0, 300);
+  }
+  return rawErrorMsg;
+}
+
 async function pauseTransientWithBackoff(
   cls: ErrorClass,
   pi: ExtensionAPI,
@@ -112,7 +232,7 @@ async function pauseTransientWithBackoff(
 
 export async function handleAgentEnd(
   pi: ExtensionAPI,
-  event: { messages: any[] },
+  event: AgentEndEvent,
   ctx: ExtensionContext,
 ): Promise<void> {
   // #4648 — Invalidate the directory-listing cache before any artifact-existence
@@ -153,10 +273,38 @@ export async function handleAgentEnd(
   if (maybeHandleEmptyIntentTurn(event, isAutoActive())) return;
 
   if (!isAutoActive()) return;
-  if (isSessionSwitchInFlight()) return;
+
+  if (shouldIgnoreAgentEndForActiveUnit(event)) {
+    return;
+  }
 
   const lastMsg = event.messages[event.messages.length - 1];
-  if (lastMsg && "stopReason" in lastMsg && lastMsg.stopReason === "aborted") {
+  if (isSessionSwitchInFlight()) {
+    _handleSessionSwitchAgentEnd(lastMsg, resolveAgentEndCancelled);
+    return;
+  }
+
+  if (isSessionSwitchAbortGraceActive() && isClaudeCodeSessionSwitchAbortMessage(lastMsg)) {
+    // Claude Code can report the abort from `newSession()` a few hundred ms
+    // after the guard drops. That event belongs to the old turn; do not let it
+    // cancel the freshly-dispatched unit.
+    return;
+  }
+
+  if (isBareClaudeCodeStreamAbortPlaceholder(lastMsg)) {
+    // The Claude Code adapter can emit this placeholder after a prior turn has
+    // already completed and the next unit is active. It has no user/provider
+    // diagnostic value and must not cancel the newly-dispatched unit.
+    return;
+  }
+
+  if (isObjectRecord(lastMsg) && "stopReason" in lastMsg && lastMsg.stopReason === "aborted") {
+    if (isAutoCompletionStopInProgress()) {
+      resetRetryState(retryState);
+      resolveAgentEnd(event);
+      return;
+    }
+
     // Empty content with aborted stopReason is a non-fatal agent stop (the LLM
     // chose to end without producing output). Only pause on genuine fatal aborts
     // that carry error context — e.g. errorMessage field or non-empty content
@@ -182,12 +330,17 @@ export async function handleAgentEnd(
     await pauseAuto(ctx, pi, _buildAbortedPauseContext(lastMsg as { errorMessage?: unknown }));
     return;
   }
-  if (lastMsg && "stopReason" in lastMsg && lastMsg.stopReason === "error") {
+  if (isObjectRecord(lastMsg) && "stopReason" in lastMsg && lastMsg.stopReason === "error") {
     // #3588: errorMessage can be useless (e.g. "success") while the real error
     // is in the assistant message text content. Fall back to content when
     // errorMessage looks uninformative.
     const rawErrorMsg = ("errorMessage" in lastMsg && lastMsg.errorMessage) ? String(lastMsg.errorMessage) : "";
     if (isUserInitiatedAbortMessage(rawErrorMsg)) {
+      if (isAutoCompletionStopInProgress()) {
+        resetRetryState(retryState);
+        resolveAgentEnd(event);
+        return;
+      }
       resolveAgentEndCancelled({
         message: rawErrorMsg,
         category: "aborted",
@@ -195,15 +348,13 @@ export async function handleAgentEnd(
       });
       return;
     }
-    const isUseless = !rawErrorMsg || /^(success|ok|true|error|unknown)$/i.test(rawErrorMsg.trim());
     // #3588: When errorMessage is uninformative, extract the real error from
     // the assistant message text content for display purposes only.
     // Classification still uses rawErrorMsg to avoid false positives from prose.
-    let displayMsg = rawErrorMsg;
-    if (isUseless && "content" in lastMsg && Array.isArray(lastMsg.content)) {
-      const textBlock = lastMsg.content.find((b: any) => b.type === "text" && b.text);
-      if (textBlock) displayMsg = (textBlock as any).text.slice(0, 300);
-    }
+    const displayMsg = resolveAgentEndErrorDisplay(
+      rawErrorMsg,
+      "content" in lastMsg ? lastMsg.content : undefined,
+    );
     const errorDetail = displayMsg ? `: ${displayMsg}` : "";
     const explicitRetryAfterMs = ("retryAfterMs" in lastMsg && typeof lastMsg.retryAfterMs === "number") ? lastMsg.retryAfterMs : undefined;
 

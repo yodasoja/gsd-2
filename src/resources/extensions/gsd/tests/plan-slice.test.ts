@@ -172,6 +172,56 @@ test('handlePlanSlice rejects invalid payloads', async () => {
   }
 });
 
+test('handlePlanSlice rejects absolute task IO paths outside the active worktree', async () => {
+  const base = makeTmpBase();
+  openDatabase(join(base, '.gsd', 'gsd.db'));
+
+  try {
+    seedParentSlice();
+    const outside = join(tmpdir(), 'outside-checkout', 'index.html');
+    const result = await handlePlanSlice({
+      ...validParams(),
+      tasks: [
+        {
+          ...validParams().tasks[0],
+          inputs: [outside],
+          expectedOutput: [outside],
+        },
+      ],
+    }, base);
+
+    assert.ok('error' in result);
+    assert.match(result.error, /validation failed: tasks\[0\]\.inputs contains absolute path outside working directory/);
+    assert.equal(getSliceTasks('M001', 'S02').length, 0, 'invalid planning IO must not persist tasks');
+  } finally {
+    cleanup(base);
+  }
+});
+
+test('handlePlanSlice accepts absolute task IO paths inside the active worktree', async () => {
+  const base = makeTmpBase();
+  openDatabase(join(base, '.gsd', 'gsd.db'));
+
+  try {
+    seedParentSlice();
+    const inside = join(base, 'index.html');
+    const result = await handlePlanSlice({
+      ...validParams(),
+      tasks: [
+        {
+          ...validParams().tasks[0],
+          inputs: [inside],
+          expectedOutput: [inside],
+        },
+      ],
+    }, base);
+
+    assert.ok(!('error' in result), `unexpected error: ${'error' in result ? result.error : ''}`);
+  } finally {
+    cleanup(base);
+  }
+});
+
 test('handlePlanSlice rejects missing parent slice', async () => {
   const base = makeTmpBase();
   openDatabase(join(base, '.gsd', 'gsd.db'));
