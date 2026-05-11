@@ -1994,25 +1994,35 @@ export function createWiredAutoOrchestrationModule(
         const prefs = loadEffectiveGSDPreferences(dispatchBasePath)?.preferences;
         const uokFlags = resolveUokFlags(prefs);
         if (!uokFlags.gates) return;
-        const runner = new UokGateRunner();
-        runner.register({
-          id: input.gateId,
-          type: input.gateType,
-          execute: async () => ({
-            outcome: input.outcome,
-            failureClass: input.failureClass,
-            rationale: input.rationale,
-            findings: input.findings ?? "",
-          }),
-        });
-        await runner.run(input.gateId, {
-          basePath: dispatchBasePath,
-          traceId: `pre-dispatch:${flowId}`,
-          turnId: `orch-${seq}`,
-          milestoneId: input.milestoneId ?? s.currentMilestoneId ?? undefined,
-          unitType: "pre-dispatch",
-          unitId: `orch-${seq}`,
-        });
+        const milestoneId = input.milestoneId ?? s.currentMilestoneId ?? undefined;
+        try {
+          const runner = new UokGateRunner();
+          runner.register({
+            id: input.gateId,
+            type: input.gateType,
+            execute: async () => ({
+              outcome: input.outcome,
+              failureClass: input.failureClass,
+              rationale: input.rationale,
+              findings: input.findings ?? "",
+            }),
+          });
+          await runner.run(input.gateId, {
+            basePath: dispatchBasePath,
+            traceId: `pre-dispatch:${flowId}`,
+            turnId: `orch-${seq}`,
+            milestoneId,
+            unitType: "pre-dispatch",
+            unitId: `orch-${seq}`,
+          });
+        } catch (err) {
+          logWarning("engine", `uok gate emit failed: ${getErrorMessage(err)}`, {
+            file: "auto.ts",
+            gateId: input.gateId,
+            gateType: input.gateType,
+            milestoneId,
+          });
+        }
       },
     },
   };

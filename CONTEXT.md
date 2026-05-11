@@ -16,7 +16,7 @@
 
 ## Architecture terms adopted for this area
 
-- **Auto Orchestration module**: the module that owns the pre-dispatch invariant pipeline and lifecycle telemetry. It gates whether a Unit may dispatch (State Reconciliation → Dispatch decision → Tool Contract → Worktree Safety) and journals lifecycle transitions, but does not execute the Unit or own runtime recovery for Unit-execution failures. The auto-loop runs the Unit and calls Recovery Classification directly when it fails.
+- **Auto Orchestration module**: the module that owns the pre-dispatch invariant pipeline and lifecycle telemetry. It runs the resource-version guard and pre-dispatch health gate before reconciliation, then gates whether a Unit may dispatch (resource-version guard → pre-dispatch health gate → State Reconciliation → Dispatch decision → Tool Contract → Worktree Safety) and journals lifecycle transitions, but does not execute the Unit or own runtime recovery for Unit-execution failures. The auto-loop runs the Unit and calls Recovery Classification directly when it fails.
 - **Dispatch adapter**: adapter behind the Dispatch seam.
 - **Recovery adapter**: adapter behind the Recovery seam.
 - **Worktree adapter**: adapter behind the Worktree seam.
