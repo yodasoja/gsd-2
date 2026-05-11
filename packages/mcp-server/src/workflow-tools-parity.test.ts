@@ -103,7 +103,7 @@ function normalizeParams(params: Record<string, unknown>): Record<string, unknow
             ? normalizeParams(item as Record<string, unknown>)
             : item,
       );
-    } else if (v && typeof v === "object") {
+    } else if (v !== null && typeof v === "object") {
       out[k] = normalizeParams(v as Record<string, unknown>);
     } else {
       out[k] = v;
@@ -124,6 +124,7 @@ function snapshotState(base: string, milestoneId: string, sliceId: string, taskI
   // string field `full_summary_md`). Recursive normalization is simpler and
   // more robust than maintaining an elision list.
   const taskRow = normalizeParams(row as Record<string, unknown>);
+  assert.equal(taskRow.status, "complete", "task status must be 'complete' after completion");
 
   const journalPath = join(base, ".gsd", "event-log.jsonl");
   const journalEvents: SnapshotShape["journalEvents"] = [];
@@ -182,7 +183,7 @@ describe("ADR-008 parity: gsd_task_complete native vs MCP", () => {
       baseNative = makeTmpBase();
       seedMilestoneAndSlice(baseNative);
       const nativeResult = await executeTaskComplete(COMPLETION_ARGS, baseNative);
-      assert.equal((nativeResult as { isError?: boolean }).isError, undefined, "native completion must succeed");
+      assert.ok(!nativeResult.isError, "native completion must succeed");
 
       const snapshotNative = snapshotState(baseNative, "M001", "S01", "T01");
       closeDatabase();
@@ -224,6 +225,11 @@ describe("ADR-008 parity: gsd_task_complete native vs MCP", () => {
       // Each journal event's params must match (these encode the completion
       // payload; cmd is normalized and actor must align).
       for (let i = 0; i < snapshotNative.journalEvents.length; i++) {
+        assert.equal(
+          snapshotNative.journalEvents[i].actor,
+          snapshotMcp.journalEvents[i].actor,
+          `journal event #${i} actor must match between native and MCP`,
+        );
         assert.deepEqual(
           snapshotNative.journalEvents[i].params,
           snapshotMcp.journalEvents[i].params,
