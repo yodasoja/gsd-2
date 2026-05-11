@@ -738,3 +738,64 @@ test("wired DispatchAdapter forwards session-derived dispatch inputs identically
     resetRegistry();
   }
 });
+
+test("wired DispatchAdapter prefers caller-supplied dispatch inputs over ctx-derived values", async () => {
+  const stateSnapshot = makeState();
+  const captured: DispatchContext[] = [];
+  const captureRule: UnifiedRule = {
+    name: "test-capture-overrides",
+    when: "dispatch",
+    evaluation: "first-match",
+    where: async (ctx: DispatchContext) => {
+      captured.push(ctx);
+      return {
+        action: "dispatch" as const,
+        unitType: "execute-task",
+        unitId: "T01",
+        prompt: "override-fixture",
+      };
+    },
+    then: (r: unknown) => r,
+  };
+  setRegistry(new RuleRegistry([captureRule]));
+
+  try {
+    const ctxModelRegistry = {
+      getAll: () => [],
+      getProviderAuthMode: (_provider: string) => "apiKey" as const,
+    };
+    const overrideModelRegistry = {
+      getAll: () => [],
+      getProviderAuthMode: (_provider: string) => "oauth" as const,
+    };
+    const ctx = {
+      model: {
+        provider: "anthropic",
+        baseUrl: "https://api.anthropic.com",
+        contextWindow: 200_000,
+      },
+      modelRegistry: ctxModelRegistry,
+    } as any;
+    const pi = {
+      getActiveTools: () => [],
+    } as any;
+    const adapter = createWiredDispatchAdapter(ctx, pi, "/tmp/parity-fixture");
+
+    const result = await adapter.decideNextUnit({
+      stateSnapshot,
+      structuredQuestionsAvailable: "true",
+      sessionContextWindow: 500_000,
+      sessionProvider: "openai",
+      modelRegistry: overrideModelRegistry,
+    });
+
+    assert.ok(result);
+    assert.equal(captured.length, 1, "expected one captured dispatch context");
+    assert.equal(captured[0].structuredQuestionsAvailable, "true");
+    assert.equal(captured[0].sessionContextWindow, 500_000);
+    assert.equal(captured[0].sessionProvider, "openai");
+    assert.equal(captured[0].modelRegistry, overrideModelRegistry);
+  } finally {
+    resetRegistry();
+  }
+});
