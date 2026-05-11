@@ -1902,12 +1902,25 @@ export function createWiredAutoOrchestrationModule(
       async cleanupOnStop() {},
     },
     health: {
+      checkResourcesStale() {
+        return checkResourcesStale(s.resourceVersionOnStart);
+      },
       async preAdvanceGate() {
-        const gate = await preDispatchHealthGate(dispatchBasePath);
-        return {
-          allow: gate.proceed,
-          reason: gate.reason,
-        };
+        try {
+          const gate = await preDispatchHealthGate(dispatchBasePath);
+          if (gate.proceed) {
+            return {
+              kind: "pass",
+              fixesApplied: gate.fixesApplied,
+            };
+          }
+          return {
+            kind: "fail",
+            reason: gate.reason ?? "Pre-dispatch health check failed — run /gsd doctor for details.",
+          };
+        } catch (error) {
+          return { kind: "threw", error };
+        }
       },
       async postAdvanceRecord(result) {
         if (result.kind === "error") {
@@ -1972,6 +1985,43 @@ export function createWiredAutoOrchestrationModule(
       async notifyLifecycle(event) {
         if (event.name === "error") {
           ctx.ui.notify(event.detail ?? "auto orchestration error", "error");
+        }
+      },
+    },
+    uokGate: {
+      async emit(input) {
+        const prefs = loadEffectiveGSDPreferences(dispatchBasePath)?.preferences;
+        const uokFlags = resolveUokFlags(prefs);
+        if (!uokFlags.gates) return;
+        const milestoneId = input.milestoneId ?? s.currentMilestoneId ?? undefined;
+        try {
+          const { UokGateRunner } = await import("./uok/gate-runner.js");
+          const runner = new UokGateRunner();
+          runner.register({
+            id: input.gateId,
+            type: input.gateType,
+            execute: async () => ({
+              outcome: input.outcome,
+              failureClass: input.failureClass,
+              rationale: input.rationale,
+              findings: input.findings ?? "",
+            }),
+          });
+          await runner.run(input.gateId, {
+            basePath: dispatchBasePath,
+            traceId: `pre-dispatch:${flowId}`,
+            turnId: `orch-${seq}`,
+            milestoneId,
+            unitType: "pre-dispatch",
+            unitId: `orch-${seq}`,
+          });
+        } catch (err) {
+          logWarning("engine", `uok gate emit failed: ${getErrorMessage(err)}`, {
+            file: "auto.ts",
+            gateId: input.gateId,
+            gateType: input.gateType,
+            ...(milestoneId ? { milestoneId } : {}),
+          });
         }
       },
     },

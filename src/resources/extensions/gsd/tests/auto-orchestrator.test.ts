@@ -62,9 +62,13 @@ function makeDeps(overrides: Partial<AutoOrchestratorDeps> = {}): { deps: AutoOr
       async cleanupOnStop() { calls.push("worktree.cleanup"); },
     },
     health: {
+      checkResourcesStale() {
+        calls.push("health.stale");
+        return null;
+      },
       async preAdvanceGate() {
         calls.push("health.pre");
-        return { allow: true };
+        return { kind: "pass" };
       },
       async postAdvanceRecord() { calls.push("health.post"); },
     },
@@ -74,6 +78,9 @@ function makeDeps(overrides: Partial<AutoOrchestratorDeps> = {}): { deps: AutoOr
     },
     notifications: {
       async notifyLifecycle(event) { calls.push(`notify:${event.name}`); },
+    },
+    uokGate: {
+      async emit(input) { calls.push(`gate:${input.gateId}:${input.outcome}`); },
     },
   };
 
@@ -96,9 +103,10 @@ test("start() advances and records active unit", async () => {
 });
 
 test("advance() returns blocked when health gate denies", async () => {
-  const { deps } = makeDeps({
+  const { deps, calls } = makeDeps({
     health: {
-      async preAdvanceGate() { return { allow: false, reason: "doctor-block" }; },
+      checkResourcesStale: () => null,
+      async preAdvanceGate() { return { kind: "fail", reason: "doctor-block" }; },
       async postAdvanceRecord() {},
     },
   });
@@ -109,6 +117,68 @@ test("advance() returns blocked when health gate denies", async () => {
   assert.equal(result.kind, "blocked");
   assert.equal(result.reason, "doctor-block");
   assert.equal(result.action, "pause");
+  assert.ok(calls.includes("gate:pre-dispatch-health-gate:manual-attention"));
+});
+
+test("advance() returns blocked stop when resources are stale", async () => {
+  const { deps, calls } = makeDeps({
+    health: {
+      checkResourcesStale: () => "resources changed since session start",
+      async preAdvanceGate() { return { kind: "pass" }; },
+      async postAdvanceRecord() {},
+    },
+  });
+  const orchestrator = createAutoOrchestrator(deps);
+
+  const result = await orchestrator.advance();
+
+  assert.equal(result.kind, "blocked");
+  assert.equal(result.reason, "resources changed since session start");
+  assert.equal(result.action, "stop");
+  assert.ok(calls.includes("gate:resource-version-guard:fail"));
+  assert.ok(!calls.includes("health.pre"));
+  assert.ok(!calls.includes("state.reconcile"));
+});
+
+test("advance() continues past pre-dispatch health gate when it throws", async () => {
+  const { deps, calls } = makeDeps({
+    health: {
+      checkResourcesStale: () => null,
+      async preAdvanceGate() { return { kind: "threw", error: new Error("boom") }; },
+      async postAdvanceRecord() {},
+    },
+  });
+  const orchestrator = createAutoOrchestrator(deps);
+
+  const result = await orchestrator.advance();
+
+  assert.equal(result.kind, "advanced");
+  assert.ok(calls.includes("gate:pre-dispatch-health-gate:manual-attention"));
+  assert.ok(calls.includes("state.reconcile"));
+  assert.ok(calls.includes("dispatch.decide"));
+});
+
+test("advance() forwards fixesApplied into pre-dispatch-health-gate pass findings", async () => {
+  let observed = "";
+  const { deps } = makeDeps({
+    health: {
+      checkResourcesStale: () => null,
+      async preAdvanceGate() { return { kind: "pass", fixesApplied: ["fix-a", "fix-b"] }; },
+      async postAdvanceRecord() {},
+    },
+    uokGate: {
+      async emit(input) {
+        if (input.gateId === "pre-dispatch-health-gate" && input.outcome === "pass") {
+          observed = input.findings ?? "";
+        }
+      },
+    },
+  });
+  const orchestrator = createAutoOrchestrator(deps);
+
+  await orchestrator.advance();
+
+  assert.equal(observed, "fix-a, fix-b");
 });
 
 test("advance() follows the ADR-015 invariant sequence before journaling advance", async () => {
@@ -121,7 +191,10 @@ test("advance() follows the ADR-015 invariant sequence before journaling advance
   assert.deepEqual(result.unit, { unitType: "execute-task", unitId: "T01" });
   assert.deepEqual(calls, [
     "runtime.lock",
+    "health.stale",
+    "gate:resource-version-guard:pass",
     "health.pre",
+    "gate:pre-dispatch-health-gate:pass",
     "state.reconcile",
     "dispatch.decide",
     "tool.compile",

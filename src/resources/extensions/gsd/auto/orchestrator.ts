@@ -43,12 +43,64 @@ export class AutoOrchestrator implements AutoOrchestrationModule {
   public async advance(): Promise<AutoAdvanceResult> {
     try {
       await this.deps.runtime.ensureLockOwnership();
-      const gate = await this.deps.health.preAdvanceGate();
-      if (!gate.allow) {
-        const blocked: AutoAdvanceResult = { kind: "blocked", reason: gate.reason ?? "health gate blocked", action: "pause" };
+
+      const staleMsg = this.deps.health.checkResourcesStale();
+      if (staleMsg) {
+        await this.deps.uokGate.emit({
+          gateId: "resource-version-guard",
+          gateType: "policy",
+          outcome: "fail",
+          failureClass: "policy",
+          rationale: "resource version guard blocked dispatch",
+          findings: staleMsg,
+        });
+        const blocked: AutoAdvanceResult = { kind: "blocked", reason: staleMsg, action: "stop" };
         await this.deps.runtime.journalTransition({ name: "advance-blocked", reason: blocked.reason });
         await this.deps.health.postAdvanceRecord(blocked);
         return blocked;
+      }
+      await this.deps.uokGate.emit({
+        gateId: "resource-version-guard",
+        gateType: "policy",
+        outcome: "pass",
+        failureClass: "none",
+        rationale: "resource version guard passed",
+      });
+
+      const gate = await this.deps.health.preAdvanceGate();
+      if (gate.kind === "fail") {
+        await this.deps.uokGate.emit({
+          gateId: "pre-dispatch-health-gate",
+          gateType: "execution",
+          outcome: "manual-attention",
+          failureClass: "manual-attention",
+          rationale: "pre-dispatch health gate blocked dispatch",
+          findings: gate.reason,
+        });
+        const blocked: AutoAdvanceResult = { kind: "blocked", reason: gate.reason, action: "pause" };
+        await this.deps.runtime.journalTransition({ name: "advance-blocked", reason: blocked.reason });
+        await this.deps.health.postAdvanceRecord(blocked);
+        return blocked;
+      }
+      if (gate.kind === "threw") {
+        await this.deps.uokGate.emit({
+          gateId: "pre-dispatch-health-gate",
+          gateType: "execution",
+          outcome: "manual-attention",
+          failureClass: "manual-attention",
+          rationale: "pre-dispatch health gate threw unexpectedly",
+          findings: String(gate.error),
+        });
+        // intentional fall-through: matches runPreDispatch behaviour
+      } else {
+        await this.deps.uokGate.emit({
+          gateId: "pre-dispatch-health-gate",
+          gateType: "execution",
+          outcome: "pass",
+          failureClass: "none",
+          rationale: "pre-dispatch health gate passed",
+          findings: gate.fixesApplied?.join(", ") ?? "",
+        });
       }
 
       const reconciliation = await this.deps.stateReconciliation.reconcileBeforeDispatch();

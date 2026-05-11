@@ -73,9 +73,29 @@ export interface WorktreeAdapter {
   cleanupOnStop(reason: string): Promise<void>;
 }
 
+export type HealthGateResult =
+  | { kind: "pass"; fixesApplied?: readonly string[] }
+  | { kind: "fail"; reason: string }
+  | { kind: "threw"; error: unknown };
+
 export interface HealthAdapter {
-  preAdvanceGate(): Promise<{ allow: boolean; reason?: string }>;
+  checkResourcesStale(): string | null;
+  preAdvanceGate(): Promise<HealthGateResult>;
   postAdvanceRecord(result: AutoAdvanceResult): Promise<void>;
+}
+
+export interface UokGateInput {
+  gateId: string;
+  gateType: "policy" | "execution";
+  outcome: "pass" | "fail" | "manual-attention";
+  failureClass: "none" | "policy" | "manual-attention";
+  rationale: string;
+  findings?: string;
+  milestoneId?: string;
+}
+
+export interface UokGateAdapter {
+  emit(input: UokGateInput): Promise<void>;
 }
 
 export interface RuntimePersistenceAdapter {
@@ -104,4 +124,5 @@ export interface AutoOrchestratorDeps {
   health: HealthAdapter;
   runtime: RuntimePersistenceAdapter;
   notifications: NotificationAdapter;
+  uokGate: UokGateAdapter;
 }
