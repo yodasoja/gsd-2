@@ -131,9 +131,14 @@ export async function buildBeforeAgentStartResult(
     logWarning("bootstrap", `cmux prompt setup skipped: ${(e as Error).message}`);
   }
 
+  const ctxProjectRoot = (ctx as { projectRoot?: unknown }).projectRoot;
+  const basePath = typeof ctxProjectRoot === "string" && ctxProjectRoot.length > 0
+    ? ctxProjectRoot
+    : process.cwd();
+
   let preferenceBlock = "";
   if (loadedPreferences) {
-    const cwd = process.cwd();
+    const cwd = basePath;
     const report = resolveAllSkillReferences(loadedPreferences.preferences, cwd);
     preferenceBlock = `\n\n${renderPreferencesForSystemPrompt(loadedPreferences.preferences, report.resolutions)}`;
     if (report.warnings.length > 0) {
@@ -142,14 +147,6 @@ export async function buildBeforeAgentStartResult(
         "warning",
       );
     }
-  }
-
-  const { block: knowledgeBlock, globalSizeKb } = loadKnowledgeBlock(gsdHome(), process.cwd());
-  if (globalSizeKb > 4) {
-    ctx.ui.notify(
-      `GSD: ~/.gsd/agent/KNOWLEDGE.md is ${globalSizeKb.toFixed(1)}KB — consider trimming to keep system prompt lean.`,
-      "warning",
-    );
   }
 
   // ADR-013 step 5: opportunistic decisions->memories backfill. Idempotent
@@ -183,6 +180,24 @@ export async function buildBeforeAgentStartResult(
     renderKnowledgeProjection(basePath);
   } catch (e) {
     logWarning("bootstrap", `KNOWLEDGE.md projection render failed: ${(e as Error).message}`);
+  }
+
+  // ADR-013 step 6 preflight: warn when decisions / KNOWLEDGE.md rows are not
+  // yet in the memories table. Read-only; never throws. Runs after the two
+  // backfills above so the gap report reflects post-backfill state.
+  try {
+    const { reportConsolidationGaps } = await import("../memory-consolidation-scanner.js");
+    reportConsolidationGaps(basePath);
+  } catch (e) {
+    logWarning("bootstrap", `memory consolidation scan failed: ${(e as Error).message}`);
+  }
+
+  const { block: knowledgeBlock, globalSizeKb } = loadKnowledgeBlock(gsdHome(), basePath);
+  if (globalSizeKb > 4) {
+    ctx.ui.notify(
+      `GSD: ~/.gsd/agent/KNOWLEDGE.md is ${globalSizeKb.toFixed(1)}KB — consider trimming to keep system prompt lean.`,
+      "warning",
+    );
   }
 
   let newSkillsBlock = "";
@@ -389,6 +404,27 @@ export async function loadMemoryBlock(
   }
 }
 
+/**
+ * Extracts intro prose plus the `## Rules` section from project KNOWLEDGE.md,
+ * dropping projected patterns and lessons that are injected through memory.
+ */
+function extractRulesSection(content: string): string {
+  const rulesHeading = "## Rules";
+  const rulesIdx = content.indexOf(rulesHeading);
+  if (rulesIdx === -1) {
+    const firstSection = content.search(/^## /m);
+    return firstSection === -1 ? content : content.slice(0, firstSection).trim();
+  }
+
+  const intro = content.slice(0, rulesIdx).trim();
+  const afterRules = content.slice(rulesIdx);
+  const nextSection = afterRules.match(/\n## /);
+  const rulesSection =
+    nextSection && nextSection.index !== undefined ? afterRules.slice(0, nextSection.index).trim() : afterRules.trim();
+
+  return intro ? `${intro}\n\n${rulesSection}` : rulesSection;
+}
+
 export function loadKnowledgeBlock(gsdHomeDir: string, cwd: string): { block: string; globalSizeKb: number } {
   // 1. Global knowledge (~/.gsd/agent/KNOWLEDGE.md) — cross-project, user-maintained
   let globalKnowledge = "";
@@ -412,7 +448,7 @@ export function loadKnowledgeBlock(gsdHomeDir: string, cwd: string): { block: st
   if (existsSync(knowledgePath)) {
     try {
       const content = readFileSync(knowledgePath, "utf-8").trim();
-      if (content) projectKnowledge = content;
+      if (content) projectKnowledge = extractRulesSection(content);
     } catch (e) {
       logWarning("bootstrap", `project knowledge file read failed: ${(e as Error).message}`);
     }
@@ -431,7 +467,7 @@ export function loadKnowledgeBlock(gsdHomeDir: string, cwd: string): { block: st
   }
   const body = limitKnowledgeBlock(parts.join("\n\n"), getKnowledgeCharLimit());
   return {
-    block: `\n\n[KNOWLEDGE — Rules, patterns, and lessons learned]\n\n${body}`,
+    block: `\n\n[KNOWLEDGE — Manual Rules]\n\n${body}`,
     globalSizeKb,
   };
 }

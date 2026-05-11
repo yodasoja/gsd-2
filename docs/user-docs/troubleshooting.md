@@ -161,6 +161,14 @@ If recovery still fails, repair runtime state instead of manually deleting indiv
 
 **Fix:** Run `/gsd doctor fix` to remove the orphan milestone stub directory automatically. The auto-fix only targets disk-only stubs with no DB row, no worktree, and no content files; populated milestone directories and in-flight worktree-only milestones are not removed.
 
+### Startup warns that memory consolidation is incomplete
+
+**Symptoms:** On startup, GSD shows a warning like `Memory consolidation: ... not yet in memories table. Run /doctor for details.`
+
+**What it means:** The ADR-013 memory-store consolidation preflight scanner found legacy knowledge that is not yet represented in the canonical `memories` table. It checks active `decisions` rows for matching `structured_fields.sourceDecisionId` markers and `.gsd/KNOWLEDGE.md` table rows for matching `sourceKnowledgeId` markers. The scanner is read-only and is intended to block destructive cutover until migration coverage is visible.
+
+**Fix:** Run `/gsd doctor` to inspect the counts and sample rows. Before cutover, complete the decisions or KNOWLEDGE.md backfill so the affected rows exist in `memories`; do not delete legacy `DECISIONS.md`, `KNOWLEDGE.md`, or database rows just to silence the warning.
+
 ### Transient `EBUSY` / `EPERM` / `EACCES` while writing `.gsd/` files
 
 **Symptoms:** On Windows, auto mode or doctor occasionally fails while updating `.gsd/` files with errors like `EBUSY`, `EPERM`, or `EACCES`.

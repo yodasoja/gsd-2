@@ -187,6 +187,64 @@ test("backfill auto-heals when a source decision's superseded_by changes after m
   }
 });
 
+test("backfill drift auto-heal updates only the selected memory row", () => {
+  const base = makeTmpBase();
+  try {
+    seedRawDecision({
+      id: "D001",
+      when_context: "M001",
+      scope: "M001",
+      decision: "Original",
+      choice: "A",
+      rationale: "r",
+    });
+    backfillDecisionsToMemories();
+
+    const adapter = _getAdapter();
+    if (!adapter) throw new Error("DB adapter unavailable");
+    const now = new Date().toISOString();
+    adapter
+      .prepare(
+        `INSERT INTO memories (
+          id, category, content, confidence, created_at, updated_at, scope, tags, structured_fields
+        ) VALUES (
+          :id, 'architecture', 'duplicate marker', 0.8, :created_at, :updated_at, 'project', '[]', :structured_fields
+        )`,
+      )
+      .run({
+        ":id": "manual-duplicate-D001",
+        ":created_at": now,
+        ":updated_at": now,
+        ":structured_fields": JSON.stringify({
+          sourceDecisionId: "D001",
+          superseded_by: null,
+          note: "manual duplicate should not be healed as a side effect",
+        }),
+      });
+
+    setDecisionSupersededBy("D001", "D002");
+    backfillDecisionsToMemories();
+
+    const rows = adapter
+      .prepare("SELECT id, structured_fields FROM memories WHERE structured_fields LIKE :pattern ORDER BY seq")
+      .all({ ":pattern": '%"sourceDecisionId":"D001"%' }) as Array<{
+        id: string;
+        structured_fields: string;
+      }>;
+    assert.equal(rows.length, 2);
+    const healed = rows.find((row) => row.id !== "manual-duplicate-D001");
+    const duplicate = rows.find((row) => row.id === "manual-duplicate-D001");
+    assert.equal(JSON.parse(healed?.structured_fields ?? "{}").superseded_by, "D002");
+    assert.equal(
+      JSON.parse(duplicate?.structured_fields ?? "{}").superseded_by,
+      null,
+      "drift auto-heal must not update every memory matching the sourceDecisionId pattern",
+    );
+  } finally {
+    cleanup(base);
+  }
+});
+
 // ─── queryDecisionsFromMemories: active-only via structuredFields ──────────
 
 test("queryDecisionsFromMemories filters out rows whose structuredFields.superseded_by is set", () => {
@@ -351,8 +409,6 @@ test("saveDecisionToDb writes a DECISIONS.md projection sourced from memories th
         decision: "Schema versioning",
         choice: "header column",
         rationale: "simplest to read",
-        revisable: "Yes",
-        made_by: "agent",
       },
       base,
     );
@@ -366,6 +422,31 @@ test("saveDecisionToDb writes a DECISIONS.md projection sourced from memories th
     assert.match(md, /Adopt SQLite/);
     assert.match(md, /Schema versioning/);
     assert.match(md, /# Decisions Register/);
+    assert.match(md, /\| D002 \|[^\n]*\| Yes \| agent \|/);
+  } finally {
+    cleanup(base);
+  }
+});
+
+test("saveDecisionToDb injects a projection fallback when memory mirror is absent", async () => {
+  const base = makeTmpBase();
+  try {
+    const result = await saveDecisionToDb(
+      {
+        when_context: "M001 fallback",
+        scope: "M001",
+        decision: "",
+        choice: "",
+        rationale: "",
+      },
+      base,
+    );
+
+    assert.equal(result.id, "D001");
+    assert.equal(getAllDecisionsFromMemories().some((d) => d.id === "D001"), false);
+
+    const md = readFileSync(join(base, ".gsd", "DECISIONS.md"), "utf-8");
+    assert.match(md, /\| D001 \| M001 fallback \| M001 \|  \|  \|  \| Yes \| agent \|/);
   } finally {
     cleanup(base);
   }

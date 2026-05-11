@@ -423,6 +423,10 @@ export function registerHooks(
   pi: ExtensionAPI,
   ecosystemHandlers: GSDEcosystemBeforeAgentStartHandler[],
 ): void {
+  // ADR-005 Phase 3b: surface pi-ai ProviderSwitchReport via audit, notification, and counter.
+  // Idempotent — only the first registerHooks call installs.
+  void import("../provider-switch-observer.js").then((m) => m.installProviderSwitchObserver());
+
   pi.on("session_start", async (_event, ctx) => {
     const basePath = contextBasePath(ctx);
     initSessionNotifications(ctx);
