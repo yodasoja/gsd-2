@@ -55,6 +55,7 @@ Step 6 may land only when **all** of the following are observable on `feat/memor
 
 - Step 4 auto-injection produces a memory block measurably similar in coverage to the current KNOWLEDGE.md inline injection on at least three real GSD projects (manual spot check).
 - Step 5 backfill is idempotent (rerunnable with no diff) on at least one real `.gsd/gsd.db` that contains historical decisions.
+- The ADR-013 Phase 6 preflight scanner reports zero consolidation gaps at startup and through `/gsd doctor`: active `decisions` rows must have matching `memories.structured_fields.sourceDecisionId` markers, and migrated `KNOWLEDGE.md` rows must have matching `sourceKnowledgeId` markers.
 - MCP `capture_thought` and `memory_query` calls succeed end-to-end from a non-CLI client (studio or vscode integration test).
 - No regression test in `src/resources/extensions/gsd/tests/` is silenced or removed without an explicit rationale comment in the diff.
 - A two-week dual-write bake period elapses with no in-flight project reporting lost decisions or knowledge entries.
@@ -82,6 +83,7 @@ If step 6 must be rolled back after the `decisions` table is dropped, a forward 
 ### Caveats
 
 - KNOWLEDGE.md and DECISIONS.md become projections. Manual edits are already overwritten today (DECISIONS.md is DB-projected) — the change extends that contract to KNOWLEDGE.md, which currently accepts manual appends. Anyone hand-editing KNOWLEDGE.md after step 6 will see their changes discarded on the next render. The migration commits include a one-time scan that warns if any KNOWLEDGE.md row in the working tree has no corresponding `memories` row at cutover time.
+- Before cutover, GSD runs a read-only consolidation scanner on startup. A warning such as `Memory consolidation: ... not yet in memories table` means the project still has legacy knowledge rows that have not been proven migrated; run `/gsd doctor` for counts and samples, then complete the decisions or KNOWLEDGE.md backfill before attempting cutover.
 - `category` enum is fixed at six values (`architecture | convention | gotcha | pattern | preference | environment`). Adding a seventh requires a schema change. The current set is adequate for the migration; future categories are out of scope for this ADR.
 - The `structuredFields` blob is intentionally schemaless inside the JSON. Schema for `architecture`-category memories is documented in step 2's commit; future categories may grow their own structured shapes.
 
