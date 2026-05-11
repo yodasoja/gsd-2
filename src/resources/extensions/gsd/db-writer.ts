@@ -416,6 +416,16 @@ export interface SaveDecisionFields {
   source?: string;
 }
 
+type NormalizedSaveDecisionFields = Omit<
+  SaveDecisionFields,
+  'when_context' | 'revisable' | 'made_by' | 'source'
+> & {
+  when_context: string;
+  revisable: string;
+  made_by: NonNullable<SaveDecisionFields['made_by']>;
+  source: string;
+};
+
 /**
  * Save a new decision to DB and regenerate DECISIONS.md.
  * Auto-assigns the next ID via nextDecisionId().
@@ -447,19 +457,26 @@ export async function saveDecisionToDb(
     const db = await import('./gsd-db.js');
 
     const adapter = db._getAdapter();
+    const normalized: NormalizedSaveDecisionFields = {
+      ...fields,
+      when_context: fields.when_context ?? '',
+      revisable: fields.revisable ?? 'Yes',
+      made_by: fields.made_by ?? 'agent',
+      source: fields.source ?? 'discussion',
+    };
 
     const id = db.transaction(() => {
       const nextId = nextDecisionIdSync(adapter);
       db.upsertDecision({
         id: nextId,
-        when_context: fields.when_context ?? '',
-        scope: fields.scope,
-        decision: fields.decision,
-        choice: fields.choice,
-        rationale: fields.rationale,
-        revisable: fields.revisable ?? 'Yes',
-        made_by: fields.made_by ?? 'agent',
-        source: fields.source ?? 'discussion',
+        when_context: normalized.when_context,
+        scope: normalized.scope,
+        decision: normalized.decision,
+        choice: normalized.choice,
+        rationale: normalized.rationale,
+        revisable: normalized.revisable,
+        made_by: normalized.made_by,
+        source: normalized.source,
         superseded_by: null,
       });
 
@@ -467,23 +484,19 @@ export async function saveDecisionToDb(
       return nextId;
     });
 
-    // Fetch all decisions (including superseded for the full register)
-    let allDecisions: Decision[] = [];
-    if (adapter) {
-      const rows = adapter.prepare('SELECT * FROM decisions ORDER BY seq').all();
-      allDecisions = rows.map(row => ({
-        seq: row['seq'] as number,
-        id: row['id'] as string,
-        when_context: row['when_context'] as string,
-        scope: row['scope'] as string,
-        decision: row['decision'] as string,
-        choice: row['choice'] as string,
-        rationale: row['rationale'] as string,
-        revisable: row['revisable'] as string,
-        made_by: (row['made_by'] as string as import('./types.js').DecisionMadeBy) ?? 'agent',
-        superseded_by: (row['superseded_by'] as string) ?? null,
-      }));
-    }
+    // ADR-013 Stage 2a (PR #5767 → #5755): the dual-write to memories MUST
+    // happen before the projection regen below, because the regen now sources
+    // from memories. If the dual-write ran after, the just-saved decision
+    // would be missing from its own projection.
+    await mirrorDecisionToMemory(id, normalized);
+
+    // Fetch all decisions (including superseded for the full register).
+    // ADR-013 Stage 2a: source from the `memories` table. The Phase 5
+    // dual-write keeps memories in sync with each decision save; the backfill
+    // (memory-backfill.ts) absorbs the historical chain and drift-heals
+    // superseded_by on every session start.
+    const { getAllDecisionsFromMemories } = await import('./context-store.js');
+    let allDecisions: Decision[] = getAllDecisionsFromMemories();
 
     const filePath = resolveGsdRootFile(basePath, 'DECISIONS');
 
@@ -538,54 +551,61 @@ export async function saveDecisionToDb(
     clearPathCache();
     clearParseCache();
 
-    // ADR-013 dual-write: keep the memory store in sync with every decision
-    // persisted via the legacy gsd_save_decision path. Without this, prompts
-    // that still call gsd_save_decision (discuss.md, plan-milestone.md,
-    // plan-slice.md, et al.) would create decisions rows invisible to
-    // memory_query and loadMemoryBlock.
-    // Best-effort — never throw, never roll back the decision on failure.
-    try {
-      const { createMemory } = await import('./memory-store.js');
-      const decisionText = (fields.decision ?? '').trim();
-      const choiceText = (fields.choice ?? '').trim();
-      const rationaleText = (fields.rationale ?? '').trim();
-      const contentParts: string[] = [];
-      if (decisionText) contentParts.push(decisionText);
-      if (choiceText) contentParts.push(`Chose: ${choiceText}.`);
-      if (rationaleText) contentParts.push(`Rationale: ${rationaleText}.`);
-      const content = contentParts.join(' ').slice(0, 600);
-      if (content) {
-        createMemory({
-          category: 'architecture',
-          content,
-          scope: fields.scope || 'project',
-          confidence: 0.85,
-          structuredFields: {
-            sourceDecisionId: id,
-            when_context: fields.when_context ?? '',
-            scope: fields.scope,
-            decision: fields.decision,
-            choice: fields.choice,
-            rationale: fields.rationale,
-            made_by: fields.made_by ?? 'agent',
-            revisable: fields.revisable ?? '',
-          },
-        });
-      }
-    } catch (mirrorErr) {
-      logError('manifest', 'memory-store mirror write failed (non-fatal)', {
-        fn: 'saveDecisionToDb',
-        decisionId: id,
-        error: String((mirrorErr as Error).message),
-      });
-    }
-
     return { id };
   } catch (err) {
     logError('manifest', 'saveDecisionToDb failed', { fn: 'saveDecisionToDb', error: String((err as Error).message) });
     throw err;
   } finally {
     release!();
+  }
+}
+
+/**
+ * ADR-013 dual-write — mirror a freshly-saved decision into the `memories`
+ * table so the memory store remains the single source of truth for the
+ * DECISIONS.md projection (Stage 2a) and for prompt-inline reads (Stage 1).
+ *
+ * Best-effort: never throws, never rolls back the decision on failure.
+ * Caller invokes this AFTER the decisions-table write completes and
+ * BEFORE the projection regen — the regen sources from memories and would
+ * otherwise miss the just-saved decision.
+ */
+async function mirrorDecisionToMemory(
+  id: string,
+  fields: NormalizedSaveDecisionFields,
+): Promise<void> {
+  try {
+    const { createMemory } = await import('./memory-store.js');
+    const { synthesizeDecisionMemoryContent } = await import('./memory-backfill.js');
+    const content = synthesizeDecisionMemoryContent(fields);
+    if (!content) return;
+
+    createMemory({
+      category: 'architecture',
+      content,
+      scope: fields.scope || 'project',
+      confidence: 0.85,
+      structuredFields: {
+        sourceDecisionId: id,
+        when_context: fields.when_context,
+        scope: fields.scope,
+        decision: fields.decision,
+        choice: fields.choice,
+        rationale: fields.rationale,
+        made_by: fields.made_by,
+        revisable: fields.revisable,
+        // New decisions are always written as active; md-importer can later
+        // set superseded_by on the source decision row, and the backfill's
+        // drift auto-heal pass propagates that update to this memory.
+        superseded_by: null,
+      },
+    });
+  } catch (mirrorErr) {
+    logError('manifest', 'memory-store mirror write failed (non-fatal)', {
+      fn: 'saveDecisionToDb',
+      decisionId: id,
+      error: String((mirrorErr as Error).message),
+    });
   }
 }
 
