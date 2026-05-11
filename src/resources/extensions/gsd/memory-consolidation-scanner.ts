@@ -245,6 +245,10 @@ export function scanConsolidationGaps(basePath: string): ConsolidationGapReport 
  * warning when gaps exist. Best-effort: never throws; a broken scanner
  * cannot block agent startup.
  *
+ * Returns the ConsolidationGapReport from scanConsolidationGaps whether
+ * gaps exist or not; returns null only on scan failure. Notifications and
+ * warnings are emitted only when report.totalGaps > 0.
+ *
  * Idempotent at the surface: the notification store applies its own
  * 30-second dedup window keyed on (severity, source, message), so repeated
  * boots with identical gaps produce one notification, not a flood.

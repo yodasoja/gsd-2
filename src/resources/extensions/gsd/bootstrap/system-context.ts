@@ -171,7 +171,7 @@ export async function buildBeforeAgentStartResult(
   // any destructive step lands.
   try {
     const { reportConsolidationGaps } = await import("../memory-consolidation-scanner.js");
-    reportConsolidationGaps(basePath);
+    reportConsolidationGaps(process.cwd());
   } catch (e) {
     logWarning("bootstrap", `memory consolidation scan failed: ${(e as Error).message}`);
   }
