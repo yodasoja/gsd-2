@@ -17,6 +17,7 @@ import { migrateFromMarkdown, parseDecisionsTable } from '../../md-importer.ts';
 import {
   queryDecisions,
   queryRequirements,
+  getAllDecisionsFromMemories,
   formatDecisionsForPrompt,
   formatRequirementsForPrompt,
 } from '../../context-store.ts';
@@ -233,8 +234,8 @@ test('integration-lifecycle: full pipeline', async () => {
       assert.ok(typeof saved.id === 'string', 'lifecycle: saveDecisionToDb returned an id');
       assert.match(saved.id, /^D\d+$/, 'lifecycle: saved ID matches D### pattern');
 
-      // Query back from DB
-      const allAfterSave = queryDecisions();
+      // Query back from DB (memories — Stage 3 of ADR-013 stopped legacy decisions-table writes)
+      const allAfterSave = getAllDecisionsFromMemories();
       const savedDecision = allAfterSave.find(d => d.id === saved.id);
       assert.ok(savedDecision !== null && savedDecision !== undefined, `lifecycle: saved decision ${saved.id} found in DB`);
       assert.deepStrictEqual(savedDecision?.decision, 'integration test write-back decision', 'lifecycle: saved decision text matches');
