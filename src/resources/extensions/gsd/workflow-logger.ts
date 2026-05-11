@@ -65,6 +65,7 @@ export type LogComponent =
   | "memory-embeddings" // Memory layer embedding generation
   | "memory-ingest"     // Memory layer ingestion pipeline
   | "memory-backfill"   // ADR-013: decisions->memories backfill
+  | "memory-consolidation" // ADR-013: legacy memory surface gap scanner
   | "knowledge-backfill" // ADR-013: KNOWLEDGE.md->memories backfill
   | "knowledge-projection" // ADR-013: KNOWLEDGE.md projection renderer
   | "memory-store"      // Memory CRUD layer — surfaces SQLite/store-level faults (#4967)

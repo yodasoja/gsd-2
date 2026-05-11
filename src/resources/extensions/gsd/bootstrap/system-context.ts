@@ -179,6 +179,16 @@ export async function buildBeforeAgentStartResult(
     logWarning("bootstrap", `KNOWLEDGE.md projection render failed: ${(e as Error).message}`);
   }
 
+  // ADR-013 step 6 preflight: warn when decisions / KNOWLEDGE.md rows are not
+  // yet in the memories table. Read-only; never throws. Runs after the two
+  // backfills above so the gap report reflects post-backfill state.
+  try {
+    const { reportConsolidationGaps } = await import("../memory-consolidation-scanner.js");
+    reportConsolidationGaps(basePath);
+  } catch (e) {
+    logWarning("bootstrap", `memory consolidation scan failed: ${(e as Error).message}`);
+  }
+
   const { block: knowledgeBlock, globalSizeKb } = loadKnowledgeBlock(gsdHome(), basePath);
   if (globalSizeKb > 4) {
     ctx.ui.notify(
