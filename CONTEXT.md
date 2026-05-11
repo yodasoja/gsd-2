@@ -2,7 +2,7 @@
 
 ## Domain glossary
 
-- **Auto Orchestration**: runtime coordination of GSD auto-mode units from start to completion, including dispatch, recovery, and stop/resume behavior.
+- **Auto Orchestration**: runtime coordination of GSD auto-mode units from start to completion, including dispatch and stop/resume behavior; the auto-loop runs Units and calls Recovery Classification for Unit-execution failure recovery.
 - **Unit**: the smallest executable workflow step (e.g., plan slice, execute task, complete slice).
 - **Unit progression**: movement from one Unit to the next under orchestration rules.
 - **Dispatch decision**: selection of the next Unit plus rationale and preconditions.
