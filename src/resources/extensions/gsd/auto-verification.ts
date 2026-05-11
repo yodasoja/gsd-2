@@ -40,6 +40,7 @@ import { join } from "node:path";
 import { resolveUokFlags } from "./uok/flags.js";
 import { UokGateRunner } from "./uok/gate-runner.js";
 import { verificationRetryKey } from "./auto/verification-retry-policy.js";
+import { decideVerificationVerdict } from "./verification-verdict.js";
 
 export interface VerificationContext {
   s: AutoSession;
@@ -48,12 +49,6 @@ export interface VerificationContext {
 }
 
 export type VerificationResult = "continue" | "retry" | "pause";
-
-function isInfraVerificationFailure(stderr: string): boolean {
-  return /\b(ENOENT|ENOTFOUND|ETIMEDOUT|ECONNRESET|EAI_AGAIN|spawn\s+\S+\s+ENOENT|command not found)\b/i.test(
-    stderr,
-  );
-}
 
 /**
  * Post-unit guard for `validate-milestone` units (#4094).
@@ -196,7 +191,7 @@ async function countIncompleteSlices(basePath: string, milestoneId: string): Pro
 /**
  * Run the verification gate for the current execute-task unit.
  * Returns:
- * - "continue" — gate passed (or no checks configured), proceed normally
+ * - "continue" — host-owned verification passed, proceed normally
  * - "retry" — gate failed with retries remaining, s.pendingVerificationRetry set for loop re-iteration
  * - "pause" — gate failed with retries exhausted, pauseAuto already called
  */
@@ -260,6 +255,11 @@ export async function runPostUnitVerification(
       }
     }
 
+    const verdict = decideVerificationVerdict(s.currentUnit.type, result);
+    if (!verdict.passed) {
+      result.passed = false;
+    }
+
     if (uokFlags.gates) {
       const gateRunner = new UokGateRunner();
       gateRunner.register({
@@ -272,10 +272,12 @@ export async function runPostUnitVerification(
             : "verification",
           rationale: result.passed
             ? "verification checks passed"
-            : "verification checks failed",
+            : verdict.reason === "no-host-checks"
+              ? "no runnable host-owned verification checks discovered"
+              : "verification checks failed",
           findings: result.passed
             ? ""
-            : formatFailureContext(result),
+            : verdict.failureContext || formatFailureContext(result),
         }),
       });
 
@@ -356,26 +358,6 @@ export async function runPostUnitVerification(
       } catch (evidenceErr) {
         logWarning("engine", `verification-evidence write error: ${(evidenceErr as Error).message}`);
       }
-    }
-
-    const advisoryFailure =
-      !result.passed &&
-      (result.discoverySource === "package-json" ||
-        result.checks.some((check) =>
-          isInfraVerificationFailure(check.stderr),
-        ));
-
-    if (advisoryFailure) {
-      s.verificationRetryCount.delete(retryKey);
-      s.verificationRetryFailureHashes.delete(retryKey);
-      s.pendingVerificationRetry = null;
-      ctx.ui.notify(
-        result.discoverySource === "package-json"
-          ? "Verification failed in auto-discovered package.json checks — treating as advisory."
-          : "Verification failed due to infrastructure/runtime environment issues — treating as advisory.",
-        "warning",
-      );
-      return "continue";
     }
 
     // ── Post-execution checks (run after main verification passes for execute-task units) ──
@@ -572,6 +554,17 @@ export async function runPostUnitVerification(
       s.verificationRetryFailureHashes.delete(retryKey);
       s.pendingVerificationRetry = null;
       return "continue";
+    } else if (verdict.reason === "no-host-checks") {
+      s.verificationRetryCount.delete(retryKey);
+      s.verificationRetryFailureHashes.delete(retryKey);
+      s.pendingVerificationRetry = null;
+      ctx.ui.notify(
+        "Verification gate FAILED — no runnable host-owned verification checks were discovered. Pausing for human review.",
+        "error",
+      );
+      process.stderr.write(`verification-gate: ${verdict.failureContext}\n`);
+      await pauseAuto(ctx, pi);
+      return "pause";
     } else if (postExecBlockingFailure) {
       // Post-execution failures are cross-task consistency issues — retrying the same task won't fix them.
       // Skip retry and pause immediately for human review.
@@ -589,7 +582,7 @@ export async function runPostUnitVerification(
       s.verificationRetryCount.set(retryKey, nextAttempt);
       s.pendingVerificationRetry = {
         unitId: s.currentUnit.id,
-        failureContext: formatFailureContext(result),
+        failureContext: verdict.failureContext || formatFailureContext(result),
         attempt: nextAttempt,
       };
       const failedCmds = result.checks
@@ -623,9 +616,13 @@ export async function runPostUnitVerification(
       return "pause";
     }
   } catch (err) {
-    // Gate errors are non-fatal
     logWarning("engine", `verification-gate error: ${(err as Error).message}`);
-    return "continue";
+    ctx.ui.notify(
+      `Verification gate errored before producing an authoritative verdict: ${(err as Error).message}`,
+      "error",
+    );
+    await pauseAuto(ctx, pi);
+    return "pause";
   }
 }
 
