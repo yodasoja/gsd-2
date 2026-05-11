@@ -404,6 +404,27 @@ export async function loadMemoryBlock(
   }
 }
 
+/**
+ * Extracts intro prose plus the `## Rules` section from project KNOWLEDGE.md,
+ * dropping projected patterns and lessons that are injected through memory.
+ */
+function extractRulesSection(content: string): string {
+  const rulesHeading = "## Rules";
+  const rulesIdx = content.indexOf(rulesHeading);
+  if (rulesIdx === -1) {
+    const firstSection = content.search(/^## /m);
+    return firstSection === -1 ? content : content.slice(0, firstSection).trim();
+  }
+
+  const intro = content.slice(0, rulesIdx).trim();
+  const afterRules = content.slice(rulesIdx);
+  const nextSection = afterRules.match(/\n## /);
+  const rulesSection =
+    nextSection && nextSection.index !== undefined ? afterRules.slice(0, nextSection.index).trim() : afterRules.trim();
+
+  return intro ? `${intro}\n\n${rulesSection}` : rulesSection;
+}
+
 export function loadKnowledgeBlock(gsdHomeDir: string, cwd: string): { block: string; globalSizeKb: number } {
   // 1. Global knowledge (~/.gsd/agent/KNOWLEDGE.md) — cross-project, user-maintained
   let globalKnowledge = "";
@@ -427,7 +448,7 @@ export function loadKnowledgeBlock(gsdHomeDir: string, cwd: string): { block: st
   if (existsSync(knowledgePath)) {
     try {
       const content = readFileSync(knowledgePath, "utf-8").trim();
-      if (content) projectKnowledge = content;
+      if (content) projectKnowledge = extractRulesSection(content);
     } catch (e) {
       logWarning("bootstrap", `project knowledge file read failed: ${(e as Error).message}`);
     }
@@ -446,7 +467,7 @@ export function loadKnowledgeBlock(gsdHomeDir: string, cwd: string): { block: st
   }
   const body = limitKnowledgeBlock(parts.join("\n\n"), getKnowledgeCharLimit());
   return {
-    block: `\n\n[KNOWLEDGE — Rules, patterns, and lessons learned]\n\n${body}`,
+    block: `\n\n[KNOWLEDGE — Manual Rules]\n\n${body}`,
     globalSizeKb,
   };
 }
