@@ -338,6 +338,8 @@ Plan (with integrated research) → Execute (per task) → Complete → Reassess
 
 **Plan** scouts the codebase, researches relevant docs, and decomposes the slice into tasks with must-haves (mechanically verifiable outcomes). **Execute** runs each task in a fresh context window with only the relevant files pre-loaded — then runs configured verification commands (lint, test, etc.) with auto-fix retries. **Complete** writes the summary, UAT script, marks the roadmap, and commits with meaningful messages derived from task summaries. **Reassess** checks if the roadmap still makes sense given what was learned. **Validate Milestone** runs a reconciliation gate after all slices complete — comparing roadmap success criteria against actual results before sealing the milestone.
 
+When progressive planning is enabled, the first slice is fully planned up front while later slices may appear in `M###-ROADMAP.md` with a `` `[sketch]` `` badge. A sketch slice has an approved title, dependency shape, demo line, and scope boundary, but it has not yet been expanded into task plans; auto mode runs `refine-slice` just before execution to turn the sketch into a full slice plan using the latest prior-slice summaries.
+
 ### `/gsd auto` — The Main Event
 
 This is what makes GSD different. Run it, walk away, come back to built software.
@@ -548,7 +550,7 @@ Every dispatch is carefully constructed. The LLM never wastes tool calls on orie
 | `runtime/research-decision.json` | Deep-mode marker for project research vs skip       |
 | `research/*.md`    | Optional deep-mode project research: stack, features, architecture, pitfalls |
 | `STATE.md`         | Quick-glance dashboard rendered from the database                |
-| `M001-ROADMAP.md`  | Milestone plan with slice checkboxes, risk levels, dependencies |
+| `M001-ROADMAP.md`  | Milestone plan with slice checkboxes, risk levels, dependencies, and `` `[sketch]` `` badges for slices awaiting `refine-slice` |
 | `M001-CONTEXT.md`  | User decisions from the discuss phase                           |
 | `M001-RESEARCH.md` | Codebase and ecosystem research                                 |
 | `S01-PLAN.md`      | Slice task decomposition with must-haves                        |
