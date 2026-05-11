@@ -2548,6 +2548,81 @@ test("resolveAgentEndCancelled with errorContext passes it through to resolved p
   assert.equal(resolved.errorContext!.isTransient, true);
 });
 
+test("runUnitPhase pauses transient aborted cancellations instead of hard-stopping", async (t) => {
+  _resetPendingResolve();
+
+  const basePath = mkdtempSync(join(tmpdir(), "gsd-aborted-cancel-"));
+  t.after(() => {
+    rmSync(basePath, { recursive: true, force: true });
+  });
+
+  const ctx = {
+    ...makeMockCtx(),
+    ui: {
+      notify: () => {},
+      setStatus: () => {},
+      setWorkingMessage: () => {},
+    },
+    sessionManager: {
+      getEntries: () => [],
+    },
+    modelRegistry: {
+      getProviderAuthMode: () => undefined,
+      isProviderRequestReady: () => true,
+    },
+  } as any;
+  const pi = {
+    ...makeMockPi(),
+    sendMessage: () => {
+      queueMicrotask(() => resolveAgentEndCancelled({
+        message: "Claude Code process aborted by user",
+        category: "aborted",
+        isTransient: true,
+      }));
+    },
+  } as any;
+  const s = makeLoopSession({
+    basePath,
+    canonicalProjectRoot: basePath,
+    originalBasePath: basePath,
+  });
+  const deps = makeMockDeps();
+  let seq = 0;
+
+  const result = await runUnitPhase(
+    { ctx, pi, s, deps, prefs: undefined, iteration: 1, flowId: "flow-aborted", nextSeq: () => ++seq },
+    {
+      unitType: "execute-task",
+      unitId: "M001/S01/T01",
+      prompt: "do work",
+      finalPrompt: "do work",
+      pauseAfterUatDispatch: false,
+      state: {
+        phase: "executing",
+        activeMilestone: { id: "M001", title: "Milestone" },
+        activeSlice: { id: "S01", title: "Slice" },
+        activeTask: { id: "T01", title: "Task" },
+        registry: [{ id: "M001", title: "Milestone", status: "active" }],
+        recentDecisions: [],
+        blockers: [],
+        nextAction: "",
+        progress: { milestones: { done: 0, total: 1 } },
+        requirements: { active: 0, validated: 0, deferred: 0, outOfScope: 0, blocked: 0, total: 0 },
+      } as any,
+      mid: "M001",
+      midTitle: "Milestone",
+      isRetry: false,
+      previousTier: undefined,
+    },
+    { recentUnits: [{ key: "execute-task/M001/S01/T01" }], stuckRecoveryAttempts: 0, consecutiveFinalizeTimeouts: 0 },
+  );
+
+  assert.equal(result.action, "break");
+  assert.equal((result as any).reason, "unit-aborted-pause");
+  assert.equal(deps.callLog.includes("pauseAuto"), true);
+  assert.equal(deps.callLog.includes("stopAuto"), false);
+});
+
 test("runUnitPhase pauses ghost completions before closeout and finalize side effects", async (t) => {
   _resetPendingResolve();
 

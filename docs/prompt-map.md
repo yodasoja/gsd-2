@@ -79,7 +79,8 @@ Static section
     └── DECISIONS.md
 
 Semi-static section
-    ├── KNOWLEDGE.md  (manual rules; patterns/gotchas via memory block)
+    ├── KNOWLEDGE.md  (manual rules only — patterns/lessons stripped; ADR-013 Stage 2c)
+    ├── memories      (prompt-relevant patterns, gotchas, decisions — canonical for patterns/lessons)
     ├── PREFERENCES.md
     └── Prior slice/milestone RESEARCH.md
 
@@ -91,6 +92,12 @@ Dynamic section
     ├── Carry-forward captures
     └── Gate list to close
 ```
+
+Before this map is assembled, `buildBeforeAgentStartResult()` runs the
+session-start KNOWLEDGE backfill/projection path and then calls
+`loadKnowledgeBlock()`. That helper inlines only manual Rules from the project
+`.gsd/KNOWLEDGE.md` file; projected patterns and lessons are supplied through
+the memories layer.
 
 Budget enforcement: `context-budget.ts` computes `preambleBudgetChars`, `summaryBudgetChars`, `verificationBudgetChars` from the model's context window. Sections are truncated at markdown section boundaries, not mid-sentence.
 
@@ -419,9 +426,9 @@ LLM sees: "load these skill files and follow their rules for this unit"
 | `gsd_requirement_save` | requirements table |
 | `gsd_requirement_update` | requirements table |
 | `gsd_summary_save` | artifact files + DB reference |
-| `gsd_decision_save` | DECISIONS.md + DB |
-| `capture_thought` | memories (patterns, gotchas, arch); relevant rows project into KNOWLEDGE.md |
-| `memory_query` | READ — queries memories |
+| `gsd_decision_save` | memories table (`architecture` rows) + DECISIONS.md projection |
+| `capture_thought` | memories table; KNOWLEDGE.md projection for Patterns/Lessons |
+| `memory_query` | READ — queries memories / memory indexes |
 | `ask_user_questions` | blocks until user responds; no DB write |
 | `subagent` | spins up child Pi session with given prompt |
 

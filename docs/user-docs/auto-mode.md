@@ -22,13 +22,17 @@ Plan (with integrated research) → Execute (per task) → Complete → Reassess
 - **Reassess** — checks if the roadmap still makes sense
 - **Validate Milestone** — reconciliation gate after all slices complete; compares roadmap success criteria against actual results, catches gaps before sealing the milestone
 
+When progressive planning is enabled, GSD fully plans the first slice and may leave later slices as sketches. Those slices render in `M###-ROADMAP.md` with a `` `[sketch]` `` badge, meaning the slice has an approved scope boundary but has not yet been expanded into task plans. Auto mode runs `refine-slice` just before execution to convert the sketch into a full slice plan using the current codebase and prior slice summaries.
+
 ### Idempotent Milestone Completion
 
 Milestone completion is safe to retry. If a `complete-milestone` unit is redispatched after the database already marks the milestone as closed, GSD treats the call as successful instead of returning an error. The existing summary projection is left intact, no duplicate completion event is appended, and the tool response includes `alreadyComplete: true` in its details so operators and integrations can distinguish a retry from the first completion.
 
 ### State Authority
 
-The SQLite database is the runtime source of truth for milestones, slices, tasks, requirements, decisions, summaries, and completion status. Markdown files in `.gsd/` are rendered projections for review, prompts, and git-friendly history; editing a projection does not override the database unless a command imports or saves that change through GSD.
+The SQLite database is the runtime source of truth for milestones, slices, tasks, requirements, summaries, and completion status. Durable decisions and project knowledge use the same database through the `memories` table: decisions are stored as `architecture` memories, and KNOWLEDGE patterns/lessons are stored as `pattern`/`gotcha` memories.
+
+Markdown files in `.gsd/` are rendered projections for review, prompts, and git-friendly history. `.gsd/DECISIONS.md` is projected from architecture memories, and the Patterns/Lessons sections of `.gsd/KNOWLEDGE.md` are projected from memory rows; editing those projections does not override the database unless a command imports or saves the change through GSD. The Rules section of `KNOWLEDGE.md` remains manually authored and is preserved separately.
 
 In worktree mode, the project-root database and project-root `.gsd/` state remain authoritative. Worktree markdown projections are useful diagnostics, but they are not synced back as runtime state. If the database is unavailable, runtime state derivation refuses to silently rebuild from markdown. The legacy markdown derivation path is only enabled when `GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK=1`, which exists for tests and explicit recovery scenarios.
 
@@ -61,7 +65,7 @@ Workflow Preferences -> Project Context -> Requirements -> Research Decision -> 
 | `.gsd/REQUIREMENTS.md` | `discuss-requirements` | Capability contract using `R###` requirements grouped by Active, Validated, Deferred, and Out of Scope |
 | `.gsd/runtime/research-decision.json` | `research-decision` | Records `research` or `skip`; this unit only asks the question and writes the marker |
 | `.gsd/research/STACK.md`, `FEATURES.md`, `ARCHITECTURE.md`, `PITFALLS.md` | `research-project`, only when the decision is `research` | Four parallel project-level research outputs for stack, feature norms, architecture, and pitfalls |
-| `.gsd/milestones/<MID>/M###-CONTEXT.md` and `M###-ROADMAP.md` | Normal milestone discussion/planning | Milestone-specific context and executable roadmap |
+| `.gsd/milestones/<MID>/M###-CONTEXT.md` and `M###-ROADMAP.md` | Normal milestone discussion/planning | Milestone-specific context and executable roadmap; `` `[sketch]` `` marks slices awaiting `refine-slice` |
 
 `REQUIREMENTS.md` is rendered from the requirements stored in the GSD database. Agents should save individual requirements with `gsd_requirement_save`; a final `gsd_summary_save` for `REQUIREMENTS` will fail if no active requirement rows exist instead of treating caller-supplied markdown as canonical.
 

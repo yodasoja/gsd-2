@@ -28,7 +28,9 @@ Plan → Execute (per task) → Complete → Reassess Roadmap → Next Slice
 
 ## State Authority
 
-The GSD database is the runtime source of truth for milestones, slices, tasks, requirements, decisions, summaries, and completion status. Markdown files in `.gsd/` are rendered projections for review, prompts, and git-friendly history; editing a projection does not override the database unless a GSD command imports or saves the change.
+The GSD database is the runtime source of truth for milestones, slices, tasks, requirements, summaries, and completion status. Durable decisions and project knowledge use the same database through the `memories` table: decisions are stored as `architecture` memories, and KNOWLEDGE patterns/lessons are stored as `pattern`/`gotcha` memories.
+
+Markdown files in `.gsd/` are rendered projections for review, prompts, and git-friendly history. `.gsd/DECISIONS.md` is projected from architecture memories, and the Patterns/Lessons sections of `.gsd/KNOWLEDGE.md` are projected from memory rows; editing those projections does not override the database unless a GSD command imports or saves the change. The Rules section of `KNOWLEDGE.md` remains manually authored and is preserved separately.
 
 In worktree mode, the project-root database and project-root `.gsd/` state remain authoritative. Worktree markdown projections are diagnostics, not state to sync back. Runtime state derivation does not silently rebuild from markdown when the database is unavailable. The legacy markdown fallback is only enabled with `GSD_ALLOW_MARKDOWN_DERIVE_FALLBACK=1` for tests and explicit recovery work.
 

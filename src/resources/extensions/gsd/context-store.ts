@@ -94,15 +94,16 @@ function readDecisionsFromMemories(
     if (opts?.milestoneId) {
       // when_context is a free-text JSON value; substring match preserves the
       // semantics of `when_context LIKE '%milestoneId%'` on the legacy table.
-      clauses.push("structured_fields LIKE :milestone_pattern");
-      params[':milestone_pattern'] = `%"when_context":"%${opts.milestoneId}%"%`;
+      clauses.push("json_extract(structured_fields, '$.when_context') LIKE :milestone_pattern");
+      params[':milestone_pattern'] = `%${opts.milestoneId}%`;
     }
 
     if (opts?.scope) {
-      // Anchored with the closing `"` so prefix collisions don't produce
-      // false matches (e.g. scope=M001 must not match "scope":"M001-S01").
-      clauses.push("structured_fields LIKE :scope_pattern");
-      params[':scope_pattern'] = `%"scope":"${opts.scope}"%`;
+      // Stage 1 used `json_extract` in main (post-merge); preserve that
+      // style here. Exact equality on the JSON value avoids the prefix
+      // collision risk LIKE patterns had (scope=M001 vs scope=M001-S01).
+      clauses.push("json_extract(structured_fields, '$.scope') = :scope");
+      params[':scope'] = opts.scope;
     }
 
     const sql = `SELECT seq, structured_fields FROM memories WHERE ${clauses.join(' AND ')} ORDER BY seq`;

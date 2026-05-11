@@ -116,7 +116,7 @@ See the full [Changelog](./CHANGELOG.md) for the complete v2.82 entry and prior 
 
 - **Context Mode** — dispatch builds task-ready context automatically (artifacts, prior session, milestone/slice signals, execution metadata); enabled by default for new projects
 - **Sandboxed execution tools** — `gsd_exec_search`, `gsd_resume`, and sandboxed tool-output paths for context-mode flows
-- **Memory architecture (ADR-013)** — `memories` table is now authoritative; `structured_fields` adds typed metadata; dual-write migration landed with decisions backfill
+- **Memory architecture (ADR-013)** — `memories` table is now authoritative; `structured_fields` adds typed metadata; decisions and KNOWLEDGE patterns/lessons are memory-backed projections after the cutover
 - **Skill coverage** — 9 gap-closing skills landed plus 6 planning/design skills surfaced
 - **Hook stack** — Layer 0 shell hooks and additional Layer 2 lifecycle events
 - **TUI polish** — dedicated chat-frame style for skill invocations; active-row overflow fixes
@@ -338,6 +338,8 @@ Plan (with integrated research) → Execute (per task) → Complete → Reassess
 
 **Plan** scouts the codebase, researches relevant docs, and decomposes the slice into tasks with must-haves (mechanically verifiable outcomes). **Execute** runs each task in a fresh context window with only the relevant files pre-loaded — then runs configured verification commands (lint, test, etc.) with auto-fix retries. **Complete** writes the summary, UAT script, marks the roadmap, and commits with meaningful messages derived from task summaries. **Reassess** checks if the roadmap still makes sense given what was learned. **Validate Milestone** runs a reconciliation gate after all slices complete — comparing roadmap success criteria against actual results before sealing the milestone.
 
+When progressive planning is enabled, the first slice is fully planned up front while later slices may appear in `M###-ROADMAP.md` with a `` `[sketch]` `` badge. A sketch slice has an approved title, dependency shape, demo line, and scope boundary, but it has not yet been expanded into task plans; auto mode runs `refine-slice` just before execution to turn the sketch into a full slice plan using the latest prior-slice summaries.
+
 ### `/gsd auto` — The Main Event
 
 This is what makes GSD different. Run it, walk away, come back to built software.
@@ -348,7 +350,9 @@ This is what makes GSD different. Run it, walk away, come back to built software
 
 Auto mode is a state machine driven by the GSD database at the project root. It derives the next unit of work from authoritative SQLite state, creates a fresh agent session, injects a focused prompt with all relevant context pre-inlined, and lets the LLM execute. When the LLM finishes, auto mode persists the result to the database, refreshes markdown projections such as `STATE.md`, and dispatches the next unit.
 
-The database is authoritative for milestones, slices, tasks, requirements, decisions, summaries, and completion status. Markdown under `.gsd/` is a rendered projection for review, prompts, and git-friendly history; it is not a runtime fallback unless you explicitly run a recovery/import command. In worktree mode, project-root DB state remains authoritative and worktree markdown projections are not synced back as state.
+The database is authoritative for milestones, slices, tasks, requirements, summaries, and completion status. Durable decisions and project knowledge are stored in the `memories` table: decisions are `architecture` memories, and KNOWLEDGE patterns/lessons are `pattern`/`gotcha` memories. Markdown under `.gsd/` is a rendered projection for review, prompts, and git-friendly history; it is not a runtime fallback unless you explicitly run a recovery/import command. In worktree mode, project-root DB state remains authoritative and worktree markdown projections are not synced back as state.
+
+`KNOWLEDGE.md` is hybrid: rules remain file-canonical, while patterns and lessons are stored in the `memories` table and rendered back into `KNOWLEDGE.md` on the next session-start projection. Existing pattern and lesson rows are backfilled into memories before projection, so newly captured patterns and lessons may appear in memory-backed prompt context before the file view refreshes.
 
 **What happens under the hood:**
 
@@ -542,13 +546,13 @@ Every dispatch is carefully constructed. The LLM never wastes tool calls on orie
 | `gsd.db`           | Authoritative runtime state for hierarchy and completion        |
 | `PROJECT.md`       | Living doc — what the project is right now                      |
 | `REQUIREMENTS.md`  | Project-level capability contract and out-of-scope list         |
-| `DECISIONS.md`     | Append-only register of architectural decisions                 |
-| `KNOWLEDGE.md`     | Cross-session knowledge: manual Rules plus memory-projected Patterns and Lessons |
+| `DECISIONS.md`     | Projected register of memory-backed architectural decisions     |
+| `KNOWLEDGE.md`     | Hybrid knowledge projection: manual Rules plus memory-backed Patterns/Lessons |
 | `RUNTIME.md`       | Runtime context — API endpoints, env vars, services (v2.39)     |
 | `runtime/research-decision.json` | Deep-mode marker for project research vs skip       |
 | `research/*.md`    | Optional deep-mode project research: stack, features, architecture, pitfalls |
 | `STATE.md`         | Quick-glance dashboard rendered from the database                |
-| `M001-ROADMAP.md`  | Milestone plan with slice checkboxes, risk levels, dependencies |
+| `M001-ROADMAP.md`  | Milestone plan with slice checkboxes, risk levels, dependencies, and `` `[sketch]` `` badges for slices awaiting `refine-slice` |
 | `M001-CONTEXT.md`  | User decisions from the discuss phase                           |
 | `M001-RESEARCH.md` | Codebase and ecosystem research                                 |
 | `S01-PLAN.md`      | Slice task decomposition with must-haves                        |
@@ -584,6 +588,12 @@ Every task has must-haves — mechanically checkable outcomes:
 - **Key Links** — Imports and wiring between artifacts
 
 The verification ladder: static checks → command execution → behavioral testing → human review (only when the agent genuinely can't verify itself).
+
+### Project Knowledge
+
+`.gsd/KNOWLEDGE.md` remains the human-readable register for durable project knowledge, but the memory store is now authoritative for generated Patterns and Lessons. On startup, GSD backfills existing `## Patterns` and `## Lessons Learned` rows into `gsd.db` memories, then rewrites `KNOWLEDGE.md` as a hybrid projection: the manual `## Rules` section is preserved from the file, while Patterns and Lessons are rendered from the backfilled memory rows.
+
+Keep hand-authored operating rules in `## Rules` or add them with `/gsd knowledge rule`. Patterns and Lessons that agents discover are retrieved through the memory system for prompts and projected back into `KNOWLEDGE.md` for review, reports, and git history.
 
 ### Dashboard
 
@@ -829,7 +839,7 @@ gsd (CLI binary)
 - **`pkg/` shim directory** — `PI_PACKAGE_DIR` points here (not project root) to avoid Pi's theme resolution collision with our `src/` directory. Contains only `piConfig` and theme assets.
 - **Two-file loader pattern** — `loader.ts` sets all env vars with zero SDK imports, then dynamic-imports `cli.ts` which does static SDK imports. This ensures `PI_PACKAGE_DIR` is set before any SDK code evaluates.
 - **Always-overwrite sync** — `npm update -g` takes effect immediately. Bundled extensions and agents are synced to `~/.gsd/agent/` on every launch, not just first run.
-- **DB-authoritative state** — the project-root GSD database is the runtime source of truth. `.gsd/` markdown files are rendered projections for review, prompt context, and git history. No in-memory state survives across sessions.
+- **DB-authoritative state** — the project-root GSD database is the runtime source of truth. `.gsd/` markdown files are rendered projections for review, prompt context, and git history. `KNOWLEDGE.md` keeps rules file-canonical and projects patterns/lessons from `memories` at session start. No in-memory state survives across sessions.
 
 ---
 

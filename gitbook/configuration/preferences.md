@@ -263,7 +263,7 @@ custom_instructions:
   - "Prefer functional patterns over classes"
 ```
 
-For project-specific knowledge, use `/gsd knowledge rule|pattern|lesson <description>`. Rules append directly to `.gsd/KNOWLEDGE.md`; patterns and lessons are stored as memories, projected back into `.gsd/KNOWLEDGE.md`, and injected through the memory block automatically.
+For project-specific durable guidance, use `.gsd/KNOWLEDGE.md` instead. Rules are read from the file; patterns and lessons are persisted to the `memories` table and projected back into `KNOWLEDGE.md` on the next session start.
 
 ### `context_pause_threshold`
 

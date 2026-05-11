@@ -102,6 +102,8 @@ The workflow MCP surface includes:
 
 These tools use the same GSD workflow handlers as the native in-process tool path wherever a shared handler exists.
 
+`gsd_decision_save` and its `gsd_save_decision` alias persist new decisions to the ADR-013 memory store, not to the legacy `decisions` table. The assigned `D###` ID is recorded in `memories.structured_fields.sourceDecisionId`, and `.gsd/DECISIONS.md` is refreshed as a projection from memory-backed decisions. The legacy table may still be read by compatibility and inspection paths during the cutover window, but it is no longer a write target.
+
 `gsd_summary_save` computes artifact paths from the supplied IDs. `milestone_id` is required for milestone-, slice-, and task-scoped artifact types (`SUMMARY`, `RESEARCH`, `CONTEXT`, `ASSESSMENT`, `CONTEXT-DRAFT`) and should be omitted only for root-level `PROJECT`, `PROJECT-DRAFT`, `REQUIREMENTS`, and `REQUIREMENTS-DRAFT` artifacts. For final `REQUIREMENTS` saves, the tool renders content from active database requirement rows; callers must create those rows with `gsd_requirement_save` first.
 
 ### Interactive tools

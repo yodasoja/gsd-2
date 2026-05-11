@@ -39,6 +39,8 @@ interface DecisionRow {
   superseded_by: string | null;
 }
 
+type DecisionContentFields = Pick<DecisionRow, "decision" | "choice" | "rationale">;
+
 /**
  * Backfill decisions rows into the memories table.
  *
@@ -69,7 +71,7 @@ export function backfillDecisionsToMemories(): number {
 
   try {
     const decisions = adapter
-      .prepare("SELECT id, when_context, scope, decision, choice, rationale, made_by, revisable, superseded_by FROM decisions")
+      .prepare("SELECT id, when_context, scope, decision, choice, rationale, made_by, revisable, superseded_by FROM decisions ORDER BY seq")
       .all() as Array<Record<string, unknown>>;
 
     if (decisions.length === 0) return 0;
@@ -80,10 +82,10 @@ export function backfillDecisionsToMemories(): number {
     // sentinel would silently abort the backfill if a user manually called
     // capture_thought with their own structuredFields.sourceDecisionId.
     const checkExisting = adapter.prepare(
-      "SELECT structured_fields FROM memories WHERE structured_fields LIKE :pattern LIMIT 1",
+      "SELECT id, structured_fields FROM memories WHERE structured_fields LIKE :pattern LIMIT 1",
     );
     const updateStructuredFields = adapter.prepare(
-      "UPDATE memories SET structured_fields = :sf, updated_at = :ts WHERE structured_fields LIKE :pattern",
+      "UPDATE memories SET structured_fields = :sf, updated_at = :ts WHERE id = :id",
     );
 
     let written = 0;
@@ -104,7 +106,7 @@ export function backfillDecisionsToMemories(): number {
 
       const pattern = `%"sourceDecisionId":"${row.id}"%`;
       const existing = checkExisting.get({ ":pattern": pattern }) as
-        | { structured_fields: string | null }
+        | { id: string; structured_fields: string | null }
         | undefined;
 
       if (existing) {
@@ -113,9 +115,17 @@ export function backfillDecisionsToMemories(): number {
         // queries reconstruct Decision.superseded_by from this field, so the
         // DECISIONS.md projection stays accurate without us having to track
         // supersedes events at the write site.
-        const currentSf = existing.structured_fields
-          ? (safeParse(existing.structured_fields) ?? {})
+        const parsedSf = existing.structured_fields
+          ? safeParse(existing.structured_fields)
           : {};
+        if (existing.structured_fields && !parsedSf) {
+          logWarning(
+            "memory-backfill",
+            `decisions->memories drift heal skipped for ${row.id}: invalid structured_fields JSON`,
+          );
+          continue;
+        }
+        const currentSf = parsedSf ?? {};
         const memorySuperseded =
           typeof currentSf["superseded_by"] === "string" || currentSf["superseded_by"] === null
             ? (currentSf["superseded_by"] as string | null | undefined)
@@ -126,16 +136,16 @@ export function backfillDecisionsToMemories(): number {
             superseded_by: row.superseded_by,
           };
           updateStructuredFields.run({
+            ":id": existing.id,
             ":sf": JSON.stringify(merged),
             ":ts": new Date().toISOString(),
-            ":pattern": pattern,
           });
           healed += 1;
         }
         continue;
       }
 
-      const content = synthesizeContent(row);
+      const content = synthesizeDecisionMemoryContent(row);
       const id = createMemory({
         category: "architecture",
         content,
@@ -186,7 +196,7 @@ function safeParse(raw: string): Record<string, unknown> | null {
  * Truncates each field to keep the synthesized line under ~600 chars so
  * memory_query rendering stays readable.
  */
-function synthesizeContent(row: DecisionRow): string {
+export function synthesizeDecisionMemoryContent(row: DecisionContentFields): string {
   const trim = (value: string, max: number): string => {
     const cleaned = value.replace(/\s+/g, " ").trim();
     return cleaned.length > max ? cleaned.slice(0, max - 1) + "\u2026" : cleaned;

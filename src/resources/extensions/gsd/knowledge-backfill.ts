@@ -48,13 +48,13 @@ export function backfillKnowledgeToMemories(basePath: string): number {
   const adapter = _getAdapter();
   if (!adapter) return 0;
 
-  const content = readKnowledgeMd(basePath);
-  if (!content.trim()) return 0;
-
-  const rows = parseKnowledgeRows(content);
-  if (rows.length === 0) return 0;
-
   try {
+    const content = readKnowledgeMd(basePath);
+    if (!content.trim()) return 0;
+
+    const rows = parseKnowledgeRows(content);
+    if (rows.length === 0) return 0;
+
     const checkExisting = adapter.prepare(
       "SELECT 1 FROM memories WHERE structured_fields LIKE :pattern LIMIT 1",
     );
@@ -82,7 +82,7 @@ export function backfillKnowledgeToMemories(basePath: string): number {
     return written;
   } catch (e) {
     logWarning(
-      "knowledge-backfill",
+      "memory-backfill",
       `KNOWLEDGE.md -> memories backfill failed: ${(e as Error).message}`,
     );
     return 0;

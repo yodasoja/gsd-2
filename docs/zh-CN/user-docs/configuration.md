@@ -682,7 +682,7 @@ custom_instructions:
   - "Prefer functional patterns over classes"
 ```
 
-如果是项目特有知识，请使用 `/gsd knowledge rule|pattern|lesson <description>` 添加。规则会直接追加到 `.gsd/KNOWLEDGE.md`；模式和经验会保存为 memories，投影回 `.gsd/KNOWLEDGE.md`，并通过 memory block 自动注入。
+如果是项目特有知识，请使用 GSD 的 knowledge 和 memory 机制。`.gsd/KNOWLEDGE.md` 是混合投影：手动维护的 Rules 保留在文件里，生成的 Patterns 和 Lessons 由 `memories` 表承载，并渲染回文件方便审阅。持久操作规则用 `/gsd knowledge rule <description>` 添加；agent 发现的模式和经验会作为 memories 保存，并自动参与 prompt 注入。
 
 ### `RUNTIME.md`：运行时上下文（v2.39）
 

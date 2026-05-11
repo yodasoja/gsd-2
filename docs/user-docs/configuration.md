@@ -752,7 +752,7 @@ custom_instructions:
   - "Prefer functional patterns over classes"
 ```
 
-For project-specific knowledge, use `/gsd knowledge rule|pattern|lesson <description>`. Rules append directly to `.gsd/KNOWLEDGE.md`; patterns and lessons are stored as memories, projected back into `.gsd/KNOWLEDGE.md`, and injected through the memory block automatically.
+For project-specific knowledge, use the GSD knowledge and memory surfaces instead. `.gsd/KNOWLEDGE.md` is a hybrid projection: manually maintained Rules stay in the file, while generated Patterns and Lessons are backed by the `memories` table and rendered back into the file for review. Add durable operating rules with `/gsd knowledge rule <description>`; agent-discovered patterns and lessons are stored as memories and selected for prompt injection automatically.
 
 ### `RUNTIME.md` — Runtime Context (v2.39)
 
