@@ -91,10 +91,6 @@ function readDecisionsFromMemories(
     ];
     const params: Record<string, unknown> = {};
 
-    if (!includeSuperseded) {
-      clauses.push("superseded_by IS NULL");
-    }
-
     if (opts?.milestoneId) {
       // when_context is a free-text JSON value; substring match preserves the
       // semantics of `when_context LIKE '%milestoneId%'` on the legacy table.
@@ -126,9 +122,10 @@ function readDecisionsFromMemories(
       const sourceId = sf['sourceDecisionId'];
       if (typeof sourceId !== 'string' || sourceId.length === 0) continue;
 
-      // Decision-level supersedes lives in structuredFields.superseded_by
-      // (populated by the backfill / drift auto-heal). Skip when the caller
-      // wants active-only and the chain has been recorded there.
+      // Decision-level superseded status lives in structured_fields.superseded_by
+      // (written by mirrorDecisionToMemory / memory-backfill.ts). The top-level
+      // memories.superseded_by column is intentionally never set for decision mirrors,
+      // so active-only filtering must be done here in the JS loop.
       const supersededBy = typeof sf['superseded_by'] === 'string' ? (sf['superseded_by'] as string) : null;
       if (!includeSuperseded && supersededBy) continue;
 

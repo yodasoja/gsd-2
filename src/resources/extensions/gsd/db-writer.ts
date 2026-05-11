@@ -471,7 +471,7 @@ export async function saveDecisionToDb(
     // happen before the projection regen below, because the regen now sources
     // from memories. If the dual-write ran after, the just-saved decision
     // would be missing from its own projection.
-    await mirrorDecisionToMemory(id, fields);
+    const mirroredToMemory = await mirrorDecisionToMemory(id, fields);
 
     // Fetch all decisions (including superseded for the full register).
     // ADR-013 Stage 2a: source from the `memories` table. The Phase 5
@@ -480,6 +480,13 @@ export async function saveDecisionToDb(
     // superseded_by on every session start.
     const { getAllDecisionsFromMemories } = await import('./context-store.js');
     let allDecisions: Decision[] = getAllDecisionsFromMemories();
+    if (!mirroredToMemory && !allDecisions.some(d => d.id === id)) {
+      const savedDecision = db.getDecisionById(id);
+      if (savedDecision) {
+        logWarning('projection', 'memory-store mirror failed; including just-saved legacy decision in DECISIONS.md projection', { fn: 'saveDecisionToDb', id });
+        allDecisions = [...allDecisions, savedDecision];
+      }
+    }
 
     const filePath = resolveGsdRootFile(basePath, 'DECISIONS');
 
@@ -556,7 +563,7 @@ export async function saveDecisionToDb(
 async function mirrorDecisionToMemory(
   id: string,
   fields: SaveDecisionFields,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const { createMemory } = await import('./memory-store.js');
     const decisionText = (fields.decision ?? '').trim();
@@ -567,7 +574,7 @@ async function mirrorDecisionToMemory(
     if (choiceText) contentParts.push(`Chose: ${choiceText}.`);
     if (rationaleText) contentParts.push(`Rationale: ${rationaleText}.`);
     const content = contentParts.join(' ').slice(0, 600);
-    if (!content) return;
+    if (!content) return false;
 
     createMemory({
       category: 'architecture',
@@ -582,19 +589,23 @@ async function mirrorDecisionToMemory(
         choice: fields.choice,
         rationale: fields.rationale,
         made_by: fields.made_by ?? 'agent',
-        revisable: fields.revisable ?? '',
-        // New decisions are always written as active; md-importer can later
-        // set superseded_by on the source decision row, and the backfill's
-        // drift auto-heal pass propagates that update to this memory.
+        revisable: fields.revisable ?? 'Yes',
+        // New decisions are always active at write time. md-importer can later
+        // set superseded_by on the source decisions row; the backfill's drift
+        // auto-heal pass propagates that into structured_fields.superseded_by.
+        // The top-level memories.superseded_by column is intentionally left
+        // NULL for decision mirrors.
         superseded_by: null,
       },
     });
+    return true;
   } catch (mirrorErr) {
     logError('manifest', 'memory-store mirror write failed (non-fatal)', {
       fn: 'saveDecisionToDb',
       decisionId: id,
       error: String((mirrorErr as Error).message),
     });
+    return false;
   }
 }
 

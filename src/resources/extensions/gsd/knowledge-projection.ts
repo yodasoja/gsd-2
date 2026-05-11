@@ -20,8 +20,7 @@
 // KNOWLEDGE.md. They remain accessible via the loadMemoryBlock auto-injection
 // surface; KNOWLEDGE.md projects only the KNOWLEDGE.md-originating subset.
 
-import { writeFileSync } from "node:fs";
-
+import { atomicWriteSync } from "./atomic-write.js";
 import { _getAdapter, isDbAvailable } from "./gsd-db.js";
 import {
   KNOWLEDGE_SECTIONS,
@@ -206,7 +205,7 @@ export function renderKnowledgeProjection(basePath: string): KnowledgeProjection
       return { written: false, content };
     }
 
-    writeFileSync(knowledgeMdPath(basePath), content, "utf-8");
+    atomicWriteSync(knowledgeMdPath(basePath), content, "utf-8");
     return { written: true, content };
   } catch (e) {
     logWarning("knowledge-projection", `render failed: ${(e as Error).message}`);

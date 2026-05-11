@@ -209,7 +209,7 @@ Available types: `agent_start`, `agent_end`, `tool_execution_start`, `tool_execu
 | `queue` | Queue/reorder milestones |
 | `history` | View execution history |
 | `doctor` | Health check + auto-fix |
-| `knowledge <rule|pattern|lesson>` | Add persistent project knowledge |
+| `knowledge <rule\|pattern\|lesson>` | Add persistent project knowledge |
 
 See `references/commands.md` for the complete reference.
 </all_commands>
