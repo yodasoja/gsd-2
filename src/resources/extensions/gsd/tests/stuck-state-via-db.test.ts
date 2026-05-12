@@ -19,10 +19,11 @@ import {
   closeDatabase,
   insertMilestone,
 } from "../gsd-db.ts";
-import { registerAutoWorker } from "../db/auto-workers.ts";
+import { registerAutoWorker, markWorkerCrashed } from "../db/auto-workers.ts";
 import { claimMilestoneLease } from "../db/milestone-leases.ts";
 import {
   recordDispatchClaim,
+  markFailed,
   markCanceled,
   getRecentUnitKeysForWorker,
   getRecentUnitKeysForProjectRoot,
@@ -75,6 +76,7 @@ test("getRecentUnitKeysForProjectRoot restores compound keys used by stuck detec
   t.after(() => cleanup(base));
   openDatabase(join(base, ".gsd", "gsd.db"));
   insertMilestone({ id: "M001", title: "T", status: "active" });
+  insertMilestone({ id: "M002", title: "Crashed", status: "active" });
   const worker = registerAutoWorker({ projectRootRealpath: base });
   const lease = claimMilestoneLease(worker, "M001");
   assert.equal(lease.ok, true);
@@ -95,7 +97,29 @@ test("getRecentUnitKeysForProjectRoot restores compound keys used by stuck detec
     markCanceled(claim.dispatchId, "pause");
   }
 
-  const window = getRecentUnitKeysForProjectRoot(base, 20);
+  const crashedWorker = registerAutoWorker({ projectRootRealpath: base });
+  const crashedLease = claimMilestoneLease(crashedWorker, "M002");
+  assert.equal(crashedLease.ok, true);
+  if (!crashedLease.ok) return;
+
+  for (let i = 0; i < 3; i++) {
+    const claim = recordDispatchClaim({
+      traceId: `crashed-${i}`,
+      workerId: crashedWorker,
+      milestoneLeaseToken: crashedLease.token,
+      milestoneId: "M002",
+      sliceId: "S01",
+      taskId: "T01",
+      unitType: "execute-task",
+      unitId: "M002/S01/T01",
+    });
+    assert.equal(claim.ok, true);
+    if (!claim.ok) return;
+    markFailed(claim.dispatchId, { errorSummary: "worker crashed" });
+  }
+  markWorkerCrashed(crashedWorker);
+
+  const window = getRecentUnitKeysForProjectRoot(base, 3);
   assert.deepEqual(window.map(w => w.key), [
     "complete-slice/M001/S01",
     "complete-slice/M001/S01",
