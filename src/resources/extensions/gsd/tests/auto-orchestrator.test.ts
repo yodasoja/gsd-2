@@ -842,7 +842,9 @@ test("wired DispatchAdapter forwards session-derived dispatch inputs identically
     assert.equal(adapterCtx.midTitle, directCtx.midTitle);
 
     // Dispatch action equality: both flows reach the same dispatch decision.
-    assert.ok(adapterResult);
+    if (!adapterResult || !("unitType" in adapterResult)) {
+      assert.fail("expected adapter result to be a dispatch decision");
+    }
     assert.equal(adapterResult.unitType, "execute-task");
     assert.equal(adapterResult.unitId, "T01");
     assert.equal(adapterResult.reason, "test-capture");
