@@ -2,7 +2,7 @@
 
 "use client"
 
-import { useEffect, useRef, useState, useCallback } from "react"
+import { useEffect, useMemo, useRef, useState, useCallback } from "react"
 import * as TabsPrimitive from "@radix-ui/react-tabs"
 import {
   CheckCircle2,
@@ -135,6 +135,91 @@ function verificationTone(result: string) {
   if (result === "passed") return "text-success border-success/25 bg-success/10"
   if (result === "failed") return "text-destructive border-destructive/25 bg-destructive/10"
   return "text-muted-foreground border-border bg-muted/50"
+}
+
+function matchesQuery(value: unknown, query: string): boolean {
+  if (value == null) return false
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value).toLowerCase().includes(query)
+  }
+  if (Array.isArray(value)) return value.some((item) => matchesQuery(item, query))
+  if (typeof value === "object") return Object.values(value).some((item) => matchesQuery(item, query))
+  return false
+}
+
+function filterRecord<T>(items: T[], query: string): T[] {
+  return items.filter((item) => matchesQuery(item, query))
+}
+
+function filterVisualizerData(data: VisualizerData, rawQuery: string): VisualizerData {
+  const query = rawQuery.trim().toLowerCase()
+  if (!query) return data
+
+  const milestones = data.milestones
+    .map((milestone) => {
+      if (matchesQuery({ ...milestone, slices: [] }, query)) return milestone
+
+      const slices = milestone.slices
+        .map((slice) => {
+          if (matchesQuery({ ...slice, tasks: [] }, query)) return slice
+          const tasks = filterRecord(slice.tasks, query)
+          return tasks.length > 0 ? { ...slice, tasks } : null
+        })
+        .filter((slice): slice is VisualizerSlice => slice != null)
+
+      return slices.length > 0 ? { ...milestone, slices } : null
+    })
+    .filter((milestone): milestone is VisualizerData["milestones"][number] => milestone != null)
+
+  const missingSlices = filterRecord(data.stats.missingSlices, query)
+  const updatedSlices = filterRecord(data.stats.updatedSlices, query)
+  const recentEntries = filterRecord(data.stats.recentEntries, query)
+  const captureEntries = filterRecord(data.captures.entries, query)
+
+  return {
+    ...data,
+    milestones,
+    byPhase: filterRecord(data.byPhase, query),
+    bySlice: filterRecord(data.bySlice, query),
+    byModel: filterRecord(data.byModel, query),
+    byTier: filterRecord(data.byTier, query),
+    units: filterRecord(data.units, query),
+    changelog: {
+      ...data.changelog,
+      entries: filterRecord(data.changelog.entries, query),
+    },
+    sliceVerifications: filterRecord(data.sliceVerifications, query),
+    knowledge: {
+      ...data.knowledge,
+      rules: filterRecord(data.knowledge.rules, query),
+      patterns: filterRecord(data.knowledge.patterns, query),
+      lessons: filterRecord(data.knowledge.lessons, query),
+    },
+    captures: {
+      ...data.captures,
+      entries: captureEntries,
+      pendingCount: captureEntries.filter((entry) => entry.status === "pending").length,
+      totalCount: captureEntries.length,
+    },
+    health: {
+      ...data.health,
+      tierBreakdown: filterRecord(data.health.tierBreakdown, query),
+      providers: filterRecord(data.health.providers, query),
+      environmentIssues: filterRecord(data.health.environmentIssues, query),
+      doctorHistory: data.health.doctorHistory
+        ? filterRecord(data.health.doctorHistory, query)
+        : data.health.doctorHistory,
+    },
+    discussion: filterRecord(data.discussion, query),
+    stats: {
+      ...data.stats,
+      missingCount: missingSlices.length,
+      missingSlices,
+      updatedCount: updatedSlices.length,
+      updatedSlices,
+      recentEntries,
+    },
+  }
 }
 
 /** Prominent section label with left accent bar */
@@ -1864,6 +1949,10 @@ export function VisualizerView() {
   const [filterQuery, setFilterQuery] = useState("")
   const [helpOpen, setHelpOpen] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const filteredData = useMemo(
+    () => (data ? filterVisualizerData(data, filterQuery) : null),
+    [data, filterQuery],
+  )
 
   const fetchData = useCallback(async () => {
     try {
@@ -1902,6 +1991,12 @@ export function VisualizerView() {
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (helpOpen && (event.key === "Escape" || event.key.toLowerCase() === "q")) {
+        event.preventDefault()
+        setHelpOpen(false)
+        return
+      }
+
       if (isFormFieldFocused()) return
 
       if (event.key >= "1" && event.key <= "9") {
@@ -1928,12 +2023,6 @@ export function VisualizerView() {
       if (event.key === "?") {
         event.preventDefault()
         setHelpOpen(true)
-        return
-      }
-
-      if (helpOpen && (event.key === "Escape" || event.key.toLowerCase() === "q")) {
-        event.preventDefault()
-        setHelpOpen(false)
       }
     }
 
@@ -1978,6 +2067,7 @@ export function VisualizerView() {
   }
 
   if (!data) return null
+  const visibleData = filteredData ?? data
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -2046,34 +2136,34 @@ export function VisualizerView() {
         <div className="flex-1 overflow-y-auto">
           <div className="mx-auto max-w-5xl px-7 py-7">
             <TabsPrimitive.Content value="progress" className="outline-none">
-              <ProgressTab data={data} />
+              <ProgressTab data={visibleData} />
             </TabsPrimitive.Content>
             <TabsPrimitive.Content value="deps" className="outline-none">
-              <DepsTab data={data} />
+              <DepsTab data={visibleData} />
             </TabsPrimitive.Content>
             <TabsPrimitive.Content value="metrics" className="outline-none">
-              <MetricsTab data={data} />
+              <MetricsTab data={visibleData} />
             </TabsPrimitive.Content>
             <TabsPrimitive.Content value="health" className="outline-none">
-              <HealthTab data={data} />
+              <HealthTab data={visibleData} />
             </TabsPrimitive.Content>
             <TabsPrimitive.Content value="timeline" className="outline-none">
-              <TimelineTab data={data} />
+              <TimelineTab data={visibleData} />
             </TabsPrimitive.Content>
             <TabsPrimitive.Content value="agent" className="outline-none">
-              <AgentTab data={data} />
+              <AgentTab data={visibleData} />
             </TabsPrimitive.Content>
             <TabsPrimitive.Content value="changes" className="outline-none">
-              <ChangesTab data={data} />
+              <ChangesTab data={visibleData} />
             </TabsPrimitive.Content>
             <TabsPrimitive.Content value="knowledge" className="outline-none">
-              <KnowledgeTab data={data} />
+              <KnowledgeTab data={visibleData} />
             </TabsPrimitive.Content>
             <TabsPrimitive.Content value="captures" className="outline-none">
-              <CapturesTab data={data} />
+              <CapturesTab data={visibleData} />
             </TabsPrimitive.Content>
             <TabsPrimitive.Content value="export" className="outline-none">
-              <ExportTab data={data} />
+              <ExportTab data={visibleData} />
             </TabsPrimitive.Content>
           </div>
         </div>
