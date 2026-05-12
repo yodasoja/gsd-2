@@ -182,6 +182,7 @@ const KNOWN_COMMAND_PREFIXES = new Set([
  * Heuristics (any true → prose-like):
  *   1. First token starts with an uppercase letter and the string has 4+ words
  *   2. String contains commas followed by spaces (prose clause structure)
+ *   3. First token has no ASCII letters or digits and the string has 4+ words
  */
 export function isLikelyCommand(cmd: string): boolean {
   const trimmed = cmd.trim();
@@ -207,6 +208,9 @@ export function isLikelyCommand(cmd: string): boolean {
 
   // First token has uppercase letters and no path separators → prose
   if (/[A-Z]/.test(firstToken) && !firstToken.includes("/")) return false;
+
+  // Non-ASCII prose with multiple words should not be executed as a command.
+  if (!/[A-Za-z0-9]/.test(firstToken) && tokens.length >= 4) return false;
 
   return true;
 }
