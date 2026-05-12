@@ -95,6 +95,8 @@ Check the persisted run:
 
 Status output includes the run status, mode, context mode, update time, child status, exit code, output or error, and the child session file when one exists.
 
+Each child is also assigned a random tracking name, shown as `<tracking-name> / <agent>`. The name is only for human tracking in status and result output; agent selection still uses the configured agent id.
+
 ## Resume And Follow-Up
 
 Resume follows up inside a child session captured by a previous run:
@@ -137,7 +139,7 @@ Subagent run records are JSON files stored under:
 | `contextMode` | `fresh` or `fork` |
 | `status` | `running`, `succeeded`, `failed`, or `interrupted` |
 | `cwd` | Parent working directory for the dispatch |
-| `children` | Per-child agent, task, cwd, status, session file, output, stderr, usage, model, and merge result |
+| `children` | Per-child tracking name, agent, task, cwd, status, session file, output, stderr, usage, model, and merge result |
 | `failure` | Failure category and message when the run did not succeed |
 
 The persisted record is the operational source for `status` and `resume`. The child session JSONL file remains the source for conversation continuation.

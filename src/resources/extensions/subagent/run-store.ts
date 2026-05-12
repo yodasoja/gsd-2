@@ -1,7 +1,8 @@
-// GSD-2 + Durable subagent run status and result artifact store.
+// GSD-2 + Durable subagent run status, tracking names, and result artifact store.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { randomInt } from "node:crypto";
 import { getAgentDir } from "@gsd/pi-coding-agent";
 
 export type SubagentRunMode = "single" | "parallel" | "chain";
@@ -10,6 +11,7 @@ export type SubagentRunStatus = "queued" | "running" | "succeeded" | "failed" | 
 export interface SubagentChildArtifact {
 	index: number;
 	agent: string;
+	trackingName?: string;
 	task: string;
 	status: SubagentRunStatus;
 	exitCode?: number;
@@ -58,6 +60,54 @@ export interface SubagentRunRecord {
 
 export function defaultSubagentRunStoreDir(): string {
 	return path.join(getAgentDir(), "subagent-runs");
+}
+
+const TRACKING_ADJECTIVES = [
+	"amber",
+	"bright",
+	"calm",
+	"clear",
+	"crisp",
+	"daring",
+	"keen",
+	"lucky",
+	"quiet",
+	"steady",
+	"swift",
+	"vivid",
+] as const;
+
+const TRACKING_NOUNS = [
+	"anchor",
+	"atlas",
+	"beacon",
+	"canvas",
+	"compass",
+	"forge",
+	"harbor",
+	"lantern",
+	"ledger",
+	"mesa",
+	"quartz",
+	"ridge",
+	"signal",
+	"summit",
+	"vector",
+	"vista",
+] as const;
+
+export function createSubagentTrackingName(existingNames: ReadonlySet<string> = new Set()): string {
+	const maxCombinations = TRACKING_ADJECTIVES.length * TRACKING_NOUNS.length;
+	for (let attempt = 0; attempt < maxCombinations * 2; attempt++) {
+		const adjective = TRACKING_ADJECTIVES[randomInt(TRACKING_ADJECTIVES.length)];
+		const noun = TRACKING_NOUNS[randomInt(TRACKING_NOUNS.length)];
+		const name = `${adjective}-${noun}`;
+		if (!existingNames.has(name)) return name;
+	}
+
+	let suffix = existingNames.size + 1;
+	while (existingNames.has(`agent-${suffix}`)) suffix++;
+	return `agent-${suffix}`;
 }
 
 export class SubagentRunStore {
@@ -126,7 +176,7 @@ export function createInitialRunRecord(input: {
 	mode: SubagentRunMode;
 	contextMode: "fresh" | "fork";
 	cwd: string;
-	children: Array<{ agent: string; task: string; cwd?: string }>;
+	children: Array<{ agent: string; trackingName?: string; task: string; cwd?: string }>;
 	now?: string;
 }): SubagentRunRecord {
 	const now = input.now ?? new Date().toISOString();
@@ -142,6 +192,7 @@ export function createInitialRunRecord(input: {
 		children: input.children.map((child, index) => ({
 			index,
 			agent: child.agent,
+			trackingName: child.trackingName,
 			task: child.task,
 			cwd: child.cwd,
 			status: "queued",

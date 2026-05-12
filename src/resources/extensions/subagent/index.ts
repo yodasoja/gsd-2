@@ -49,6 +49,7 @@ import {
 import {
 	SubagentRunStore,
 	createInitialRunRecord,
+	createSubagentTrackingName,
 	deriveRunStatus,
 	type SubagentChildArtifact,
 	type SubagentRunMode,
@@ -205,6 +206,7 @@ interface UsageStats {
 
 interface SingleResult {
 	agent: string;
+	trackingName?: string;
 	agentSource: "user" | "project" | "unknown";
 	task: string;
 	exitCode: number;
@@ -355,6 +357,7 @@ function resultToChildArtifact(result: SingleResult, index: number, cwd?: string
 	return {
 		index,
 		agent: result.agent,
+		trackingName: result.trackingName,
 		task: result.task,
 		status: running ? "running" : resultStatus(result),
 		exitCode: result.exitCode,
@@ -378,6 +381,10 @@ function resultToChildArtifact(result: SingleResult, index: number, cwd?: string
 	};
 }
 
+function formatAgentLabel(agent: string, trackingName?: string): string {
+	return trackingName ? `${trackingName} / ${agent}` : agent;
+}
+
 function formatRunRecord(record: ReturnType<SubagentRunStore["get"]>): string {
 	if (!record) return "Subagent run not found.";
 	const lines = [
@@ -388,7 +395,7 @@ function formatRunRecord(record: ReturnType<SubagentRunStore["get"]>): string {
 	];
 	for (const child of record.children) {
 		const exit = child.exitCode === undefined ? "" : ` (exit ${child.exitCode})`;
-		lines.push(`- [${child.status}] ${child.agent}${exit}: ${child.output || child.errorMessage || child.stderr || child.task}`);
+		lines.push(`- [${child.status}] ${formatAgentLabel(child.agent, child.trackingName)}${exit}: ${child.output || child.errorMessage || child.stderr || child.task}`);
 		if (child.sessionFile) lines.push(`  session: ${child.sessionFile}`);
 	}
 	if (record.failure) lines.push(`Failure: ${record.failure.message}`);
@@ -409,6 +416,7 @@ async function runSingleAgent(
 	contextMode: SubagentContextMode = "fresh",
 	parentSessionManager?: Parameters<typeof createSubagentLaunchPlan>[0]["parentSessionManager"],
 	sessionOverride?: SubagentSessionArgs,
+	trackingName?: string,
 ): Promise<SingleResult> {
 	const agent = agents.find((a) => a.name === agentName);
 
@@ -416,6 +424,7 @@ async function runSingleAgent(
 		const available = agents.map((a) => `"${a.name}"`).join(", ") || "none";
 		return {
 			agent: agentName,
+			trackingName,
 			agentSource: "unknown",
 			task,
 			exitCode: 1,
@@ -432,6 +441,7 @@ async function runSingleAgent(
 		if (activePhase && agent.conflictsWith.includes(activePhase)) {
 			return {
 				agent: agentName,
+				trackingName,
 				agentSource: agent.source,
 				task,
 				exitCode: 1,
@@ -448,6 +458,7 @@ async function runSingleAgent(
 
 	const currentResult: SingleResult = {
 		agent: agentName,
+		trackingName,
 		agentSource: agent.source,
 		task,
 		exitCode: -1,
@@ -570,10 +581,11 @@ async function runSingleAgentInCmuxSplit(
 	contextMode: SubagentContextMode = "fresh",
 	parentSessionManager?: Parameters<typeof createSubagentLaunchPlan>[0]["parentSessionManager"],
 	sessionOverride?: SubagentSessionArgs,
+	trackingName?: string,
 ): Promise<SingleResult> {
 	const agent = agents.find((a) => a.name === agentName);
 	if (!agent) {
-		return runSingleAgent(defaultCwd, agents, agentName, task, cwd, step, signal, onUpdate, makeDetails, modelOverride, contextMode, parentSessionManager, sessionOverride);
+		return runSingleAgent(defaultCwd, agents, agentName, task, cwd, step, signal, onUpdate, makeDetails, modelOverride, contextMode, parentSessionManager, sessionOverride, trackingName);
 	}
 
 	let tmpPromptDir: string | null = null;
@@ -582,6 +594,7 @@ async function runSingleAgentInCmuxSplit(
 
 	const currentResult: SingleResult = {
 		agent: agentName,
+		trackingName,
 		agentSource: agent.source,
 		task,
 		exitCode: -1,
@@ -619,7 +632,7 @@ async function runSingleAgentInCmuxSplit(
 			? await cmuxClient.createSplit(directionOrSurfaceId as "right" | "down" | "left" | "up")
 			: directionOrSurfaceId;
 		if (!cmuxSurfaceId) {
-			return runSingleAgent(defaultCwd, agents, agentName, task, cwd, step, signal, onUpdate, makeDetails, modelOverride, contextMode, parentSessionManager, sessionOverride);
+			return runSingleAgent(defaultCwd, agents, agentName, task, cwd, step, signal, onUpdate, makeDetails, modelOverride, contextMode, parentSessionManager, sessionOverride, trackingName);
 		}
 
 		const bundledPaths = (process.env.GSD_BUNDLED_EXTENSION_PATHS ?? "").split(path.delimiter).map((s) => s.trim()).filter(Boolean);
@@ -653,7 +666,7 @@ async function runSingleAgentInCmuxSplit(
 
 		const sent = await cmuxClient.sendSurface(cmuxSurfaceId, `bash -lc ${shellEscape(innerScript)}`);
 		if (!sent) {
-			return runSingleAgent(defaultCwd, agents, agentName, task, cwd, step, signal, onUpdate, makeDetails, modelOverride, contextMode, parentSessionManager, sessionOverride);
+			return runSingleAgent(defaultCwd, agents, agentName, task, cwd, step, signal, onUpdate, makeDetails, modelOverride, contextMode, parentSessionManager, sessionOverride, trackingName);
 		}
 
 		const finished = await waitForFile(exitPath, signal);
@@ -885,7 +898,7 @@ export default function (pi: ExtensionAPI) {
 						? sessionChildren[0]
 						: undefined;
 				if (!selected?.sessionFile) {
-					const available = sessionChildren.map((child) => child.agent).join(", ") || "none";
+					const available = sessionChildren.map((child) => formatAgentLabel(child.agent, child.trackingName)).join(", ") || "none";
 					return {
 						content: [{
 							type: "text",
@@ -909,6 +922,7 @@ export default function (pi: ExtensionAPI) {
 					"fresh",
 					ctx.sessionManager,
 					{ mode: "fork", sessionFile: selected.sessionFile, sessionDir: path.dirname(selected.sessionFile) },
+					selected.trackingName,
 				);
 				return {
 					content: [{ type: "text", text: getFinalOutput(result.messages) || result.errorMessage || result.stderr || "(no output)" }],
@@ -952,6 +966,12 @@ export default function (pi: ExtensionAPI) {
 			const dispatchStartMs = Date.now();
 			let finalResults: SingleResult[] = [];
 			let dispatchCompletedEmitted = false;
+			const usedTrackingNames = new Set<string>();
+			const dispatchTrackingNames = dispatchAgents.map(() => {
+				const trackingName = createSubagentTrackingName(usedTrackingNames);
+				usedTrackingNames.add(trackingName);
+				return trackingName;
+			});
 			const dispatchContextMode: SubagentContextMode =
 				hasChain && chainParams.some((step) => (step.context ?? contextMode) === "fork")
 					? "fork"
@@ -960,6 +980,7 @@ export default function (pi: ExtensionAPI) {
 						: contextMode;
 			const dispatchChildren = dispatchAgents.map((agent, index) => ({
 				agent,
+				trackingName: dispatchTrackingNames[index],
 				task: dispatchTasks[index] ?? "",
 				cwd: hasChain
 					? chainParams[index]?.cwd
@@ -1046,10 +1067,20 @@ export default function (pi: ExtensionAPI) {
 			});
 			const errorMessageFor = (err: unknown): string =>
 				err instanceof Error ? err.message : String(err || "subagent dispatch failed");
-			const makeFailureResult = (err: unknown, agent: string, task: string, step?: number): SingleResult => {
+			const makeFailureResult = (
+				err: unknown,
+				agent: string,
+				task: string,
+				step?: number,
+				trackingName?: string,
+			): SingleResult => {
 				const message = errorMessageFor(err);
+				const dispatchIndex = dispatchAgents.findIndex((dispatchAgent, index) =>
+					dispatchAgent === agent && dispatchTasks[index] === task
+				);
 				return {
 					agent,
+					trackingName: trackingName ?? (dispatchIndex >= 0 ? dispatchTrackingNames[dispatchIndex] : undefined),
 					agentSource: "unknown",
 					task,
 					exitCode: 1,
@@ -1088,6 +1119,7 @@ export default function (pi: ExtensionAPI) {
 								dispatchAgents[nextIndex] ?? "unknown",
 								dispatchTasks[nextIndex] ?? "",
 								dispatchMode === "chain" ? nextIndex + 1 : undefined,
+								dispatchTrackingNames[nextIndex],
 							),
 						];
 					}
@@ -1100,6 +1132,7 @@ export default function (pi: ExtensionAPI) {
 						agent,
 						dispatchTasks[index] ?? "",
 						dispatchMode === "chain" ? index + 1 : undefined,
+						dispatchTrackingNames[index],
 					),
 				);
 			};
@@ -1198,6 +1231,8 @@ export default function (pi: ExtensionAPI) {
 							params.model,
 							contextMode,
 							ctx.sessionManager,
+							undefined,
+							dispatchTrackingNames[0],
 						);
 						if (isolation && result.exitCode === 0) {
 							const patches = await isolation.captureDelta();
@@ -1269,6 +1304,8 @@ export default function (pi: ExtensionAPI) {
 						step.model || params.model,
 						step.context ?? contextMode,
 						ctx.sessionManager,
+						undefined,
+						dispatchTrackingNames[i],
 					);
 					results.push(result);
 					persistRunResults(results);
@@ -1315,6 +1352,7 @@ export default function (pi: ExtensionAPI) {
 				for (let i = 0; i < taskParams.length; i++) {
 					allResults[i] = {
 						agent: taskParams[i].agent,
+						trackingName: dispatchTrackingNames[i],
 						agentSource: "unknown",
 						task: taskParams[i].task,
 						exitCode: -1, // -1 = still running
@@ -1371,6 +1409,8 @@ export default function (pi: ExtensionAPI) {
 								taskModel,
 								t.context ?? contextMode,
 								ctx.sessionManager,
+								undefined,
+								dispatchTrackingNames[index],
 							)
 						: runSingleAgent(
 								ctx.cwd,
@@ -1385,6 +1425,8 @@ export default function (pi: ExtensionAPI) {
 								taskModel,
 								t.context ?? contextMode,
 								ctx.sessionManager,
+								undefined,
+								dispatchTrackingNames[index],
 							);
 					const runTask = async () => {
 						let isolation: IsolationEnvironment | null = null;
@@ -1436,7 +1478,7 @@ export default function (pi: ExtensionAPI) {
 					const output = isError
 						? (r.errorMessage || r.stderr || getFinalOutput(r.messages) || "(no output)")
 						: getFinalOutput(r.messages);
-					return `[${r.agent}] ${r.exitCode === 0 ? "completed" : `failed (exit ${r.exitCode})`}: ${output || "(no output)"}`;
+					return `[${formatAgentLabel(r.agent, r.trackingName)}] ${r.exitCode === 0 ? "completed" : `failed (exit ${r.exitCode})`}: ${output || "(no output)"}`;
 				});
 				finishDispatch(results);
 				return {
@@ -1481,6 +1523,8 @@ export default function (pi: ExtensionAPI) {
 							params.model,
 							contextMode,
 							ctx.sessionManager,
+							undefined,
+							dispatchTrackingNames[0],
 						)
 						: await runSingleAgent(
 							ctx.cwd,
@@ -1495,6 +1539,8 @@ export default function (pi: ExtensionAPI) {
 							params.model,
 							contextMode,
 							ctx.sessionManager,
+							undefined,
+							dispatchTrackingNames[0],
 						);
 					finalResults = [result];
 
@@ -1633,7 +1679,7 @@ export default function (pi: ExtensionAPI) {
 
 				if (expanded) {
 					const container = new Container();
-					let header = `${icon} ${theme.fg("toolTitle", theme.bold(r.agent))}${theme.fg("muted", ` (${r.agentSource})`)}`;
+					let header = `${icon} ${theme.fg("toolTitle", theme.bold(formatAgentLabel(r.agent, r.trackingName)))}${theme.fg("muted", ` (${r.agentSource})`)}`;
 					if (isError && r.stopReason) header += ` ${theme.fg("error", `[${r.stopReason}]`)}`;
 					container.addChild(new Text(header, 0, 0));
 					if (isError && r.errorMessage)
@@ -1669,7 +1715,7 @@ export default function (pi: ExtensionAPI) {
 					return container;
 				}
 
-				let text = `${icon} ${theme.fg("toolTitle", theme.bold(r.agent))}${theme.fg("muted", ` (${r.agentSource})`)}`;
+				let text = `${icon} ${theme.fg("toolTitle", theme.bold(formatAgentLabel(r.agent, r.trackingName)))}${theme.fg("muted", ` (${r.agentSource})`)}`;
 				if (isError && r.stopReason) text += ` ${theme.fg("error", `[${r.stopReason}]`)}`;
 				if (isError && r.errorMessage) text += `\n${theme.fg("error", `Error: ${r.errorMessage}`)}`;
 				else if (displayItems.length === 0) text += `\n${theme.fg("muted", "(no output)")}`;
@@ -1720,7 +1766,7 @@ export default function (pi: ExtensionAPI) {
 						container.addChild(new Spacer(1));
 						container.addChild(
 							new Text(
-								`${theme.fg("muted", `─── Step ${r.step}: `) + theme.fg("accent", r.agent)} ${rIcon}`,
+								`${theme.fg("muted", `─── Step ${r.step}: `) + theme.fg("accent", formatAgentLabel(r.agent, r.trackingName))} ${rIcon}`,
 								0,
 								0,
 							),
@@ -1767,7 +1813,7 @@ export default function (pi: ExtensionAPI) {
 				for (const r of details.results) {
 					const rIcon = r.exitCode === 0 ? theme.fg("success", "✓") : theme.fg("error", "✗");
 					const displayItems = getDisplayItems(r.messages);
-					text += `\n\n${theme.fg("muted", `─── Step ${r.step}: `)}${theme.fg("accent", r.agent)} ${rIcon}`;
+					text += `\n\n${theme.fg("muted", `─── Step ${r.step}: `)}${theme.fg("accent", formatAgentLabel(r.agent, r.trackingName))} ${rIcon}`;
 					if (displayItems.length === 0) text += `\n${theme.fg("muted", "(no output)")}`;
 					else text += `\n${renderDisplayItems(displayItems, 5)}`;
 				}
@@ -1808,7 +1854,7 @@ export default function (pi: ExtensionAPI) {
 
 						container.addChild(new Spacer(1));
 						container.addChild(
-							new Text(`${theme.fg("muted", "─── ") + theme.fg("accent", r.agent)} ${rIcon}`, 0, 0),
+							new Text(`${theme.fg("muted", "─── ") + theme.fg("accent", formatAgentLabel(r.agent, r.trackingName))} ${rIcon}`, 0, 0),
 						);
 						container.addChild(new Text(theme.fg("muted", "Task: ") + theme.fg("dim", r.task), 0, 0));
 
@@ -1853,7 +1899,7 @@ export default function (pi: ExtensionAPI) {
 								? theme.fg("success", "✓")
 								: theme.fg("error", "✗");
 					const displayItems = getDisplayItems(r.messages);
-					text += `\n\n${theme.fg("muted", "─── ")}${theme.fg("accent", r.agent)} ${rIcon}`;
+					text += `\n\n${theme.fg("muted", "─── ")}${theme.fg("accent", formatAgentLabel(r.agent, r.trackingName))} ${rIcon}`;
 					if (displayItems.length === 0)
 						text += `\n${theme.fg("muted", r.exitCode === -1 ? "(running...)" : "(no output)")}`;
 					else text += `\n${renderDisplayItems(displayItems, 5)}`;

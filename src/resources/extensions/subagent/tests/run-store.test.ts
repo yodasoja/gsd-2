@@ -9,6 +9,7 @@ import { afterEach, describe, it } from "node:test";
 import {
 	SubagentRunStore,
 	createInitialRunRecord,
+	createSubagentTrackingName,
 	deriveRunStatus,
 } from "../run-store.js";
 
@@ -28,7 +29,7 @@ describe("SubagentRunStore", () => {
 			mode: "single",
 			contextMode: "fresh",
 			cwd: "/repo",
-			children: [{ agent: "scout", task: "inspect" }],
+			children: [{ agent: "scout", trackingName: "clear-beacon", task: "inspect" }],
 			now: "2026-01-01T00:00:00.000Z",
 		}));
 
@@ -46,8 +47,19 @@ describe("SubagentRunStore", () => {
 
 		const loaded = store.get("run-1");
 		assert.equal(loaded?.status, "succeeded");
+		assert.equal(loaded?.children[0]?.trackingName, "clear-beacon");
 		assert.equal(loaded?.children[0]?.output, "done");
 		assert.equal(store.list()[0]?.runId, "run-1");
+	});
+
+	it("generates unique tracking names for child agents", () => {
+		const names = new Set<string>();
+		for (let i = 0; i < 24; i++) {
+			const name = createSubagentTrackingName(names);
+			assert.match(name, /^[a-z]+-[a-z]+$|^agent-\d+$/);
+			assert.equal(names.has(name), false);
+			names.add(name);
+		}
 	});
 
 	it("persists failed and interrupted child evidence", () => {
