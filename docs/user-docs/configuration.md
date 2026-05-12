@@ -359,6 +359,24 @@ Defaults and tuning:
 
 When `enabled` is omitted, reactive execution uses the default-on safety threshold of three ready tasks before it attempts a parallel batch. When `enabled: true` is set explicitly, GSD uses the earlier opt-in threshold of two ready tasks.
 
+### `taskIsolation`
+
+Controls optional filesystem isolation for explicit subagent tool calls that set `isolated: true`. This is a global `~/.gsd/agent/settings.json` setting.
+
+```json
+{
+  "taskIsolation": {
+    "mode": "worktree"
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `mode` | string | none | `"worktree"` creates a temporary detached git worktree for the child task. `"fuse-overlay"` uses `fuse-overlayfs` on Linux when installed and falls back to `worktree`. Any other value disables subagent filesystem isolation. |
+
+See [Subagents](./subagents.md#filesystem-isolation) for invocation, merge, and recovery behavior.
+
 ### `skill_discovery`
 
 Controls how GSD finds and applies skills during auto mode.
