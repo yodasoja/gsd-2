@@ -87,16 +87,10 @@ function validateTasks(value: unknown): PlanSliceTaskInput[] {
     if (!isNonEmptyString(title)) throw new Error(`tasks[${index}].title must be a non-empty string`);
     if (!isNonEmptyString(description)) throw new Error(`tasks[${index}].description must be a non-empty string`);
     if (!isNonEmptyString(estimate)) throw new Error(`tasks[${index}].estimate must be a non-empty string`);
-    if (!Array.isArray(files) || files.some((item) => !isNonEmptyString(item))) {
-      throw new Error(`tasks[${index}].files must be an array of non-empty strings`);
-    }
+    const validatedFiles = validateStringArray(files, `tasks[${index}].files`);
     if (!isNonEmptyString(verify)) throw new Error(`tasks[${index}].verify must be a non-empty string`);
-    if (!Array.isArray(inputs) || inputs.some((item) => !isNonEmptyString(item))) {
-      throw new Error(`tasks[${index}].inputs must be an array of non-empty strings`);
-    }
-    if (!Array.isArray(expectedOutput) || expectedOutput.some((item) => !isNonEmptyString(item))) {
-      throw new Error(`tasks[${index}].expectedOutput must be an array of non-empty strings`);
-    }
+    const validatedInputs = validateStringArray(inputs, `tasks[${index}].inputs`);
+    const validatedExpectedOutput = validateStringArray(expectedOutput, `tasks[${index}].expectedOutput`);
     if (observabilityImpact !== undefined && !isNonEmptyString(observabilityImpact)) {
       throw new Error(`tasks[${index}].observabilityImpact must be a non-empty string when provided`);
     }
@@ -106,10 +100,10 @@ function validateTasks(value: unknown): PlanSliceTaskInput[] {
       title,
       description,
       estimate,
-      files,
+      files: validatedFiles,
       verify,
-      inputs,
-      expectedOutput,
+      inputs: validatedInputs,
+      expectedOutput: validatedExpectedOutput,
       observabilityImpact: typeof observabilityImpact === "string" ? observabilityImpact : "",
     };
   });

@@ -158,6 +158,13 @@ test('planning-dispatch: allows subagent dispatch (delegated recon/planner durin
   assert.strictEqual(r.block, false);
 });
 
+test('planning-dispatch: allows markdown agent filenames after identity normalization', () => {
+  const agentClasses = extractSubagentAgentClasses({ agent: 'scout.md' });
+  assert.deepEqual(agentClasses, ['scout']);
+  const r = shouldBlockPlanningUnit('subagent', '', BASE, 'plan-slice', PLANNING_DISPATCH, agentClasses);
+  assert.strictEqual(r.block, false);
+});
+
 test('planning-dispatch: allows task dispatch (delegated recon/planner during slice planning)', () => {
   const r = shouldBlockPlanningUnit('task', '', BASE, 'plan-slice', PLANNING_DISPATCH, ['planner']);
   assert.strictEqual(r.block, false);

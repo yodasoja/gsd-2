@@ -197,6 +197,28 @@ test('handlePlanSlice rejects invalid payloads', async () => {
   }
 });
 
+test('handlePlanSlice explains string task IO fields must be arrays', async () => {
+  const base = makeTmpBase();
+  openDatabase(join(base, '.gsd', 'gsd.db'));
+
+  try {
+    seedParentSlice();
+    const result = await handlePlanSlice({
+      ...validParams(),
+      tasks: [
+        {
+          ...validParams().tasks[0],
+          inputs: 'src/index.ts' as unknown as string[],
+        },
+      ],
+    }, base);
+    assert.ok('error' in result);
+    assert.match(result.error, /validation failed: tasks\[0\]\.inputs must be an array of strings, not string/);
+  } finally {
+    cleanup(base);
+  }
+});
+
 test('handlePlanSlice rejects absolute task IO paths outside the active worktree', async () => {
   const base = makeTmpBase();
   openDatabase(join(base, '.gsd', 'gsd.db'));
