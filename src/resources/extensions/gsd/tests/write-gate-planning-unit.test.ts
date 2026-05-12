@@ -339,6 +339,17 @@ test('verification-mode: run-uat can run build commands', () => {
   assert.strictEqual(r.block, false);
 });
 
+test('verification-mode: run-uat blocks destructive bash (rm -rf)', () => {
+  const r = shouldBlockPlanningUnit('bash', 'rm -rf dist', BASE, 'run-uat', VERIFICATION);
+  assert.strictEqual(r.block, true);
+  assert.match(r.reason!, /bash is restricted to build\/test verification commands/);
+});
+
+test('verification-mode: run-uat allows read-only investigative bash (git status)', () => {
+  const r = shouldBlockPlanningUnit('bash', 'git status', BASE, 'run-uat', VERIFICATION);
+  assert.strictEqual(r.block, false);
+});
+
 test('verification-mode: run-uat still blocks user source edits', () => {
   const r = shouldBlockPlanningUnit('edit', join(BASE, 'src', 'main.ts'), BASE, 'run-uat', VERIFICATION);
   assert.strictEqual(r.block, true);
