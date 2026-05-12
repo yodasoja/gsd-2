@@ -8,6 +8,7 @@ import {
 	formatPageRules,
 	getVisualBriefModeProfile,
 } from "./page-contract.js";
+import { renderHtmlShellTemplate } from "../shared/html-shell.js";
 
 export type VisualBriefMode = "diagram" | "plan" | "diff" | "recap" | "table" | "slides";
 
@@ -63,6 +64,15 @@ export const VISUAL_BRIEF_MODES: readonly VisualBriefModeInfo[] = [
 export const VISUAL_BRIEF_USAGE =
 	"Usage: /gsd brief <diagram|plan|diff|recap|table|slides> [topic] [--slides]";
 
+const VISUAL_BRIEF_KIND: Record<VisualBriefMode, string> = {
+	diff: "Diff Brief",
+	recap: "Project Recap",
+	plan: "Implementation Plan",
+	diagram: "Diagram",
+	table: "Comparison",
+	slides: "Slide Deck",
+};
+
 export function parseVisualBriefArgs(args: string): VisualBriefRequest | null {
 	const rawArgs = args.trim();
 	if (!rawArgs) return null;
@@ -95,6 +105,14 @@ export function buildVisualBriefPrompt(
 	const profile = getVisualBriefModeProfile(request.mode, request.slides);
 	const artifactPolicy = createVisualBriefArtifactPolicy(options.outputDir);
 	const outputFormat = request.slides ? "slide deck" : "scrollable explanation page";
+	const shell = renderHtmlShellTemplate({
+		title: request.subject,
+		documentTitle: `GSD ${VISUAL_BRIEF_KIND[request.mode]} - ${request.subject}`,
+		subtitle: "Visual brief",
+		kind: VISUAL_BRIEF_KIND[request.mode],
+		mainPlaceholder: "{{MAIN_HTML}}",
+		footerNote: request.subject,
+	});
 
 	return `Create a visual brief as a single HTML file.
 
@@ -117,6 +135,16 @@ ${profile.evidenceSteps.map((step) => `   - ${step}`).join("\n")}
 ${formatPageRules()}
 3. Write the HTML file.
 ${formatArtifactPolicy(artifactPolicy).split("\n").map((line) => `   ${line}`).join("\n")}
+
+## Required HTML shell
+
+Use this scaffold verbatim. Replace {{MAIN_HTML}} with the authored <main> contents and {{GENERATED_AT}} with the current ISO timestamp. Do not add new <style> blocks or replace the header, footer, CSS, or script. The <h1> is the subject only; the kind chip is the only visual carrier of artifact type.
+
+\`\`\`html
+${shell}
+\`\`\`
+
+Author only section-level content for {{MAIN_HTML}}. Use the shell utility classes where they fit: .kv-grid, .tbl, .card-row, .card, .callout-info, .callout-warn, .callout-ok, .dot-active, .dot-complete, .dot-pending.
 
 ## Page sections
 
