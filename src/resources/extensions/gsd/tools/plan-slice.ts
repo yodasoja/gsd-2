@@ -1,16 +1,21 @@
+import { existsSync, rmSync } from "node:fs";
+import { join, relative } from "node:path";
 import { clearParseCache } from "../files.js";
 import { isClosedStatus, isDeferredStatus } from "../status-guards.js";
-import { isNonEmptyString, validateStringArray } from "../validation.js";
+import { isNonEmptyString } from "../validation.js";
 import {
   transaction,
   getMilestone,
   getSlice,
+  getSliceTasks,
   insertTask,
   upsertSlicePlanning,
   upsertTaskPlanning,
   insertGateRow,
   updateSliceStatus,
   setSliceSketchFlag,
+  deleteTask,
+  deleteArtifactByPath,
 } from "../gsd-db.js";
 import type { GateId } from "../types.js";
 import { invalidateStateCache } from "../state.js";
@@ -20,6 +25,7 @@ import { writeManifest } from "../workflow-manifest.js";
 import { appendEvent } from "../workflow-events.js";
 import { logWarning } from "../workflow-logger.js";
 import { validatePlanningPathScope } from "../planning-path-scope.js";
+import { buildTaskFileName, gsdRoot, resolveTasksDir } from "../paths.js";
 
 export interface PlanSliceTaskInput {
   taskId: string;
@@ -159,6 +165,7 @@ export async function handlePlanSlice(
   // Guards must be inside the transaction so the state they check cannot
   // change between the read and the write (#2723).
   let guardError: string | null = null;
+  let omittedTaskIds: string[] = [];
 
   try {
     transaction(() => {
@@ -194,6 +201,23 @@ export async function handlePlanSlice(
         integrationClosure: params.integrationClosure,
         observabilityImpact: params.observabilityImpact,
       });
+
+      const newTaskIds = new Set(params.tasks.map((task) => task.taskId));
+      const existingTasks = getSliceTasks(params.milestoneId, params.sliceId);
+      omittedTaskIds = existingTasks
+        .filter((task) => !newTaskIds.has(task.id))
+        .map((task) => task.id);
+
+      for (const task of existingTasks) {
+        if (!newTaskIds.has(task.id) && isClosedStatus(task.status)) {
+          guardError = `cannot remove completed task ${task.id}`;
+          return;
+        }
+      }
+
+      for (const taskId of omittedTaskIds) {
+        deleteTask(params.milestoneId, params.sliceId, taskId);
+      }
 
       for (const task of params.tasks) {
         insertTask({
@@ -239,6 +263,15 @@ export async function handlePlanSlice(
   }
 
   try {
+    const tasksDir = resolveTasksDir(basePath, params.milestoneId, params.sliceId);
+    for (const taskId of omittedTaskIds) {
+      if (!tasksDir) continue;
+      const taskPlanPath = join(tasksDir, buildTaskFileName(taskId, "PLAN"));
+      if (existsSync(taskPlanPath)) rmSync(taskPlanPath, { force: true });
+      const artifactPath = relative(gsdRoot(basePath), taskPlanPath).replace(/\\/g, "/");
+      deleteArtifactByPath(artifactPath);
+    }
+
     const renderResult = await renderPlanFromDb(basePath, params.milestoneId, params.sliceId);
     invalidateStateCache();
     clearParseCache();
