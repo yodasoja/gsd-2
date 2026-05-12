@@ -14,7 +14,10 @@ import {
   type SkillsPolicy,
   type UnitContextManifest,
 } from "../unit-context-manifest.ts";
-import { ALLOWED_PLANNING_DISPATCH_AGENTS } from "../bootstrap/write-gate.ts";
+import {
+  ALLOWED_PLANNING_DISPATCH_AGENTS,
+  shouldBlockPlanningUnit,
+} from "../bootstrap/write-gate.ts";
 import {
   getRequiredWorkflowToolsForAutoUnit,
   getRequiredWorkflowToolsForGuidedUnit,
@@ -243,12 +246,22 @@ test('#4934: only execution units and complete-milestone may use tools.mode "all
 });
 
 test("#5453: complete-milestone uses all tools so bash verification is not planning-dispatch blocked", () => {
-  assert.strictEqual(UNIT_MANIFESTS["complete-milestone"].tools.mode, "all");
+  const manifest = UNIT_MANIFESTS["complete-milestone"];
+
+  assert.strictEqual(manifest.tools.mode, "all");
   assert.deepEqual(resolveSubagentPermissionContract("complete-milestone"), {
     allowed: true,
     allowedSubagents: ["*"],
     toolsMode: "all",
   });
+  const gitVerification = shouldBlockPlanningUnit(
+    "bash",
+    "git diff --name-only",
+    process.cwd(),
+    "complete-milestone",
+    manifest.tools,
+  );
+  assert.strictEqual(gitVerification.block, false, gitVerification.reason);
 });
 
 test('planning-dispatch mode is reserved for slice-level decomposition and completion units', () => {
