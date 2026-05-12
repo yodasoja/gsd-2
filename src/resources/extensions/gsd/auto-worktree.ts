@@ -1740,24 +1740,6 @@ export function mergeMilestoneToMain(
   }
 
   if (nativeIsAncestor(originalBasePath_, milestoneBranch, mainBranch)) {
-    const numstat = nativeDiffNumstat(
-      originalBasePath_,
-      mainBranch,
-      milestoneBranch,
-    );
-    const codeChanges = numstat.filter(
-      (entry) => !entry.path.startsWith(".gsd/"),
-    );
-    if (codeChanges.length > 0) {
-      process.chdir(previousCwd);
-      throw new GSDError(
-        GSD_GIT_ERROR,
-        `Squash merge produced nothing to commit but milestone branch "${milestoneBranch}" ` +
-          `has ${codeChanges.length} code file(s) not on "${mainBranch}". ` +
-          `Aborting worktree teardown to prevent data loss.`,
-      );
-    }
-
     debugLog("mergeMilestoneToMain", {
       action: "skip-squash-already-merged",
       milestoneId,
