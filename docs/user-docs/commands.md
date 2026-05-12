@@ -28,6 +28,7 @@
 | `/gsd cleanup` | Clean up GSD state files and stale worktrees |
 | `/gsd worktree` (`/gsd wt`) | Manage GSD worktrees from the TUI |
 | `/gsd visualize` | Open workflow visualizer (progress, timeline, deps, metrics, health, agent, changes, knowledge, captures, export) |
+| `/gsd brief <mode> [topic] [--slides]` | Generate a self-contained visual HTML brief. Modes: `diagram`, `plan`, `diff`, `recap`, `table`, `slides`. |
 | `/gsd export --html` | Generate self-contained HTML report for current or completed milestone |
 | `/gsd export --html --all` | Generate retrospective reports for all milestones at once |
 | `/gsd update` | Update GSD to the latest version in-session |
@@ -40,6 +41,29 @@
 | `/gsd logs` | Browse activity logs, debug logs, and metrics |
 | `/gsd remote` | Control remote auto-mode |
 | `/gsd help` | Categorized command reference with descriptions for all GSD subcommands |
+
+## Visual Briefs
+
+`/gsd brief` asks the agent to gather evidence and write a single responsive HTML artifact for visual review, planning, recap, or presentation. Usage:
+
+```text
+/gsd brief <diagram|plan|diff|recap|table|slides> [topic] [--slides]
+```
+
+Modes:
+
+| Mode | Use it for |
+|------|------------|
+| `diagram` | System, architecture, flow, state, data, or process diagrams. If the first argument is not a known mode, GSD treats the whole request as a diagram topic. |
+| `plan` | Visual implementation plans with scope, likely files, edge cases, risks, and tests. |
+| `diff` | Visual reviews of current staged and unstaged repository changes. If no topic is supplied, it reviews the current repository changes. |
+| `recap` | Context-switching project recaps. If no topic is supplied, it recaps the current project. |
+| `table` | Dense comparisons, audits, matrices, and status reports as readable HTML tables. |
+| `slides` | A concise visual deck. Passing `--slides` with another mode also requests slide-deck output. |
+
+Artifacts are written under the GSD agent directory's `diagrams/` folder with a descriptive kebab-case `.html` filename. The generated file is self-contained with embedded CSS and minimal JavaScript; it may use CDN libraries such as Mermaid for diagrams, but must keep useful written context if a CDN fails.
+
+After writing the file, GSD attempts to open it in a browser using the local platform opener (`open` on macOS, `xdg-open` on Linux, or `cmd /c start` on Windows). If browser opening is unavailable or fails, the command reports the absolute file path.
 
 ## Configuration & Diagnostics
 
