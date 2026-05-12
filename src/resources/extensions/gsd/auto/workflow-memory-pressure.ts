@@ -19,7 +19,16 @@ export interface MeasureMemoryPressureDeps {
   heapLimitBytes: () => number;
 }
 
+/**
+ * Returns true on auto-mode startup, then every configured interval.
+ *
+ * Iteration 1 is checked explicitly so early session memory pressure cannot
+ * bypass the periodic interval guard.
+ */
 export function shouldCheckMemoryPressure(iteration: number, interval: number): boolean {
+  if (!Number.isInteger(interval) || interval <= 0) {
+    throw new Error("Memory pressure check interval must be a positive integer");
+  }
   return iteration === 1 || iteration % interval === 0;
 }
 

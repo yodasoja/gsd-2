@@ -78,3 +78,14 @@ test("shouldCheckMemoryPressure covers the first auto-mode iteration", () => {
   assert.equal(shouldCheckMemoryPressure(2, 5), false);
   assert.equal(shouldCheckMemoryPressure(5, 5), true);
 });
+
+test("shouldCheckMemoryPressure rejects invalid intervals", () => {
+  assert.throws(
+    () => shouldCheckMemoryPressure(1, 0),
+    /positive integer/,
+  );
+  assert.throws(
+    () => shouldCheckMemoryPressure(1, 1.5),
+    /positive integer/,
+  );
+});
