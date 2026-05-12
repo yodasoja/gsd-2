@@ -19,6 +19,10 @@ export interface MeasureMemoryPressureDeps {
   heapLimitBytes: () => number;
 }
 
+export function shouldCheckMemoryPressure(iteration: number, interval: number): boolean {
+  return iteration === 1 || iteration % interval === 0;
+}
+
 function defaultHeapLimitBytes(): number {
   const v8 = require("node:v8") as {
     getHeapStatistics?: () => { heap_size_limit?: number };
