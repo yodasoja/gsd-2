@@ -1,3 +1,6 @@
+// Project/App: GSD-2
+// File Purpose: Adapts shared GSD workflow handlers for MCP executor calls.
+
 import { ensureDbOpen } from "../bootstrap/dynamic-tools.js";
 import { sanitizeCompleteMilestoneParams } from "../bootstrap/sanitize-complete-milestone.js";
 import { loadWriteGateSnapshot, shouldBlockContextArtifactSaveInSnapshot, shouldBlockRootArtifactSaveInSnapshot } from "../bootstrap/write-gate.js";
@@ -25,6 +28,12 @@ import type { PlanSliceParams } from "./plan-slice.js";
 import { handlePlanSlice } from "./plan-slice.js";
 import type { ReplanSliceParams } from "./replan-slice.js";
 import { handleReplanSlice } from "./replan-slice.js";
+import type { ReopenMilestoneParams } from "./reopen-milestone.js";
+import { handleReopenMilestone } from "./reopen-milestone.js";
+import type { ReopenSliceParams } from "./reopen-slice.js";
+import { handleReopenSlice } from "./reopen-slice.js";
+import type { ReopenTaskParams } from "./reopen-task.js";
+import { handleReopenTask } from "./reopen-task.js";
 import type { ReassessRoadmapParams } from "./reassess-roadmap.js";
 import { handleReassessRoadmap } from "./reassess-roadmap.js";
 import type { ValidateMilestoneParams } from "./validate-milestone.js";
@@ -311,6 +320,9 @@ export type SliceCompleteExecutorParams = CompleteSliceParams;
 export type PlanMilestoneExecutorParams = PlanMilestoneParams;
 export type PlanSliceExecutorParams = PlanSliceParams;
 export type ReplanSliceExecutorParams = ReplanSliceParams;
+export type ReopenTaskExecutorParams = ReopenTaskParams;
+export type ReopenSliceExecutorParams = ReopenSliceParams;
+export type ReopenMilestoneExecutorParams = ReopenMilestoneParams;
 export type ValidateMilestoneExecutorParams = ValidateMilestoneParams;
 export type ReassessRoadmapExecutorParams = ReassessRoadmapParams;
 
@@ -368,6 +380,129 @@ export async function executeTaskComplete(
       details: { operation: "complete_task", error: msg },
     isError: true,
       };
+  }
+}
+
+export async function executeTaskReopen(
+  params: ReopenTaskExecutorParams,
+  basePath: string = process.cwd(),
+): Promise<ToolExecutionResult> {
+  const dbAvailable = await ensureDbOpen(basePath);
+  if (!dbAvailable) {
+    return {
+      content: [{ type: "text", text: "Error: GSD database is not available. Cannot reopen task." }],
+      details: { operation: "reopen_task", error: "db_unavailable" },
+      isError: true,
+    };
+  }
+  try {
+    const result = await handleReopenTask(params, basePath);
+    if ("error" in result) {
+      return {
+        content: [{ type: "text", text: `Error reopening task: ${result.error}` }],
+        details: { operation: "reopen_task", error: result.error },
+        isError: true,
+      };
+    }
+    return {
+      content: [{ type: "text", text: `Reopened task ${result.taskId} (${result.sliceId}/${result.milestoneId})` }],
+      details: {
+        operation: "reopen_task",
+        taskId: result.taskId,
+        sliceId: result.sliceId,
+        milestoneId: result.milestoneId,
+      },
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logError("tool", `reopen_task tool failed: ${msg}`, { tool: "gsd_task_reopen", error: String(err) });
+    return {
+      content: [{ type: "text", text: `Error reopening task: ${msg}` }],
+      details: { operation: "reopen_task", error: msg },
+      isError: true,
+    };
+  }
+}
+
+export async function executeSliceReopen(
+  params: ReopenSliceExecutorParams,
+  basePath: string = process.cwd(),
+): Promise<ToolExecutionResult> {
+  const dbAvailable = await ensureDbOpen(basePath);
+  if (!dbAvailable) {
+    return {
+      content: [{ type: "text", text: "Error: GSD database is not available. Cannot reopen slice." }],
+      details: { operation: "reopen_slice", error: "db_unavailable" },
+      isError: true,
+    };
+  }
+  try {
+    const result = await handleReopenSlice(params, basePath);
+    if ("error" in result) {
+      return {
+        content: [{ type: "text", text: `Error reopening slice: ${result.error}` }],
+        details: { operation: "reopen_slice", error: result.error },
+        isError: true,
+      };
+    }
+    return {
+      content: [{ type: "text", text: `Reopened slice ${result.sliceId} (${result.milestoneId})` }],
+      details: {
+        operation: "reopen_slice",
+        sliceId: result.sliceId,
+        milestoneId: result.milestoneId,
+        tasksReset: result.tasksReset,
+      },
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logError("tool", `reopen_slice tool failed: ${msg}`, { tool: "gsd_slice_reopen", error: String(err) });
+    return {
+      content: [{ type: "text", text: `Error reopening slice: ${msg}` }],
+      details: { operation: "reopen_slice", error: msg },
+      isError: true,
+    };
+  }
+}
+
+export async function executeMilestoneReopen(
+  params: ReopenMilestoneExecutorParams,
+  basePath: string = process.cwd(),
+): Promise<ToolExecutionResult> {
+  const dbAvailable = await ensureDbOpen(basePath);
+  if (!dbAvailable) {
+    return {
+      content: [{ type: "text", text: "Error: GSD database is not available. Cannot reopen milestone." }],
+      details: { operation: "reopen_milestone", error: "db_unavailable" },
+      isError: true,
+    };
+  }
+  try {
+    const result = await handleReopenMilestone(params, basePath);
+    if ("error" in result) {
+      return {
+        content: [{ type: "text", text: `Error reopening milestone: ${result.error}` }],
+        details: { operation: "reopen_milestone", error: result.error },
+        isError: true,
+      };
+    }
+    return {
+      content: [{ type: "text", text: `Reopened milestone ${result.milestoneId}` }],
+      details: {
+        operation: "reopen_milestone",
+        milestoneId: result.milestoneId,
+        slicesReset: result.slicesReset,
+        tasksReset: result.tasksReset,
+      },
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logError("tool", `reopen_milestone tool failed: ${msg}`, { tool: "gsd_milestone_reopen", error: String(err) });
+    return {
+      content: [{ type: "text", text: `Error reopening milestone: ${msg}` }],
+      details: { operation: "reopen_milestone", error: msg },
+      isError: true,
+    };
   }
 }
 

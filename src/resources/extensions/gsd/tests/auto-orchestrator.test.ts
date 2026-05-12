@@ -7,6 +7,11 @@ import assert from "node:assert/strict";
 import { createAutoOrchestrator, STUCK_WINDOW_SIZE } from "../auto/orchestrator.js";
 import type { AutoOrchestratorDeps } from "../auto/contracts.js";
 import type { GSDState } from "../types.js";
+import { createWiredDispatchAdapter } from "../auto.js";
+import { resolveDispatch, type DispatchContext } from "../auto-dispatch.js";
+import { RuleRegistry, setRegistry, resetRegistry } from "../rule-registry.js";
+import type { UnifiedRule } from "../rule-types.js";
+import { supportsStructuredQuestions } from "../workflow-mcp.js";
 
 function makeState(): GSDState {
   return {
@@ -62,9 +67,13 @@ function makeDeps(overrides: Partial<AutoOrchestratorDeps> = {}): { deps: AutoOr
       async cleanupOnStop() { calls.push("worktree.cleanup"); },
     },
     health: {
+      checkResourcesStale() {
+        calls.push("health.stale");
+        return null;
+      },
       async preAdvanceGate() {
         calls.push("health.pre");
-        return { allow: true };
+        return { kind: "pass" };
       },
       async postAdvanceRecord() { calls.push("health.post"); },
     },
@@ -74,6 +83,9 @@ function makeDeps(overrides: Partial<AutoOrchestratorDeps> = {}): { deps: AutoOr
     },
     notifications: {
       async notifyLifecycle(event) { calls.push(`notify:${event.name}`); },
+    },
+    uokGate: {
+      async emit(input) { calls.push(`gate:${input.gateId}:${input.outcome}`); },
     },
   };
 
@@ -96,9 +108,10 @@ test("start() advances and records active unit", async () => {
 });
 
 test("advance() returns blocked when health gate denies", async () => {
-  const { deps } = makeDeps({
+  const { deps, calls } = makeDeps({
     health: {
-      async preAdvanceGate() { return { allow: false, reason: "doctor-block" }; },
+      checkResourcesStale: () => null,
+      async preAdvanceGate() { return { kind: "fail", reason: "doctor-block" }; },
       async postAdvanceRecord() {},
     },
   });
@@ -109,6 +122,68 @@ test("advance() returns blocked when health gate denies", async () => {
   assert.equal(result.kind, "blocked");
   assert.equal(result.reason, "doctor-block");
   assert.equal(result.action, "pause");
+  assert.ok(calls.includes("gate:pre-dispatch-health-gate:manual-attention"));
+});
+
+test("advance() returns blocked stop when resources are stale", async () => {
+  const { deps, calls } = makeDeps({
+    health: {
+      checkResourcesStale: () => "resources changed since session start",
+      async preAdvanceGate() { return { kind: "pass" }; },
+      async postAdvanceRecord() {},
+    },
+  });
+  const orchestrator = createAutoOrchestrator(deps);
+
+  const result = await orchestrator.advance();
+
+  assert.equal(result.kind, "blocked");
+  assert.equal(result.reason, "resources changed since session start");
+  assert.equal(result.action, "stop");
+  assert.ok(calls.includes("gate:resource-version-guard:fail"));
+  assert.ok(!calls.includes("health.pre"));
+  assert.ok(!calls.includes("state.reconcile"));
+});
+
+test("advance() continues past pre-dispatch health gate when it throws", async () => {
+  const { deps, calls } = makeDeps({
+    health: {
+      checkResourcesStale: () => null,
+      async preAdvanceGate() { return { kind: "threw", error: new Error("boom") }; },
+      async postAdvanceRecord() {},
+    },
+  });
+  const orchestrator = createAutoOrchestrator(deps);
+
+  const result = await orchestrator.advance();
+
+  assert.equal(result.kind, "advanced");
+  assert.ok(calls.includes("gate:pre-dispatch-health-gate:manual-attention"));
+  assert.ok(calls.includes("state.reconcile"));
+  assert.ok(calls.includes("dispatch.decide"));
+});
+
+test("advance() forwards fixesApplied into pre-dispatch-health-gate pass findings", async () => {
+  let observed = "";
+  const { deps } = makeDeps({
+    health: {
+      checkResourcesStale: () => null,
+      async preAdvanceGate() { return { kind: "pass", fixesApplied: ["fix-a", "fix-b"] }; },
+      async postAdvanceRecord() {},
+    },
+    uokGate: {
+      async emit(input) {
+        if (input.gateId === "pre-dispatch-health-gate" && input.outcome === "pass") {
+          observed = input.findings ?? "";
+        }
+      },
+    },
+  });
+  const orchestrator = createAutoOrchestrator(deps);
+
+  await orchestrator.advance();
+
+  assert.equal(observed, "fix-a, fix-b");
 });
 
 test("advance() follows the ADR-015 invariant sequence before journaling advance", async () => {
@@ -121,7 +196,10 @@ test("advance() follows the ADR-015 invariant sequence before journaling advance
   assert.deepEqual(result.unit, { unitType: "execute-task", unitId: "T01" });
   assert.deepEqual(calls, [
     "runtime.lock",
+    "health.stale",
+    "gate:resource-version-guard:pass",
     "health.pre",
+    "gate:pre-dispatch-health-gate:pass",
     "state.reconcile",
     "dispatch.decide",
     "tool.compile",
@@ -623,4 +701,174 @@ test("stuck-loop: journal records the stuck-loop reason on advance-blocked", asy
   }
 
   assert.ok(calls.includes("journal:advance-blocked"));
+});
+
+// ─── #5789 parity: wired dispatch adapter mirrors runDispatch's resolveDispatch call ───
+
+test("wired DispatchAdapter forwards session-derived dispatch inputs identically to runDispatch", async () => {
+  const stateSnapshot = makeState();
+
+  // Install a capturing registry so we observe the DispatchContext both code paths
+  // build, and force a deterministic dispatch action so the parity assertion is
+  // about *inputs*, not rule evaluation.
+  const captured: DispatchContext[] = [];
+  const captureRule: UnifiedRule = {
+    name: "test-capture",
+    when: "dispatch",
+    evaluation: "first-match",
+    where: async (ctx: DispatchContext) => {
+      captured.push(ctx);
+      return {
+        action: "dispatch" as const,
+        unitType: "execute-task",
+        unitId: "T01",
+        prompt: "parity-fixture",
+      };
+    },
+    then: (r: unknown) => r,
+  };
+  setRegistry(new RuleRegistry([captureRule]));
+
+  try {
+    // Mock ExtensionContext + ExtensionAPI with the surface the wired adapter touches.
+    const fakeModelRegistry = {
+      getAll: () => [],
+      getProviderAuthMode: (_provider: string) => "apiKey" as const,
+    };
+    const ctx = {
+      model: {
+        provider: "anthropic",
+        baseUrl: "https://api.anthropic.com",
+        contextWindow: 200_000,
+      },
+      modelRegistry: fakeModelRegistry,
+    } as any;
+    const pi = {
+      getActiveTools: () => ["read_file", "write_file"],
+    } as any;
+    const basePath = "/tmp/parity-fixture";
+
+    // Path A — wired adapter (what createWiredAutoOrchestrationModule uses).
+    const adapter = createWiredDispatchAdapter(ctx, pi, basePath);
+    const adapterResult = await adapter.decideNextUnit({ stateSnapshot });
+
+    // Path B — direct resolveDispatch call mirroring phases.ts:runDispatch.
+    // Inline the same derivations runDispatch uses so any drift here is a parity break.
+    const prefs = undefined; // loadEffectiveGSDPreferences returns null for /tmp/parity-fixture.
+    const provider = ctx.model?.provider;
+    const authMode = provider && typeof ctx.modelRegistry?.getProviderAuthMode === "function"
+      ? ctx.modelRegistry.getProviderAuthMode(provider)
+      : undefined;
+    const activeTools = typeof pi.getActiveTools === "function" ? pi.getActiveTools() : [];
+    const structuredQuestionsAvailable: "true" | "false" =
+      prefs !== undefined && (prefs as { planning_depth?: string }).planning_depth === "deep"
+        ? "false"
+        : supportsStructuredQuestions(activeTools, {
+            authMode,
+            baseUrl: ctx.model?.baseUrl,
+          })
+          ? "true"
+          : "false";
+
+    const builtDirectCtx: DispatchContext = {
+      basePath,
+      mid: stateSnapshot.activeMilestone!.id,
+      midTitle: stateSnapshot.activeMilestone!.title,
+      state: stateSnapshot,
+      prefs,
+      structuredQuestionsAvailable,
+      sessionContextWindow: ctx.model?.contextWindow,
+      sessionProvider: ctx.model?.provider,
+      modelRegistry: ctx.modelRegistry,
+    };
+    const directAction = await resolveDispatch(builtDirectCtx);
+
+    // Two contexts captured: one per resolveDispatch call.
+    assert.equal(captured.length, 2, "expected two captured dispatch contexts");
+    const [adapterCtx, directCtx] = captured;
+
+    // Parity assertion: session-derived fields are identical.
+    assert.equal(adapterCtx.structuredQuestionsAvailable, directCtx.structuredQuestionsAvailable);
+    assert.equal(adapterCtx.sessionContextWindow, directCtx.sessionContextWindow);
+    assert.equal(adapterCtx.sessionProvider, directCtx.sessionProvider);
+    assert.equal(adapterCtx.modelRegistry, directCtx.modelRegistry);
+    assert.equal(adapterCtx.basePath, directCtx.basePath);
+    assert.equal(adapterCtx.mid, directCtx.mid);
+    assert.equal(adapterCtx.midTitle, directCtx.midTitle);
+
+    // Dispatch action equality: both flows reach the same dispatch decision.
+    assert.ok(adapterResult);
+    assert.equal(adapterResult.unitType, "execute-task");
+    assert.equal(adapterResult.unitId, "T01");
+    assert.equal(adapterResult.reason, "test-capture");
+    assert.equal(directAction.action, "dispatch");
+    if (directAction.action === "dispatch") {
+      assert.equal(directAction.unitType, adapterResult.unitType);
+      assert.equal(directAction.unitId, adapterResult.unitId);
+      assert.equal(directAction.matchedRule, adapterResult.reason);
+    }
+  } finally {
+    resetRegistry();
+  }
+});
+
+test("wired DispatchAdapter prefers caller-supplied dispatch inputs over ctx-derived values", async () => {
+  const stateSnapshot = makeState();
+  const captured: DispatchContext[] = [];
+  const captureRule: UnifiedRule = {
+    name: "test-capture-overrides",
+    when: "dispatch",
+    evaluation: "first-match",
+    where: async (ctx: DispatchContext) => {
+      captured.push(ctx);
+      return {
+        action: "dispatch" as const,
+        unitType: "execute-task",
+        unitId: "T01",
+        prompt: "override-fixture",
+      };
+    },
+    then: (r: unknown) => r,
+  };
+  setRegistry(new RuleRegistry([captureRule]));
+
+  try {
+    const ctxModelRegistry = {
+      getAll: () => [],
+      getProviderAuthMode: (_provider: string) => "apiKey" as const,
+    };
+    const overrideModelRegistry = {
+      getAll: () => [],
+      getProviderAuthMode: (_provider: string) => "oauth" as const,
+    };
+    const ctx = {
+      model: {
+        provider: "anthropic",
+        baseUrl: "https://api.anthropic.com",
+        contextWindow: 200_000,
+      },
+      modelRegistry: ctxModelRegistry,
+    } as any;
+    const pi = {
+      getActiveTools: () => [],
+    } as any;
+    const adapter = createWiredDispatchAdapter(ctx, pi, "/tmp/parity-fixture");
+
+    const result = await adapter.decideNextUnit({
+      stateSnapshot,
+      structuredQuestionsAvailable: "true",
+      sessionContextWindow: 500_000,
+      sessionProvider: "openai",
+      modelRegistry: overrideModelRegistry,
+    });
+
+    assert.ok(result);
+    assert.equal(captured.length, 1, "expected one captured dispatch context");
+    assert.equal(captured[0].structuredQuestionsAvailable, "true");
+    assert.equal(captured[0].sessionContextWindow, 500_000);
+    assert.equal(captured[0].sessionProvider, "openai");
+    assert.equal(captured[0].modelRegistry, overrideModelRegistry);
+  } finally {
+    resetRegistry();
+  }
 });

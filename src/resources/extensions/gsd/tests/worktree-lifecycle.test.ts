@@ -538,6 +538,31 @@ test("restoreToProjectRoot is no-op when originalBasePath is empty", () => {
   assert.equal(deps.calls.filter((c) => c.fn === "gitServiceFactory").length, 0);
 });
 
+test("restoreToProjectRoot completes session-state restore even when chdir fails (ADR-016 phase 3, #5693)", () => {
+  // The verb attempts process.chdir to s.basePath after restoring it. The
+  // chdir is best-effort; failure must not abort the session-state restore.
+  // We exercise that contract by pointing originalBasePath at a path that
+  // cannot be chdir'd into.
+  const s = makeSession();
+  s.originalBasePath = "/this/path/should/not/exist/in/any/test/env";
+  s.basePath = "/project/.gsd/worktrees/M001";
+  const deps = makeDeps();
+  const lifecycle = new WorktreeLifecycle(s, deps);
+
+  // Capture cwd so we can confirm we did NOT successfully chdir.
+  const cwdBefore = process.cwd();
+  lifecycle.restoreToProjectRoot();
+
+  // Session-state restore happened despite chdir failure.
+  assert.equal(s.basePath, "/this/path/should/not/exist/in/any/test/env");
+  assert.equal(
+    deps.calls.filter((c) => c.fn === "gitServiceFactory").length,
+    1,
+  );
+  // cwd is unchanged because chdir threw and was swallowed.
+  assert.equal(process.cwd(), cwdBefore);
+});
+
 // ─── adoptSessionRoot (ADR-016 phase 2 / B2, issue #5620) ─────────────────────
 
 test("adoptSessionRoot sets basePath and seeds originalBasePath on a fresh session", () => {

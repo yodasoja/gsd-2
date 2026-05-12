@@ -240,12 +240,14 @@ import { runAutoLoopWithUok } from "./uok/kernel.js";
 import { resolveUokFlags } from "./uok/flags.js";
 import { validateDirectory } from "./validate-directory.js";
 import { createAutoOrchestrator } from "./auto/orchestrator.js";
-import type { AutoOrchestrationModule, AutoOrchestratorDeps } from "./auto/contracts.js";
+import type { AutoOrchestrationModule, AutoOrchestratorDeps, DispatchAdapter } from "./auto/contracts.js";
 import { reconcileBeforeDispatch } from "./state-reconciliation.js";
 import { compileUnitToolContract } from "./tool-contract.js";
 import { createWorktreeSafetyModule } from "./worktree-safety.js";
 import { resolveManifest } from "./unit-context-manifest.js";
 import { classifyFailure } from "./recovery-classification.js";
+import { supportsStructuredQuestions } from "./workflow-mcp.js";
+import type { MinimalModelRegistry } from "./context-budget.js";
 // Slice-level parallelism (#2340)
 import { getEligibleSlices } from "./slice-parallel-eligibility.js";
 import { startSliceParallel } from "./slice-parallel-orchestrator.js";
@@ -1048,13 +1050,11 @@ export async function cleanupAfterLoopExit(ctx: ExtensionContext): Promise<void>
     initHealthWidget(ctx);
   }
 
-  // ADR-016 phase 3 (#5693): the stop-path basePath restore routes through
-  // `Lifecycle.restoreToProjectRoot()`, the sole owner of `s.basePath`
-  // mutation. The verb assigns `s.basePath` before any throwable work
-  // (rebuildGitService, cache invalidation), so a thrown error still leaves
-  // basePath restored — no fallback assignment needed at the call site.
-  // The chdir stays here because `restoreToProjectRoot` is a pure
-  // session-state mutation.
+  // ADR-016 phase 3 (#5693): the stop-path basePath restore + chdir routes
+  // through `Lifecycle.restoreToProjectRoot()`, the sole owner of both
+  // `s.basePath` mutation and the paired `process.chdir` for auto-loop
+  // transitions. The verb assigns `s.basePath` before any throwable work, so
+  // a thrown error still leaves basePath restored.
   if (s.originalBasePath) {
     try {
       buildLifecycle().restoreToProjectRoot();
@@ -1064,11 +1064,6 @@ export async function cleanupAfterLoopExit(ctx: ExtensionContext): Promise<void>
         `restore project root failed: ${err instanceof Error ? err.message : String(err)}`,
         { file: "auto.ts" },
       );
-    }
-    try {
-      process.chdir(s.originalBasePath);
-    } catch (err) {
-      logWarning("engine", `basePath restore/chdir failed: ${err instanceof Error ? err.message : String(err)}`, { file: "auto.ts" });
     }
   }
 
@@ -1384,19 +1379,13 @@ export async function stopAuto(
     }
 
     // ── Step 7: Restore basePath and chdir (ADR-016 phase 3, #5693) ──
-    // `restoreToProjectRoot` assigns s.basePath before any throwable work;
-    // no fallback assignment is needed at the call site.
+    // `restoreToProjectRoot` owns both s.basePath restore and process.chdir;
+    // no paired chdir is needed at the call site.
     if (s.originalBasePath) {
       try {
         buildLifecycle().restoreToProjectRoot();
       } catch (e) {
         debugLog("stop-cleanup-basepath", { error: e instanceof Error ? e.message : String(e) });
-      }
-      try {
-        process.chdir(s.basePath);
-      } catch (err) {
-        /* best-effort */
-        logWarning("engine", `chdir failed: ${err instanceof Error ? err.message : String(err)}`, { file: "auto.ts" });
       }
     }
 
@@ -1793,6 +1782,75 @@ function buildLifecycle(): WorktreeLifecycle {
 }
 
 /**
+ * Build the production `DispatchAdapter` used by `createWiredAutoOrchestrationModule`.
+ *
+ * Exported so tests can verify parity with `runDispatch`'s `resolveDispatch` call —
+ * the wired adapter must derive `structuredQuestionsAvailable`, `sessionContextWindow`,
+ * `sessionProvider`, and `modelRegistry` the same way phases.ts:runDispatch does.
+ */
+export function createWiredDispatchAdapter(
+  ctx: ExtensionContext,
+  pi: ExtensionAPI,
+  dispatchBasePath: string,
+): DispatchAdapter {
+  return {
+    async decideNextUnit(input) {
+      const state = input.stateSnapshot;
+      const active = state.activeMilestone;
+      if (!active) return null;
+
+      const prefs = loadEffectiveGSDPreferences(dispatchBasePath)?.preferences;
+
+      // Derive session-derived dispatch inputs the same way phases.ts:runDispatch does
+      // (#5789). Prefer caller-supplied values when present so test harnesses and
+      // alternative wirings can inject deterministic snapshots; otherwise pull from
+      // the captured pi/ctx references.
+      const sessionProvider = input.sessionProvider ?? ctx.model?.provider;
+      const sessionContextWindow = input.sessionContextWindow ?? ctx.model?.contextWindow;
+      const modelRegistry = input.modelRegistry ?? (ctx.modelRegistry as MinimalModelRegistry | undefined);
+      const authMode =
+        sessionProvider && typeof ctx.modelRegistry?.getProviderAuthMode === "function"
+          ? ctx.modelRegistry.getProviderAuthMode(sessionProvider)
+          : undefined;
+      const activeTools = typeof pi.getActiveTools === "function" ? pi.getActiveTools() : [];
+      // Mirrors runDispatch: deep-planning keeps approval gates in plain chat
+      // because structured questions can be cancelled outside the chat turn on
+      // some transports.
+      const structuredQuestionsAvailable =
+        input.structuredQuestionsAvailable ??
+        (prefs?.planning_depth === "deep"
+          ? "false"
+          : supportsStructuredQuestions(activeTools, {
+              authMode,
+              baseUrl: ctx.model?.baseUrl,
+            })
+            ? "true"
+            : "false");
+
+      const action = await resolveDispatch({
+        basePath: dispatchBasePath,
+        mid: active.id,
+        midTitle: active.title,
+        state,
+        prefs,
+        structuredQuestionsAvailable,
+        sessionContextWindow,
+        sessionProvider,
+        modelRegistry,
+      });
+
+      if (action.action !== "dispatch") return null;
+      return {
+        unitType: action.unitType,
+        unitId: action.unitId,
+        reason: action.matchedRule ?? "dispatch",
+        preconditions: [],
+      };
+    },
+  };
+}
+
+/**
  * Thin entry glue for the new Auto Orchestration module.
  *
  * This intentionally wires only dispatch + error notification today, with
@@ -1801,7 +1859,7 @@ function buildLifecycle(): WorktreeLifecycle {
  */
 export function createWiredAutoOrchestrationModule(
   ctx: ExtensionContext,
-  _pi: ExtensionAPI,
+  pi: ExtensionAPI,
   dispatchBasePath: string,
   runtimeBasePath = resolveProjectRoot(dispatchBasePath),
 ): AutoOrchestrationModule {
@@ -1830,30 +1888,7 @@ export function createWiredAutoOrchestrationModule(
         };
       },
     },
-    dispatch: {
-      async decideNextUnit(input) {
-        const state = input.stateSnapshot;
-        const active = state.activeMilestone;
-        if (!active) return null;
-
-        const prefs = loadEffectiveGSDPreferences(dispatchBasePath)?.preferences;
-        const action = await resolveDispatch({
-          basePath: dispatchBasePath,
-          mid: active.id,
-          midTitle: active.title,
-          state,
-          prefs,
-        });
-
-        if (action.action !== "dispatch") return null;
-        return {
-          unitType: action.unitType,
-          unitId: action.unitId,
-          reason: action.matchedRule ?? "dispatch",
-          preconditions: [],
-        };
-      },
-    },
+    dispatch: createWiredDispatchAdapter(ctx, pi, dispatchBasePath),
     recovery: {
       async classifyAndRecover(input) {
         const recovery = classifyFailure(input);
@@ -1902,12 +1937,25 @@ export function createWiredAutoOrchestrationModule(
       async cleanupOnStop() {},
     },
     health: {
+      checkResourcesStale() {
+        return checkResourcesStale(s.resourceVersionOnStart);
+      },
       async preAdvanceGate() {
-        const gate = await preDispatchHealthGate(dispatchBasePath);
-        return {
-          allow: gate.proceed,
-          reason: gate.reason,
-        };
+        try {
+          const gate = await preDispatchHealthGate(dispatchBasePath);
+          if (gate.proceed) {
+            return {
+              kind: "pass",
+              fixesApplied: gate.fixesApplied,
+            };
+          }
+          return {
+            kind: "fail",
+            reason: gate.reason ?? "Pre-dispatch health check failed — run /gsd doctor for details.",
+          };
+        } catch (error) {
+          return { kind: "threw", error };
+        }
       },
       async postAdvanceRecord(result) {
         if (result.kind === "error") {
@@ -1972,6 +2020,43 @@ export function createWiredAutoOrchestrationModule(
       async notifyLifecycle(event) {
         if (event.name === "error") {
           ctx.ui.notify(event.detail ?? "auto orchestration error", "error");
+        }
+      },
+    },
+    uokGate: {
+      async emit(input) {
+        const prefs = loadEffectiveGSDPreferences(dispatchBasePath)?.preferences;
+        const uokFlags = resolveUokFlags(prefs);
+        if (!uokFlags.gates) return;
+        const milestoneId = input.milestoneId ?? s.currentMilestoneId ?? undefined;
+        try {
+          const { UokGateRunner } = await import("./uok/gate-runner.js");
+          const runner = new UokGateRunner();
+          runner.register({
+            id: input.gateId,
+            type: input.gateType,
+            execute: async () => ({
+              outcome: input.outcome,
+              failureClass: input.failureClass,
+              rationale: input.rationale,
+              findings: input.findings ?? "",
+            }),
+          });
+          await runner.run(input.gateId, {
+            basePath: dispatchBasePath,
+            traceId: `pre-dispatch:${flowId}`,
+            turnId: `orch-${seq}`,
+            milestoneId,
+            unitType: "pre-dispatch",
+            unitId: `orch-${seq}`,
+          });
+        } catch (err) {
+          logWarning("engine", `uok gate emit failed: ${getErrorMessage(err)}`, {
+            file: "auto.ts",
+            gateId: input.gateId,
+            gateType: input.gateType,
+            ...(milestoneId ? { milestoneId } : {}),
+          });
         }
       },
     },

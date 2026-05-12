@@ -7,6 +7,7 @@ import {
   ARTIFACT_KEYS,
   KNOWN_UNIT_TYPES,
   UNIT_MANIFESTS,
+  resolveSubagentPermissionContract,
   resolveManifest,
   type ArtifactKey,
   type ContextModePolicy,
@@ -244,9 +245,11 @@ test('#4934: only execute-task and reactive-execute may use tools.mode "all" (fu
 test('planning-dispatch mode is reserved for slice-level decomposition and completion units', () => {
   const allowedDispatchUnits = new Set([
     "plan-slice",
+    "research-slice",
     "refine-slice",
     "complete-slice",
     "complete-milestone",
+    "gate-evaluate",
     // Deep planning mode: research-project orchestrates 4 parallel research
     // subagents (stack/features/architecture/pitfalls). Subagent dispatch is
     // the unit's core mechanism — without it, the unit cannot do its job.
@@ -263,6 +266,24 @@ test('planning-dispatch mode is reserved for slice-level decomposition and compl
       );
     }
   }
+});
+
+test('Unit Tool Contract exposes subagent dispatch permissions', () => {
+  assert.deepEqual(resolveSubagentPermissionContract("plan-slice"), {
+    allowed: true,
+    allowedSubagents: ["scout", "planner"],
+    toolsMode: "planning-dispatch",
+  });
+  assert.deepEqual(resolveSubagentPermissionContract("gate-evaluate"), {
+    allowed: true,
+    allowedSubagents: ["reviewer", "security", "tester"],
+    toolsMode: "planning-dispatch",
+  });
+  assert.deepEqual(resolveSubagentPermissionContract("discuss-milestone"), {
+    allowed: false,
+    allowedSubagents: [],
+    toolsMode: "planning",
+  });
 });
 
 test('planning-dispatch manifests declare non-empty allowedSubagents lists', () => {

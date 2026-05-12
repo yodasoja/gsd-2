@@ -11,6 +11,8 @@ import { handleCmux } from "../../commands-cmux.js";
 import { setSessionModelOverride } from "../../session-model-override.js";
 import { projectRoot } from "../context.js";
 import { formattedShortcutPair } from "../../shortcut-defs.js";
+import { getVisualBriefOutputDir } from "../../../visual-brief/artifact-policy.js";
+import { buildVisualBriefPrompt, parseVisualBriefArgs, VISUAL_BRIEF_USAGE } from "../../../visual-brief/prompts.js";
 
 export function showHelp(ctx: ExtensionCommandContext, args = ""): void {
   const summaryLines = [
@@ -27,6 +29,7 @@ export function showHelp(ctx: ExtensionCommandContext, args = ""): void {
     `  /gsd parallel watch Parallel monitor  (${formattedShortcutPair("parallel")})`,
     `  /gsd notifications  Notification history  (${formattedShortcutPair("notifications")})`,
     "  /gsd visualize      Interactive 10-tab TUI",
+    "  /gsd brief <mode>   Visual HTML brief (diagram, plan, diff, recap, table, slides)",
     "  /gsd queue          Show queued/dispatched units",
     "",
     "COURSE CORRECTION",
@@ -75,6 +78,7 @@ export function showHelp(ctx: ExtensionCommandContext, args = ""): void {
     `  /gsd parallel watch Open parallel worker monitor  (${formattedShortcutPair("parallel")})`,
     "  /gsd widget         Cycle status widget  [full|small|min|off]",
     "  /gsd visualize      Interactive 10-tab TUI (progress, timeline, deps, metrics, health, agent, changes, knowledge, captures, export)",
+    "  /gsd brief <mode>   Generate a visual HTML brief  [diagram|plan|diff|recap|table|slides] [topic] [--slides]",
     "  /gsd queue          Show queued/dispatched units and execution order",
     "  /gsd history        View execution history  [--cost] [--phase] [--model] [N]",
     "  /gsd changelog      Show categorized release notes  [version]",
@@ -201,6 +205,22 @@ export async function handleVisualize(ctx: ExtensionCommandContext): Promise<voi
   if (result === undefined) {
     ctx.ui.notify("Visualizer requires an interactive terminal. Use /gsd status for a text-based overview.", "warning");
   }
+}
+
+export async function handleBrief(args: string, ctx: ExtensionCommandContext, pi?: ExtensionAPI): Promise<void> {
+  const request = parseVisualBriefArgs(args);
+  if (!request) {
+    ctx.ui.notify(VISUAL_BRIEF_USAGE, "info");
+    return;
+  }
+
+  if (!pi?.sendUserMessage) {
+    ctx.ui.notify("Visual brief generation is unavailable in this context.", "warning");
+    return;
+  }
+
+  const outputDir = getVisualBriefOutputDir();
+  pi.sendUserMessage(buildVisualBriefPrompt(request, { outputDir }));
 }
 
 export async function handleSetup(args: string, ctx: ExtensionCommandContext, pi?: ExtensionAPI): Promise<void> {
@@ -427,6 +447,10 @@ export async function handleCoreCommand(
   }
   if (trimmed === "visualize") {
     await handleVisualize(ctx);
+    return true;
+  }
+  if (trimmed === "brief" || trimmed.startsWith("brief ")) {
+    await handleBrief(trimmed.replace(/^brief\s*/, "").trim(), ctx, pi);
     return true;
   }
   if (trimmed === "widget" || trimmed.startsWith("widget ")) {
