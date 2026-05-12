@@ -76,6 +76,9 @@ import {
   teardownAutoWorktree,
 } from "./auto-worktree.js";
 
+const recentWorktreeMergeFailures = new Map<string, number>();
+const MERGE_FAILURE_DEDUPE_MS = 60_000;
+
 // ─── Types ───────────────────────────────────────────────────────────────
 
 export interface NotifyCtx {
@@ -836,6 +839,30 @@ function rebuildGitService(
   s.gitService = deps.gitServiceFactory(s.basePath);
 }
 
+function emitWorktreeMergeFailedOnce(
+  basePath: string,
+  milestoneId: string,
+  error: string,
+): void {
+  const now = Date.now();
+  const key = `${basePath}\0${milestoneId}\0${error}`;
+  const previous = recentWorktreeMergeFailures.get(key);
+  if (previous && now - previous < MERGE_FAILURE_DEDUPE_MS) return;
+  recentWorktreeMergeFailures.set(key, now);
+  for (const [candidate, ts] of recentWorktreeMergeFailures) {
+    if (now - ts >= MERGE_FAILURE_DEDUPE_MS) {
+      recentWorktreeMergeFailures.delete(candidate);
+    }
+  }
+  emitJournalEvent(basePath, {
+    ts: new Date().toISOString(),
+    flowId: randomUUID(),
+    seq: 0,
+    eventType: "worktree-merge-failed",
+    data: { milestoneId, error },
+  });
+}
+
 // ─── Session-less merge entry (ADR-016 phase 2 / A1) ─────────────────────
 
 /**
@@ -985,13 +1012,7 @@ function _mergeWorktreeModeImpl(
       error: msg,
       fallback: "chdir-to-project-root",
     });
-    emitJournalEvent(originalBasePath || worktreeBasePath, {
-      ts: new Date().toISOString(),
-      flowId: randomUUID(),
-      seq: 0,
-      eventType: "worktree-merge-failed",
-      data: { milestoneId, error: msg },
-    });
+    emitWorktreeMergeFailedOnce(originalBasePath || worktreeBasePath, milestoneId, msg);
     // Surface a clear, actionable error. Worktree and milestone branch
     // are intentionally preserved — nothing has been deleted. User can
     // retry /gsd dispatch complete-milestone or merge manually once the

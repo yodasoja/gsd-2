@@ -1739,6 +1739,41 @@ export function mergeMilestoneToMain(
     }
   }
 
+  if (nativeIsAncestor(originalBasePath_, milestoneBranch, mainBranch)) {
+    debugLog("mergeMilestoneToMain", {
+      action: "skip-squash-already-merged",
+      milestoneId,
+      milestoneBranch,
+      mainBranch,
+    });
+    try {
+      clearProjectRootStateFiles(originalBasePath_, milestoneId);
+    } catch (err) {
+      logWarning("worktree", `clearProjectRootStateFiles failed during already-merged cleanup: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    try {
+      removeWorktree(originalBasePath_, milestoneId, {
+        branch: milestoneBranch,
+        deleteBranch: false,
+      });
+    } catch (err) {
+      logWarning("worktree", `worktree removal failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    try {
+      nativeBranchDelete(originalBasePath_, milestoneBranch);
+    } catch (err) {
+      logWarning("worktree", `git branch-delete failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    setActiveWorkspace(null);
+    nudgeGitBranchCache(previousCwd);
+    try {
+      process.chdir(originalBasePath_);
+    } catch (err) {
+      logWarning("worktree", `chdir to project root after already-merged cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return { commitMessage, pushed: false, prCreated: false, codeFilesChanged: true };
+  }
+
   // 7. Shelter queued milestone directories before the squash merge (#2505).
   // The milestone branch may contain copies of queued milestone dirs (via
   // copyPlanningArtifacts), so `git merge --squash` rejects when those same

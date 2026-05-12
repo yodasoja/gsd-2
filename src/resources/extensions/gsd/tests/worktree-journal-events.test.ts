@@ -318,11 +318,19 @@ describe("worktree journal events", () => {
       );
     }
 
+    new WorktreeLifecycle(s, deps).exitMilestone(
+      "M001",
+      { merge: true },
+      makeNotifyCtx(),
+    );
+
     const entries = readJournalEntries(tmp);
-    const failed = entries.find(e => e.eventType === "worktree-merge-failed");
+    const failures = entries.filter(e => e.eventType === "worktree-merge-failed");
+    const failed = failures[0];
     assert.ok(failed, "worktree-merge-failed event should be emitted");
     assert.equal(failed!.data?.milestoneId, "M001");
     assert.equal(failed!.data?.error, "conflict in main");
+    assert.equal(failures.length, 1, "duplicate merge failures are journaled once");
   });
 
   test("journal entries have valid flowId, seq, and ts fields", () => {
