@@ -44,6 +44,7 @@ import {
   nativeDetectMainBranch,
   nativeCheckoutBranch,
   nativeBranchList,
+  nativeBranchExists,
   nativeBranchListMerged,
   nativeBranchDelete,
   nativeWorktreeRemove,
@@ -202,9 +203,15 @@ export function decideSurvivorAction(
 export function auditOrphanedMilestoneBranches(
   basePath: string,
   isolationMode: "worktree" | "branch" | "none",
+  gitDeps: {
+    branchList?: typeof nativeBranchList;
+    branchExists?: typeof nativeBranchExists;
+  } = {},
 ): { recovered: string[]; warnings: string[] } {
   const recovered: string[] = [];
   const warnings: string[] = [];
+  const branchList = gitDeps.branchList ?? nativeBranchList;
+  const branchExists = gitDeps.branchExists ?? nativeBranchExists;
 
   // Skip in none mode — no milestone branches are created
   if (isolationMode === "none") return { recovered, warnings };
@@ -213,11 +220,13 @@ export function auditOrphanedMilestoneBranches(
   if (!isDbAvailable()) return { recovered, warnings };
 
   let milestoneBranches: string[];
+  let milestoneBranchListAvailable = true;
   try {
-    milestoneBranches = nativeBranchList(basePath, "milestone/*");
+    milestoneBranches = branchList(basePath, "milestone/*");
   } catch {
+    milestoneBranchListAvailable = false;
     // git branch list failed — fall through with an empty branch set so the
-    // branch-less orphan pass at the bottom of this function can still run.
+    // branch-less orphan pass can still run after per-milestone verification.
     milestoneBranches = [];
   }
 
@@ -379,6 +388,16 @@ export function auditOrphanedMilestoneBranches(
   for (const m of completedMilestones) {
     if (m.status !== "complete") continue;
     if (seenMilestoneIds.has(m.id)) continue; // already processed in the branch loop
+    if (!milestoneBranchListAvailable) {
+      try {
+        if (branchExists(basePath, `milestone/${m.id}`)) continue;
+      } catch (err) {
+        warnings.push(
+          `Could not verify whether milestone/${m.id} still exists; skipping branch-less worktree cleanup for safety: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        continue;
+      }
+    }
     const wtDir = getWorktreeDir(basePath, m.id);
     if (!existsSync(wtDir)) continue;
     if (!isInsideWorktreesDir(basePath, wtDir)) {

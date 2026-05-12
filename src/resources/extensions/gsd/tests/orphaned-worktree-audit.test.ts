@@ -278,6 +278,51 @@ describe("auditOrphanedMilestoneBranches", () => {
     assert.ok(!existsSync(wtDir), "branch-less orphan worktree dir should be removed");
   });
 
+  test("#5879 — branch list failure still cleans complete orphan only after branch absence is verified", () => {
+    insertMilestone({ id: "M001", title: "Test", status: "complete" });
+
+    const wtDir = join(dir, ".gsd", "worktrees", "M001");
+    mkdirSync(wtDir, { recursive: true });
+    writeFileSync(join(wtDir, "leftover.txt"), "stranded from a prior session\n");
+
+    const result = auditOrphanedMilestoneBranches(dir, "worktree", {
+      branchList: () => {
+        throw new Error("branch list failed");
+      },
+      branchExists: (_basePath, branch) => {
+        assert.equal(branch, "milestone/M001");
+        return false;
+      },
+    });
+
+    assert.ok(
+      result.recovered.some((r) => r.includes("M001") && r.includes("branch already deleted")),
+      `should report verified branch-less orphan cleanup; got: ${JSON.stringify(result.recovered)}`,
+    );
+    assert.ok(!existsSync(wtDir), "verified branch-less orphan worktree dir should be removed");
+  });
+
+  test("#5879 — branch list failure preserves complete worktree when branch still exists", () => {
+    insertMilestone({ id: "M001", title: "Test", status: "complete" });
+
+    const wtDir = join(dir, ".gsd", "worktrees", "M001");
+    mkdirSync(wtDir, { recursive: true });
+    writeFileSync(join(wtDir, "live-work.txt"), "do not delete\n");
+
+    const result = auditOrphanedMilestoneBranches(dir, "worktree", {
+      branchList: () => {
+        throw new Error("branch list failed");
+      },
+      branchExists: (_basePath, branch) => {
+        assert.equal(branch, "milestone/M001");
+        return true;
+      },
+    });
+
+    assert.deepStrictEqual(result.recovered, []);
+    assert.ok(existsSync(wtDir), "worktree dir must be preserved when branch existence is verified");
+  });
+
   test("#5879 — skips branch-less orphan for milestone that is not complete", () => {
     // Defensive: only `complete` milestones get the branch-less cleanup. An
     // `active` milestone with no branch but a worktree dir is a different
@@ -289,6 +334,26 @@ describe("auditOrphanedMilestoneBranches", () => {
     writeFileSync(join(wtDir, "live-work.txt"), "do not delete\n");
 
     const result = auditOrphanedMilestoneBranches(dir, "worktree");
+
+    assert.deepStrictEqual(result.recovered, []);
+    assert.ok(existsSync(wtDir), "active milestone worktree dir must be preserved");
+  });
+
+  test("#5879 — branch list failure does not delete worktree for milestone that is not complete", () => {
+    insertMilestone({ id: "M001", title: "Test", status: "active" });
+
+    const wtDir = join(dir, ".gsd", "worktrees", "M001");
+    mkdirSync(wtDir, { recursive: true });
+    writeFileSync(join(wtDir, "live-work.txt"), "do not delete\n");
+
+    const result = auditOrphanedMilestoneBranches(dir, "worktree", {
+      branchList: () => {
+        throw new Error("branch list failed");
+      },
+      branchExists: () => {
+        throw new Error("branchExists should not be called for active milestones");
+      },
+    });
 
     assert.deepStrictEqual(result.recovered, []);
     assert.ok(existsSync(wtDir), "active milestone worktree dir must be preserved");
