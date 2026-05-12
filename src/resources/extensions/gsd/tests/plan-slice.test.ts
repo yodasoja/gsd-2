@@ -125,6 +125,31 @@ test('handlePlanSlice advances DB-derived state out of planning immediately', as
   }
 });
 
+test('handlePlanSlice clears sketch flag so DB-derived state leaves refining', async () => {
+  const base = makeTmpBase();
+  openDatabase(join(base, '.gsd', 'gsd.db'));
+
+  try {
+    insertMilestone({ id: 'M001', title: 'Milestone', status: 'active' });
+    insertSlice({ id: 'S02', milestoneId: 'M001', title: 'Planning slice', status: 'pending', demo: 'Rendered plans exist.', isSketch: true });
+
+    invalidateStateCache();
+    const before = await deriveState(base);
+    assert.equal(before.phase, 'refining');
+
+    const result = await handlePlanSlice(validParams(), base);
+    assert.ok(!('error' in result), `unexpected error: ${'error' in result ? result.error : ''}`);
+    assert.equal(getSlice('M001', 'S02')?.is_sketch, 0, 'planned slice must no longer be treated as a sketch');
+
+    invalidateStateCache();
+    const after = await deriveState(base);
+    assert.notEqual(after.phase, 'refining');
+    assert.equal(after.progress?.tasks?.total, 2);
+  } finally {
+    cleanup(base);
+  }
+});
+
 test('handlePlanSlice leaves omitted enrichment fields empty instead of rendering placeholders', async () => {
   const base = makeTmpBase();
   openDatabase(join(base, '.gsd', 'gsd.db'));

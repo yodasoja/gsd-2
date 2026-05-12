@@ -10,6 +10,7 @@ import {
   upsertTaskPlanning,
   insertGateRow,
   updateSliceStatus,
+  setSliceSketchFlag,
 } from "../gsd-db.js";
 import type { GateId } from "../types.js";
 import { invalidateStateCache } from "../state.js";
@@ -184,6 +185,7 @@ export async function handlePlanSlice(
       if (isDeferredStatus(parentSlice.status)) {
         updateSliceStatus(params.milestoneId, params.sliceId, "pending");
       }
+      setSliceSketchFlag(params.milestoneId, params.sliceId, false);
 
       upsertSlicePlanning(params.milestoneId, params.sliceId, {
         goal: params.goal,
