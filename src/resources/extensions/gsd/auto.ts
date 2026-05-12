@@ -1044,6 +1044,7 @@ export async function cleanupAfterLoopExit(ctx: ExtensionContext): Promise<void>
   // visible so the user still has a resumable auto-mode signal on screen.
   if (!s.paused) {
     ctx.ui.setStatus("gsd-auto", undefined);
+    ctx.ui.setWidget("gsd-progress", undefined);
     if (s.completionStopInProgress) {
       s.completionStopInProgress = false;
     }
