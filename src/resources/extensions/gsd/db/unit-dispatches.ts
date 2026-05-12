@@ -524,7 +524,7 @@ export function getRecentUnitKeysForProjectRoot(
   if (!isDbAvailable()) return [];
   const db = _getAdapter()!;
   const rows = db.prepare(
-    `SELECT ud.unit_id
+    `SELECT ud.unit_type, ud.unit_id
      FROM unit_dispatches ud
      INNER JOIN workers w ON w.worker_id = ud.worker_id
      WHERE w.project_root_realpath = :project_root_realpath
@@ -533,8 +533,8 @@ export function getRecentUnitKeysForProjectRoot(
   ).all({
     ":project_root_realpath": projectRootRealpath,
     ":limit": limit,
-  }) as Array<{ unit_id: string }>;
-  return rows.reverse().map((r) => ({ key: r.unit_id }));
+  }) as Array<{ unit_type: string; unit_id: string }>;
+  return rows.reverse().map((r) => ({ key: `${r.unit_type}/${r.unit_id}` }));
 }
 
 /**
