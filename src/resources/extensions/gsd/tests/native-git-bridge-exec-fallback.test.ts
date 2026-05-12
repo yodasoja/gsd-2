@@ -112,15 +112,16 @@ process.exit(result.status ?? 1);
     git(["add", "."], repo);
 
     const originalPath = process.env.PATH ?? "";
-    const originalGitEnvPath = GIT_NO_PROMPT_ENV.PATH;
+    const gitEnv = GIT_NO_PROMPT_ENV as NodeJS.ProcessEnv;
+    const originalGitEnvPath = gitEnv.PATH;
     try {
       process.env.PATH = `${bin}${delimiter}${originalPath}`;
-      GIT_NO_PROMPT_ENV.PATH = process.env.PATH;
+      gitEnv.PATH = process.env.PATH;
       const result = nativeCommit(repo, "test: retry ENOBUFS commit");
       assert.ok(result !== null, "commit should succeed after retry");
     } finally {
       process.env.PATH = originalPath;
-      GIT_NO_PROMPT_ENV.PATH = originalGitEnvPath;
+      gitEnv.PATH = originalGitEnvPath;
     }
 
     assert.equal(readFileSync(attempts, "utf-8").length, 2);
