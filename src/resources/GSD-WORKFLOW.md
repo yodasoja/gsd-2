@@ -448,6 +448,13 @@ What differed from the plan and why (or "None").
 
 The one-liner must be substantive: "JWT auth with refresh rotation using jose" not "Authentication implemented."
 
+When `key_files` or `key_decisions` are empty, render them as empty YAML lists:
+
+```yaml
+key_files: []
+key_decisions: []
+```
+
 **Slice summary:** Written when all tasks in a slice complete. Compresses all task summaries. Includes `drill_down_paths` to each task summary. During slice completion, review task summaries for `key_decisions` and ensure any significant ones are captured in `.gsd/DECISIONS.md`.
 
 **Milestone summary:** Updated each time a slice completes. Compresses all slice summaries. This is what gets injected into later slice planning instead of loading many individual summaries.
