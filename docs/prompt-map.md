@@ -101,6 +101,19 @@ the memories layer.
 
 Budget enforcement: `context-budget.ts` computes `preambleBudgetChars`, `summaryBudgetChars`, `verificationBudgetChars` from the model's context window. Sections are truncated at markdown section boundaries, not mid-sentence.
 
+### 4a. Tool Policy Modes
+
+Auto-mode unit manifests declare a runtime-enforced `tools` policy. `write-gate.ts` checks the active unit before each tool call.
+
+| Mode | Allowed surface |
+|------|-----------------|
+| `all` | Read, source writes, Bash, and subagents. Used by execution units that run in milestone worktrees. |
+| `read-only` | Read tools only. No shell, writes, or subagents. |
+| `planning` | Read tools, `.gsd/**` writes, and safe read-only Bash. No subagents. |
+| `planning-dispatch` | Same as `planning`, plus subagents explicitly listed by the manifest. |
+| `docs` | Same as `planning`, plus writes to configured documentation globs. No subagents. |
+| `verification` | Read tools and Bash for build/test verification commands such as `npm run build`, `npm test`, `pnpm test`, `vitest`, `jest`, and `go test`; writes remain restricted to `.gsd/**`, and subagents are blocked. |
+
 ---
 
 ## 5. The 44 Prompt Files — Full Inventory
@@ -204,7 +217,7 @@ run-uat  (user acceptance tests)
 |--------|---------|-----------------|
 | `gate-evaluate.md` | Spawn one subagent per quality gate in parallel. Verifies `gsd_save_gate_result` called. | `subagent` × N |
 | `validate-milestone.md` | 3 parallel reviewers: (A) requirements, (B) integration, (C) acceptance. | `subagent` × 3, `gsd_validate_milestone` |
-| `run-uat.md` | Execute UAT. Modes: artifact-driven, runtime, browser, human-experience. | `gsd_summary_save(ASSESSMENT)` |
+| `run-uat.md` | Execute UAT. Modes: artifact-driven, runtime, browser, human-experience. Runs under `verification` tools policy, so Bash is limited to read-only inspection and build/test verification commands. | `gsd_summary_save(ASSESSMENT)`, verification Bash |
 
 ### 5f. Completion Flow
 
