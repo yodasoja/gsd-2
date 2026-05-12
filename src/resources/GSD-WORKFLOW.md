@@ -560,7 +560,7 @@ In all modes, slices and tasks commit sequentially on the active branch; there a
 
 1. **Milestone starts** → capture the current integration branch.
 2. **Optional isolation** → create `milestone/M001` only when `git.isolation` is `worktree` or `branch`.
-3. **Per-task commits** — atomic, descriptive, bisectable.
+3. **Per-task commits** — atomic, descriptive, bisectable, and published only after execute-task verification passes.
 4. **Slice completes** → write slice summary, UAT script, roadmap checkbox, and milestone summary.
 5. **Milestone completes** → if isolated, squash-merge the milestone branch back to the captured integration branch and clean up the worktree/branch.
 
@@ -573,6 +573,8 @@ fix: handle empty state rebuild
 ```
 
 In `none` mode these commits land directly on the current branch. In isolated modes they land on `milestone/<MID>` and are squashed back at milestone completion.
+
+Execute-task closeout is fail-closed: the system writes verification evidence first, defers the task commit or snapshot until verification passes, and pauses instead of publishing changes when verification fails or cannot complete.
 
 ### Commit Conventions
 
