@@ -254,14 +254,22 @@ test("#5453: complete-milestone uses all tools so bash verification is not plann
     allowedSubagents: ["*"],
     toolsMode: "all",
   });
-  const gitVerification = shouldBlockPlanningUnit(
-    "bash",
-    "git diff --name-only",
-    process.cwd(),
-    "complete-milestone",
-    manifest.tools,
-  );
-  assert.strictEqual(gitVerification.block, false, gitVerification.reason);
+  // Runtime gate-level regression: these verification commands were blocked
+  // under planning-dispatch in #5453; complete-milestone must bypass that gate.
+  for (const cmd of ["git diff --name-only HEAD~1", "git log -n1 --oneline"]) {
+    const result = shouldBlockPlanningUnit(
+      "bash",
+      cmd,
+      process.cwd(),
+      "complete-milestone",
+      manifest.tools,
+    );
+    assert.strictEqual(
+      result.block,
+      false,
+      `shouldBlockPlanningUnit must not block ${cmd} for complete-milestone: ${result.reason}`,
+    );
+  }
 });
 
 test('planning-dispatch mode is reserved for slice-level decomposition and completion units', () => {
