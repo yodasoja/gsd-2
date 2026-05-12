@@ -11,7 +11,7 @@ const source = readFileSync(
 
 test("postUnitPreVerification blocks on git action failure", () => {
   const failureBlock = extractSourceRegion(source, 'if (gitResult.status === "failed")');
-  assert.ok(failureBlock.includes('ctx.ui.notify(failureMsg, "error")'));
+  assert.ok(failureBlock.includes('ctx.ui.notify(failureMsg, opts?.softFailure ? "warning" : "error")'));
   assert.ok(failureBlock.includes("await pauseAuto(ctx, pi)"));
   assert.ok(failureBlock.includes('return "dispatched"'));
   assert.ok(!failureBlock.includes("git-action-failed-nonblocking"));
