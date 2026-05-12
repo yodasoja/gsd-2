@@ -130,7 +130,17 @@ export class SubagentRunStore {
 		const filePath = this.pathFor(runId);
 		if (!fs.existsSync(filePath)) return null;
 		try {
-			return JSON.parse(fs.readFileSync(filePath, "utf-8")) as SubagentRunRecord;
+			const parsed = JSON.parse(fs.readFileSync(filePath, "utf-8")) as Partial<SubagentRunRecord>;
+			if (
+				!parsed ||
+				typeof parsed !== "object" ||
+				typeof parsed.runId !== "string" ||
+				typeof parsed.updatedAt !== "string" ||
+				!Array.isArray(parsed.children)
+			) {
+				return null;
+			}
+			return parsed as SubagentRunRecord;
 		} catch {
 			return null;
 		}

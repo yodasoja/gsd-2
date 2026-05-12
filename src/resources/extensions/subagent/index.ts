@@ -671,9 +671,25 @@ async function runSingleAgentInCmuxSplit(
 
 		const finished = await waitForFile(exitPath, signal);
 		if (!finished) {
+			// Terminate the child running inside the cmux split: send Ctrl-C
+			// so bash interrupts the pipeline and writes the exit code, instead
+			// of leaving an orphaned subagent that can keep editing after cancel.
+			try {
+				await cmuxClient.sendInterrupt(cmuxSurfaceId);
+			} catch {
+				/* ignore — best-effort */
+			}
+			// Give the shell a brief window to reap the killed child and write exit.code.
+			await waitForFile(exitPath, undefined, 5000);
 			currentResult.exitCode = 1;
 			currentResult.running = false;
 			currentResult.stderr = "cmux split execution timed out or was aborted";
+			if (fs.existsSync(stdoutPath)) {
+				const stdout = fs.readFileSync(stdoutPath, "utf-8");
+				for (const line of stdout.split("\n")) {
+					processSubagentEventLine(line, currentResult, emitUpdate);
+				}
+			}
 			return currentResult;
 		}
 
@@ -892,11 +908,10 @@ export default function (pi: ExtensionAPI) {
 					};
 				}
 				const sessionChildren = record.children.filter((child) => child.sessionFile);
-				const selected = params.agent
-					? sessionChildren.find((child) => child.agent === params.agent)
-					: sessionChildren.length === 1
-						? sessionChildren[0]
-						: undefined;
+				const matches = params.agent
+					? sessionChildren.filter((child) => child.agent === params.agent)
+					: sessionChildren;
+				const selected = matches.length === 1 ? matches[0] : undefined;
 				if (!selected?.sessionFile) {
 					const available = sessionChildren.map((child) => formatAgentLabel(child.agent, child.trackingName)).join(", ") || "none";
 					return {
@@ -988,13 +1003,17 @@ export default function (pi: ExtensionAPI) {
 						? taskParams[index]?.cwd
 						: params.cwd,
 			}));
-			runStore.create(createInitialRunRecord({
-				runId: dispatchId,
-				mode: dispatchMode as SubagentRunMode,
-				contextMode: dispatchContextMode,
-				cwd: ctx.cwd,
-				children: dispatchChildren,
-			}));
+			try {
+				runStore.create(createInitialRunRecord({
+					runId: dispatchId,
+					mode: dispatchMode as SubagentRunMode,
+					contextMode: dispatchContextMode,
+					cwd: ctx.cwd,
+					children: dispatchChildren,
+				}));
+			} catch {
+				// Persistence is observability; execution remains authoritative.
+			}
 
 			const persistRunResults = (results: SingleResult[], completed = false): void => {
 				try {
