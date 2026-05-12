@@ -172,6 +172,15 @@ test('planning-dispatch: extracts subagent classes from single, parallel, and ch
     extractSubagentAgentClasses({ chain: [{ agent: 'reviewer' }, { agent: 'security' }] }),
     ['reviewer', 'security'],
   );
+  assert.deepEqual(
+    extractSubagentAgentClasses({
+      chain: [
+        { agent: 'scout' },
+        { parallel: [{ agent: 'reviewer' }, { agent: ' security ' }] },
+      ],
+    }),
+    ['scout', 'reviewer', 'security'],
+  );
 });
 
 test('planning-dispatch: blocks subagent dispatch when agentClasses is undefined (stale caller shim)', () => {

@@ -447,7 +447,9 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
     codebaseMap: true,
     preferences: "active-only",
     contextMode: "research",
-    tools: TOOLS_PLANNING,
+    // Multi-slice research dispatches use the research-slice unit contract to
+    // fan out scout subagents that write .gsd research artifacts.
+    tools: TOOLS_PLANNING_DISPATCH_RECON,
     artifacts: {
       inline: ["roadmap", "milestone-research", "dependency-summaries", "templates"],
       excerpt: [],
@@ -606,7 +608,9 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
     codebaseMap: false,
     preferences: "active-only",
     contextMode: "verification",
-    tools: TOOLS_PLANNING,
+    // Gate evaluation fans out tester-style subagents, which read the slice
+    // plan and report via the DB-backed gate-result tool.
+    tools: TOOLS_PLANNING_DISPATCH_REVIEW,
     artifacts: {
       inline: ["slice-plan", "prior-task-summaries"],
       excerpt: [],
@@ -733,4 +737,33 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
  */
 export function resolveManifest(unitType: string): UnitContextManifest | null {
   return (UNIT_MANIFESTS as Record<string, UnitContextManifest>)[unitType] ?? null;
+}
+
+export interface SubagentPermissionContract {
+  readonly allowed: boolean;
+  readonly allowedSubagents: readonly string[];
+  readonly toolsMode: ToolsPolicy["mode"] | "unknown";
+}
+
+export function compileSubagentPermissionContract(
+  policy: ToolsPolicy | null | undefined,
+): SubagentPermissionContract {
+  if (!policy) {
+    return { allowed: false, allowedSubagents: [], toolsMode: "unknown" };
+  }
+  if (policy.mode === "all") {
+    return { allowed: true, allowedSubagents: ["*"], toolsMode: policy.mode };
+  }
+  if (policy.mode === "planning-dispatch") {
+    return {
+      allowed: true,
+      allowedSubagents: [...policy.allowedSubagents],
+      toolsMode: policy.mode,
+    };
+  }
+  return { allowed: false, allowedSubagents: [], toolsMode: policy.mode };
+}
+
+export function resolveSubagentPermissionContract(unitType: string): SubagentPermissionContract {
+  return compileSubagentPermissionContract(resolveManifest(unitType)?.tools);
 }
