@@ -227,19 +227,28 @@ test("#4934: tools.mode is one of the declared policies", () => {
   }
 });
 
-test('#4934: only execute-task and reactive-execute may use tools.mode "all" (full source-tree write access)', () => {
-  const allowedAllUnits = new Set(["execute-task", "reactive-execute"]);
+test('#4934: only execution units and complete-milestone may use tools.mode "all"', () => {
+  const allowedAllUnits = new Set(["execute-task", "reactive-execute", "complete-milestone"]);
   for (const [unitType, manifest] of Object.entries(UNIT_MANIFESTS)) {
     const mode = (manifest as { tools: { mode: string } }).tools.mode;
     if (mode === "all") {
       assert.ok(
         allowedAllUnits.has(unitType),
-        `manifest "${unitType}" declares tools.mode = "all" but is not on the execute-track. ` +
-        'Only execute-task and reactive-execute should have full source write access; ' +
+        `manifest "${unitType}" declares tools.mode = "all" but is not explicitly allowed. ` +
+        'Only execute-task, reactive-execute, and complete-milestone should have full source write access; ' +
         'planning/discuss/research units must use "planning" or "planning-dispatch" (or "docs" for rewrite-docs).',
       );
     }
   }
+});
+
+test("#5453: complete-milestone uses all tools so bash verification is not planning-dispatch blocked", () => {
+  assert.strictEqual(UNIT_MANIFESTS["complete-milestone"].tools.mode, "all");
+  assert.deepEqual(resolveSubagentPermissionContract("complete-milestone"), {
+    allowed: true,
+    allowedSubagents: ["*"],
+    toolsMode: "all",
+  });
 });
 
 test('planning-dispatch mode is reserved for slice-level decomposition and completion units', () => {
@@ -248,7 +257,6 @@ test('planning-dispatch mode is reserved for slice-level decomposition and compl
     "research-slice",
     "refine-slice",
     "complete-slice",
-    "complete-milestone",
     "gate-evaluate",
     // Deep planning mode: research-project orchestrates 4 parallel research
     // subagents (stack/features/architecture/pitfalls). Subagent dispatch is

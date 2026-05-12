@@ -406,8 +406,8 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
     contextMode: "verification",
     // planning-dispatch: validation is a verification-fan-out unit. It reads
     // the milestone surface and dispatches reviewer/security/tester subagents
-    // to report findings without touching user source. Mirrors
-    // complete-milestone's policy. Write isolation to .gsd/ is preserved.
+    // to report findings without touching user source. Write isolation to
+    // .gsd/ is preserved.
     tools: TOOLS_PLANNING_DISPATCH_REVIEW,
     artifacts: {
       inline: ["roadmap", "slice-summary", "slice-uat", "requirements", "decisions", "templates"],
@@ -423,11 +423,9 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
     codebaseMap: false,
     preferences: "active-only",
     contextMode: "verification",
-    // planning-dispatch: completion is a high-leverage place to fan out to
-    // reviewer / security / tester subagents. They read the diff and report
-    // findings; they do not write user source. Write isolation to .gsd/ is
-    // preserved.
-    tools: TOOLS_PLANNING_DISPATCH_REVIEW,
+    // Milestone closeout must run unrestricted shell verification commands
+    // against the final diff before recording completion.
+    tools: TOOLS_ALL,
     artifacts: {
       // #4780 landed slice-summary as excerpt for this unit; phase 2 of
       // the architecture will read this manifest as the source of truth
