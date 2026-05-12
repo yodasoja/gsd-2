@@ -104,12 +104,12 @@ function renderSliceSummaryMarkdown(params: CompleteSliceParams): string {
     : "  []";
 
   const keyFilesYaml = keyFiles.length > 0
-    ? keyFiles.map(f => `  - ${f}`).join("\n")
-    : "  - (none)";
+    ? `\n${keyFiles.map(f => `  - ${f}`).join("\n")}`
+    : " []";
 
   const keyDecisionsYaml = keyDecisions.length > 0
-    ? keyDecisions.map(d => `  - ${d}`).join("\n")
-    : "  - (none)";
+    ? `\n${keyDecisions.map(d => `  - ${d}`).join("\n")}`
+    : " []";
 
   const patternsYaml = patternsEstablished.length > 0
     ? patternsEstablished.map(p => `  - ${p}`).join("\n")
@@ -155,10 +155,8 @@ requires:
 ${requiresYaml}
 affects:
 ${affectsYaml}
-key_files:
-${keyFilesYaml}
-key_decisions:
-${keyDecisionsYaml}
+key_files:${keyFilesYaml}
+key_decisions:${keyDecisionsYaml}
 patterns_established:
 ${patternsYaml}
 observability_surfaces:
