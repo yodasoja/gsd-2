@@ -79,6 +79,10 @@ import {
 const recentWorktreeMergeFailures = new Map<string, number>();
 const MERGE_FAILURE_DEDUPE_MS = 60_000;
 
+export function resetRecentWorktreeMergeFailuresForTest(): void {
+  recentWorktreeMergeFailures.clear();
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────
 
 export interface NotifyCtx {
@@ -843,12 +847,15 @@ function emitWorktreeMergeFailedOnce(
   basePath: string,
   milestoneId: string,
   error: string,
+  cause: unknown,
 ): void {
   const now = Date.now();
-  const key = `${basePath}\0${milestoneId}\0${error}`;
+  const errorIdentifier = cause instanceof MergeConflictError
+    ? cause.name
+    : error;
+  const key = `${basePath}\0${milestoneId}\0${errorIdentifier}`;
   const previous = recentWorktreeMergeFailures.get(key);
   if (previous && now - previous < MERGE_FAILURE_DEDUPE_MS) return;
-  recentWorktreeMergeFailures.set(key, now);
   for (const [candidate, ts] of recentWorktreeMergeFailures) {
     if (now - ts >= MERGE_FAILURE_DEDUPE_MS) {
       recentWorktreeMergeFailures.delete(candidate);
@@ -859,8 +866,9 @@ function emitWorktreeMergeFailedOnce(
     flowId: randomUUID(),
     seq: 0,
     eventType: "worktree-merge-failed",
-    data: { milestoneId, error },
+    data: { milestoneId, error, errorIdentifier },
   });
+  recentWorktreeMergeFailures.set(key, now);
 }
 
 // ─── Session-less merge entry (ADR-016 phase 2 / A1) ─────────────────────
@@ -1012,7 +1020,7 @@ function _mergeWorktreeModeImpl(
       error: msg,
       fallback: "chdir-to-project-root",
     });
-    emitWorktreeMergeFailedOnce(originalBasePath || worktreeBasePath, milestoneId, msg);
+    emitWorktreeMergeFailedOnce(originalBasePath || worktreeBasePath, milestoneId, msg, err);
     // Surface a clear, actionable error. Worktree and milestone branch
     // are intentionally preserved — nothing has been deleted. User can
     // retry /gsd dispatch complete-milestone or merge manually once the
