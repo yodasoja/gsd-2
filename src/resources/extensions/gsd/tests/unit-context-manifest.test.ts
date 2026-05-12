@@ -220,7 +220,7 @@ test("#4934: every manifest declares a tools policy", () => {
 });
 
 test("#4934: tools.mode is one of the declared policies", () => {
-  const validModes = new Set(["all", "read-only", "planning", "planning-dispatch", "docs"]);
+  const validModes = new Set(["all", "read-only", "planning", "planning-dispatch", "docs", "verification"]);
   for (const [unitType, manifest] of Object.entries(UNIT_MANIFESTS)) {
     const mode = (manifest as { tools: { mode: string } }).tools.mode;
     assert.ok(
@@ -270,6 +270,35 @@ test("#5453: complete-milestone uses all tools so bash verification is not plann
       `shouldBlockPlanningUnit must not block ${cmd} for complete-milestone: ${result.reason}`,
     );
   }
+});
+
+test("#5843: run-uat uses verification tools policy so build/test commands can run", () => {
+  const manifest = UNIT_MANIFESTS["run-uat"];
+
+  assert.strictEqual(manifest.tools.mode, "verification");
+
+  const buildResult = shouldBlockPlanningUnit(
+    "bash",
+    "npm run build 2>&1",
+    process.cwd(),
+    "run-uat",
+    manifest.tools,
+  );
+  assert.strictEqual(
+    buildResult.block,
+    false,
+    `run-uat must allow build verification commands: ${buildResult.reason}`,
+  );
+
+  const sourceWriteResult = shouldBlockPlanningUnit(
+    "edit",
+    "src/main.ts",
+    process.cwd(),
+    "run-uat",
+    manifest.tools,
+  );
+  assert.strictEqual(sourceWriteResult.block, true);
+  assert.match(sourceWriteResult.reason!, /tools-policy "verification"/);
 });
 
 test('planning-dispatch mode is reserved for slice-level decomposition and completion units', () => {

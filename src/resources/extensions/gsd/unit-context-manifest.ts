@@ -132,6 +132,9 @@ export type ContextModePolicy =
  *                    the explicit `allowedPathGlobs` set; Bash safe-allowlist;
  *                    no subagents. Reserved for rewrite-docs, which legitimately
  *                    edits project markdown outside .gsd/.
+ *   - "verification"
+ *                  — Read tools + Bash for verification commands, writes
+ *                    restricted to .gsd/**, no subagents.
  *
  * The allowlist for "docs" is declared per-manifest rather than hardcoded so
  * projects with non-standard doc layouts can extend it without forking the
@@ -143,7 +146,8 @@ export type ToolsPolicy =
   | { readonly mode: "read-only" }
   | { readonly mode: "planning" }
   | { readonly mode: "planning-dispatch"; readonly allowedSubagents: readonly string[] }
-  | { readonly mode: "docs"; readonly allowedPathGlobs: readonly string[] };
+  | { readonly mode: "docs"; readonly allowedPathGlobs: readonly string[] }
+  | { readonly mode: "verification" };
 
 // ─── Computed-artifact registry (#4924 v2 contract) ───────────────────────
 
@@ -288,6 +292,7 @@ const COMMON_BUDGET_SMALL = 250_000;    // ~65K tokens
 
 const TOOLS_ALL: ToolsPolicy = { mode: "all" };
 const TOOLS_PLANNING: ToolsPolicy = { mode: "planning" };
+const TOOLS_VERIFICATION: ToolsPolicy = { mode: "verification" };
 // Like TOOLS_PLANNING but permits dispatch to read-only recon/planning
 // specialists. Runtime-enforced by write-gate.ts before the subagent tool runs.
 const TOOLS_PLANNING_DISPATCH_RECON: ToolsPolicy = {
@@ -587,7 +592,7 @@ export const UNIT_MANIFESTS: Record<UnitType, UnitContextManifest> = {
     codebaseMap: false,
     preferences: "active-only",
     contextMode: "verification",
-    tools: TOOLS_PLANNING,
+    tools: TOOLS_VERIFICATION,
     artifacts: {
       // Phase 3 migration (#4782): manifest matches today's actual
       // buildRunUatPrompt inlining. Prior phase-1 entry listed

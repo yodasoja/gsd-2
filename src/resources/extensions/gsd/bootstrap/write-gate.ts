@@ -767,6 +767,9 @@ function blockReason(unitType: string, mode: string, what: string): string {
  *                    and listed in the policy's allowedSubagents.
  *   - "docs"       → like "planning" but also allows writes to paths
  *                    matching `allowedPathGlobs` relative to basePath.
+ *   - "verification"
+ *                  → allows Bash for project verification commands, but keeps
+ *                    writes restricted to .gsd/ and blocks subagent dispatch.
  *
  * `pathOrCommand` is the file path for write/edit-shaped tools and the
  * shell command for bash. Other tools ignore this argument.
@@ -804,7 +807,7 @@ export function shouldBlockPlanningUnit(
     return { block: true, reason: blockReason(unitType, policy.mode, `tool "${tool}" is not on the read-only allowlist`) };
   }
 
-  // planning / planning-dispatch / docs modes share the same surface for safe tools, bash, and subagent.
+  // planning / planning-dispatch / docs / verification modes share the same surface for safe tools, bash, and subagent.
   if (PLANNING_SAFE_TOOLS.has(tool)) return { block: false };
   if (tool.startsWith("gsd_")) return { block: false };
 
@@ -862,6 +865,7 @@ export function shouldBlockPlanningUnit(
   }
 
   if (tool === "bash") {
+    if (policy.mode === "verification") return { block: false };
     if (BASH_READ_ONLY_RE.test(pathOrCommand)) return { block: false };
     return {
       block: true,

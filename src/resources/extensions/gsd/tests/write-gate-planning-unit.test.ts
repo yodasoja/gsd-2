@@ -26,6 +26,7 @@ const PLANNING_DISPATCH_REVIEW: ToolsPolicy = {
 };
 const READ_ONLY: ToolsPolicy = { mode: 'read-only' };
 const ALL: ToolsPolicy = { mode: 'all' };
+const VERIFICATION: ToolsPolicy = { mode: 'verification' };
 const DOCS: ToolsPolicy = {
   mode: 'docs',
   allowedPathGlobs: ['docs/**', 'README.md', 'README.*.md', 'CHANGELOG.md', '*.md'],
@@ -329,6 +330,25 @@ test('all-mode: execute-task can run arbitrary bash', () => {
 test('all-mode: execute-task can dispatch subagents', () => {
   const r = shouldBlockPlanningUnit('subagent', '', BASE, 'execute-task', ALL);
   assert.strictEqual(r.block, false);
+});
+
+// ─── verification mode: bash allowed, writes still scoped ─────────────────
+
+test('verification-mode: run-uat can run build commands', () => {
+  const r = shouldBlockPlanningUnit('bash', 'npm run build 2>&1', BASE, 'run-uat', VERIFICATION);
+  assert.strictEqual(r.block, false);
+});
+
+test('verification-mode: run-uat still blocks user source edits', () => {
+  const r = shouldBlockPlanningUnit('edit', join(BASE, 'src', 'main.ts'), BASE, 'run-uat', VERIFICATION);
+  assert.strictEqual(r.block, true);
+  assert.match(r.reason!, /tools-policy "verification"/);
+});
+
+test('verification-mode: run-uat still blocks subagent dispatch', () => {
+  const r = shouldBlockPlanningUnit('subagent', '', BASE, 'run-uat', VERIFICATION);
+  assert.strictEqual(r.block, true);
+  assert.match(r.reason!, /subagent dispatch is not permitted/);
 });
 
 // ─── read-only mode ───────────────────────────────────────────────────────
