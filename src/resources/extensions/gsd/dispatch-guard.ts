@@ -5,7 +5,7 @@ import { findMilestoneIds } from "./guided-flow.js";
 import { parseUnitId } from "./unit-id.js";
 import { isDbAvailable, getMilestoneSlices, getMilestone } from "./gsd-db.js";
 import { parseRoadmap } from "./parsers-legacy.js";
-import { isClosedStatus } from "./status-guards.js";
+import { isClosedStatus, isSkippedForDispatch } from "./status-guards.js";
 import { classifyMilestoneSummaryContent } from "./milestone-summary-classifier.js";
 import { readFileSync } from "node:fs";
 
@@ -58,7 +58,7 @@ export function getPriorSliceCompletionBlocker(
     //      DB-backed projects must not treat SUMMARY.md as authoritative.
     if (isDbAvailable()) {
       const milestoneRow = getMilestone(mid);
-      if (milestoneRow && isClosedStatus(milestoneRow.status)) continue;
+      if (milestoneRow && isSkippedForDispatch(milestoneRow.status)) continue;
     } else {
       const summaryPath = resolveMilestoneFile(base, mid, "SUMMARY");
       let summaryContent: string | null = null;
