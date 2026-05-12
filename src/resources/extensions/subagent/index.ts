@@ -208,6 +208,7 @@ interface SingleResult {
 	agentSource: "user" | "project" | "unknown";
 	task: string;
 	exitCode: number;
+	running?: boolean;
 	messages: Message[];
 	stderr: string;
 	usage: UsageStats;
@@ -350,15 +351,16 @@ function resultStatus(result: SingleResult): SubagentRunStatus {
 }
 
 function resultToChildArtifact(result: SingleResult, index: number, cwd?: string): SubagentChildArtifact {
+	const running = result.running === true || result.exitCode === -1;
 	return {
 		index,
 		agent: result.agent,
 		task: result.task,
-		status: result.exitCode === -1 ? "running" : resultStatus(result),
+		status: running ? "running" : resultStatus(result),
 		exitCode: result.exitCode,
 		cwd,
 		sessionFile: result.sessionFile,
-		completedAt: result.exitCode === -1 ? undefined : new Date().toISOString(),
+		completedAt: running ? undefined : new Date().toISOString(),
 		output: getFinalOutput(result.messages),
 		stderr: result.stderr || undefined,
 		errorMessage: result.errorMessage,
@@ -448,7 +450,8 @@ async function runSingleAgent(
 		agent: agentName,
 		agentSource: agent.source,
 		task,
-		exitCode: 0,
+		exitCode: -1,
+		running: true,
 		messages: [],
 		stderr: "",
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
@@ -532,6 +535,7 @@ async function runSingleAgent(
 		});
 
 		currentResult.exitCode = exitCode;
+		currentResult.running = false;
 		if (wasAborted) throw new Error("Subagent was aborted");
 		return currentResult;
 	} finally {
@@ -580,7 +584,8 @@ async function runSingleAgentInCmuxSplit(
 		agent: agentName,
 		agentSource: agent.source,
 		task,
-		exitCode: 0,
+		exitCode: -1,
+		running: true,
 		messages: [],
 		stderr: "",
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
@@ -654,6 +659,7 @@ async function runSingleAgentInCmuxSplit(
 		const finished = await waitForFile(exitPath, signal);
 		if (!finished) {
 			currentResult.exitCode = 1;
+			currentResult.running = false;
 			currentResult.stderr = "cmux split execution timed out or was aborted";
 			return currentResult;
 		}
@@ -668,6 +674,7 @@ async function runSingleAgentInCmuxSplit(
 			currentResult.stderr = fs.readFileSync(stderrPath, "utf-8");
 		}
 		currentResult.exitCode = Number.parseInt(fs.readFileSync(exitPath, "utf-8").trim() || "1", 10) || 0;
+		currentResult.running = false;
 		return currentResult;
 	} finally {
 		if (tmpPromptPath)
@@ -1183,7 +1190,7 @@ export default function (pi: ExtensionAPI) {
 							params.task!,
 							isolation ? isolation.workDir : params.cwd,
 							undefined,
-							signal,
+							undefined,
 							(partial) => {
 								if (partial.details?.results[0]) persistRunResults([partial.details.results[0]]);
 							},

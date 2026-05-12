@@ -183,6 +183,13 @@ test('planning-dispatch: extracts subagent classes from single, parallel, and ch
   );
 });
 
+test('planning-dispatch: extracts subagent classes without recursing through cycles', () => {
+  const input: { agent: string; parallel?: unknown[] } = { agent: 'scout' };
+  input.parallel = [input, { agent: 'reviewer' }];
+
+  assert.deepEqual(extractSubagentAgentClasses(input), ['scout', 'reviewer']);
+});
+
 test('planning-dispatch: blocks subagent dispatch when agentClasses is undefined (stale caller shim)', () => {
   const r = shouldBlockPlanningUnit('subagent', '', BASE, 'plan-slice', PLANNING_DISPATCH, undefined);
   assert.strictEqual(r.block, true);
