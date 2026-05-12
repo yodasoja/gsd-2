@@ -153,6 +153,7 @@ function gitExec(basePath: string, args: string[], allowFailure = false): string
   }
 }
 
+/** sleepSync uses Atomics.wait for a blocking pause without busy-waiting; it blocks the current thread and requires Atomics.wait support. */
 function sleepSync(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
