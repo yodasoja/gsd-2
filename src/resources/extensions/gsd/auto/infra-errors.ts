@@ -19,6 +19,7 @@ export const INFRA_ERROR_CODES: ReadonlySet<string> = new Set([
   "EMFILE",   // too many open files (process)
   "ENFILE",   // too many open files (system)
   "EAGAIN",       // resource temporarily unavailable (resource exhaustion)
+  "ENOBUFS",      // no buffer space available (transient pipe exhaustion)
   "ECONNREFUSED", // connection refused (offline / local server down)
   "ENOTFOUND",    // DNS lookup failed (offline / no network)
   "ENETUNREACH",  // network unreachable (offline / no route)
