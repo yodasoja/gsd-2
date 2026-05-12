@@ -128,7 +128,7 @@ export class AutoOrchestrator implements AutoOrchestrationModule {
         await this.deps.health.postAdvanceRecord(stopped);
         return stopped;
       }
-      if ("kind" in decision && decision.kind === "blocked") {
+      if (!("unitType" in decision)) {
         const blocked: AutoAdvanceResult = {
           kind: "blocked",
           reason: decision.reason,
