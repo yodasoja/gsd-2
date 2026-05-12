@@ -288,6 +288,51 @@ test("advance() stops when dispatch has no next unit", async () => {
   assert.equal(orchestrator.getStatus().phase, "stopped");
 });
 
+test("advance() surfaces dispatch blocker reason instead of generic no remaining units", async () => {
+  const { deps, calls } = makeDeps({
+    dispatch: {
+      async decideNextUnit() {
+        return {
+          kind: "blocked",
+          reason: "Milestone M001 validation verdict is needs-remediation but all slices are complete.",
+          action: "pause",
+        };
+      },
+    },
+  });
+  const orchestrator = createAutoOrchestrator(deps);
+
+  const result = await orchestrator.advance();
+
+  assert.equal(result.kind, "blocked");
+  if (result.kind !== "blocked") return;
+  assert.equal(result.reason, "Milestone M001 validation verdict is needs-remediation but all slices are complete.");
+  assert.equal(result.action, "pause");
+  assert.ok(calls.includes("journal:advance-blocked"));
+  assert.ok(!calls.includes("journal:advance-stopped"));
+});
+
+test("resume() returns blocked when advance detects a dispatch blocker", async () => {
+  const { deps } = makeDeps({
+    dispatch: {
+      async decideNextUnit() {
+        return {
+          kind: "blocked",
+          reason: "remediation required",
+          action: "pause",
+        };
+      },
+    },
+  });
+  const orchestrator = createAutoOrchestrator(deps);
+
+  const result = await orchestrator.resume();
+
+  assert.equal(result.kind, "blocked");
+  if (result.kind !== "blocked") return;
+  assert.equal(result.reason, "remediation required");
+});
+
 test("advance() uses recovery on error", async () => {
   const { deps, calls } = makeDeps({
     runtime: {
@@ -868,6 +913,38 @@ test("wired DispatchAdapter prefers caller-supplied dispatch inputs over ctx-der
     assert.equal(captured[0].sessionContextWindow, 500_000);
     assert.equal(captured[0].sessionProvider, "openai");
     assert.equal(captured[0].modelRegistry, overrideModelRegistry);
+  } finally {
+    resetRegistry();
+  }
+});
+
+test("wired DispatchAdapter preserves stop reason as a blocked decision", async () => {
+  const stateSnapshot = makeState();
+  const stopRule: UnifiedRule = {
+    name: "test-stop",
+    when: "dispatch",
+    evaluation: "first-match",
+    where: async () => ({
+      action: "stop" as const,
+      reason: "remediation blocker",
+      level: "warning" as const,
+    }),
+    then: (r: unknown) => r,
+  };
+  setRegistry(new RuleRegistry([stopRule]));
+
+  try {
+    const ctx = { model: {}, modelRegistry: { getAll: () => [] } } as any;
+    const pi = { getActiveTools: () => [] } as any;
+    const adapter = createWiredDispatchAdapter(ctx, pi, "/tmp/parity-fixture");
+
+    const result = await adapter.decideNextUnit({ stateSnapshot });
+
+    assert.deepEqual(result, {
+      kind: "blocked",
+      reason: "remediation blocker",
+      action: "pause",
+    });
   } finally {
     resetRegistry();
   }
