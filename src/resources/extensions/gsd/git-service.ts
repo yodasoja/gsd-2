@@ -270,6 +270,20 @@ function isExcludedScopedPath(path: string, exclusions: readonly string[]): bool
   return false;
 }
 
+function isInsideSubmodule(basePath: string, path: string): boolean {
+  const normalizedPath = path.replace(/\\/g, "/");
+  const output = runGit(basePath, ["ls-files", "--stage"], { allowFailure: true });
+  if (!output) return false;
+
+  for (const line of output.split("\n")) {
+    const match = line.match(/^160000\s+\S+\s+\d+\t(.+)$/);
+    if (!match) continue;
+    const submodulePath = match[1].replace(/\\/g, "/").replace(/\/+$/, "");
+    if (normalizedPath.startsWith(`${submodulePath}/`)) return true;
+  }
+  return false;
+}
+
 /**
  * Thrown when a slice merge hits code conflicts in non-.gsd files.
  * The working tree is left in a conflicted state (no reset) so the
@@ -764,6 +778,23 @@ export class GitServiceImpl {
       .filter(file => !nativeIsIgnored(this.basePath, file))
       .filter(file => !isExcludedScopedPath(file, allExclusions));
 
+    const scopedPaths: string[] = [];
+    const submodulePaths: string[] = [];
+    for (const path of normalized) {
+      if (isInsideSubmodule(this.basePath, path)) {
+        submodulePaths.push(path);
+      } else {
+        scopedPaths.push(path);
+      }
+    }
+    if (submodulePaths.length > 0) {
+      logWarning(
+        "engine",
+        `scoped stage: dropping ${submodulePaths.length} keyFile(s) inside git submodule(s): ${submodulePaths.join(", ")}`,
+        { file: "git-service.ts" },
+      );
+    }
+
     // Drop entries that don't exist on disk. The LLM occasionally lists files
     // it intended to write but didn't (or names them with wrong casing/path).
     // Pre-`b304f738b` `git add -A` swallowed these silently; the scoped
@@ -771,7 +802,7 @@ export class GitServiceImpl {
     // the whole commit fail (see #5500). Filter so valid paths still commit.
     const missing: string[] = [];
     const existing: string[] = [];
-    for (const path of normalized) {
+    for (const path of scopedPaths) {
       if (existsSync(join(this.basePath, path))) {
         existing.push(path);
       } else {
