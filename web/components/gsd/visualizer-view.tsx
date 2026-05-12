@@ -2,7 +2,7 @@
 
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useRef, useState, useCallback } from "react"
 import * as TabsPrimitive from "@radix-ui/react-tabs"
 import {
   CheckCircle2,
@@ -1789,14 +1789,20 @@ function ExportTab({ data }: { data: VisualizerData }) {
 // ─── Custom Tab Bar ────────────────────────────────────────────────────────────
 
 function VisualizerTabs({
-  defaultValue,
+  value,
+  onValueChange,
   children,
 }: {
-  defaultValue: TabValue
+  value: TabValue
+  onValueChange: (value: TabValue) => void
   children: React.ReactNode
 }) {
   return (
-    <TabsPrimitive.Root defaultValue={defaultValue} className="flex h-full flex-col overflow-hidden">
+    <TabsPrimitive.Root
+      value={value}
+      onValueChange={(next) => onValueChange(next as TabValue)}
+      className="flex h-full flex-col overflow-hidden"
+    >
       {children}
     </TabsPrimitive.Root>
   )
@@ -1854,6 +1860,10 @@ export function VisualizerView() {
   const [data, setData] = useState<VisualizerData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [selectedTab, setSelectedTab] = useState<TabValue>("progress")
+  const [filterQuery, setFilterQuery] = useState("")
+  const [helpOpen, setHelpOpen] = useState(false)
+  const searchInputRef = useRef<HTMLInputElement>(null)
 
   const fetchData = useCallback(async () => {
     try {
@@ -1877,6 +1887,59 @@ export function VisualizerView() {
     const interval = setInterval(fetchData, 10_000)
     return () => clearInterval(interval)
   }, [fetchData])
+
+  useEffect(() => {
+    const isFormFieldFocused = () => {
+      const activeElement = document.activeElement
+      if (!activeElement) return false
+      const tagName = activeElement.tagName.toLowerCase()
+      return (
+        tagName === "input" ||
+        tagName === "textarea" ||
+        tagName === "select" ||
+        activeElement.getAttribute("contenteditable") === "true"
+      )
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isFormFieldFocused()) return
+
+      if (event.key >= "1" && event.key <= "9") {
+        const tab = TABS[Number(event.key) - 1]
+        if (tab) {
+          event.preventDefault()
+          setSelectedTab(tab.value)
+        }
+        return
+      }
+
+      if (event.key === "0") {
+        event.preventDefault()
+        setSelectedTab(TABS[TABS.length - 1].value)
+        return
+      }
+
+      if (event.key === "/") {
+        event.preventDefault()
+        searchInputRef.current?.focus()
+        return
+      }
+
+      if (event.key === "?") {
+        event.preventDefault()
+        setHelpOpen(true)
+        return
+      }
+
+      if (helpOpen && (event.key === "Escape" || event.key.toLowerCase() === "q")) {
+        event.preventDefault()
+        setHelpOpen(false)
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [helpOpen])
 
   // Loading
   if (loading && !data) {
@@ -1919,7 +1982,7 @@ export function VisualizerView() {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex shrink-0 items-center justify-between border-b border-border px-7 py-5">
+      <div className="flex shrink-0 items-center justify-between gap-5 border-b border-border px-7 py-5">
         <div>
           <h1 className="text-xl font-bold tracking-tight">Workflow Visualizer</h1>
           <div className="mt-1.5 flex items-center gap-3 text-sm text-muted-foreground">
@@ -1955,10 +2018,29 @@ export function VisualizerView() {
             )}
           </div>
         </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <input
+            ref={searchInputRef}
+            type="search"
+            value={filterQuery}
+            onChange={(event) => setFilterQuery(event.target.value)}
+            placeholder="Search"
+            aria-label="Search visualizer"
+            className="h-9 w-48 rounded-lg border border-border bg-background px-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-foreground/40"
+          />
+          <button
+            type="button"
+            onClick={() => setHelpOpen(true)}
+            aria-label="Show keyboard shortcuts"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card text-sm font-semibold transition-colors hover:bg-accent"
+          >
+            ?
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
-      <VisualizerTabs defaultValue="progress">
+      <VisualizerTabs value={selectedTab} onValueChange={setSelectedTab}>
         <VisualizerTabList />
 
         <div className="flex-1 overflow-y-auto">
@@ -1996,6 +2078,43 @@ export function VisualizerView() {
           </div>
         </div>
       </VisualizerTabs>
+
+      {helpOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="visualizer-shortcuts-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-6 backdrop-blur-sm"
+          onClick={() => setHelpOpen(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-xl border border-border bg-card p-5 shadow-lg"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-4">
+              <h2 id="visualizer-shortcuts-title" className="text-sm font-semibold">
+                Keyboard Shortcuts
+              </h2>
+              <button
+                type="button"
+                onClick={() => setHelpOpen(false)}
+                aria-label="Close keyboard shortcuts"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <XCircle className="h-4 w-4" />
+              </button>
+            </div>
+            <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-3 text-sm">
+              <dt className="font-mono text-xs text-muted-foreground">1-9, 0</dt>
+              <dd>Jump to tab</dd>
+              <dt className="font-mono text-xs text-muted-foreground">/</dt>
+              <dd>Focus search</dd>
+              <dt className="font-mono text-xs text-muted-foreground">?</dt>
+              <dd>Show this help</dd>
+            </dl>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
