@@ -5,7 +5,7 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { minimatch } from "minimatch";
 
 import { getIsolationMode } from "../preferences.js";
-import type { ToolsPolicy } from "../unit-context-manifest.js";
+import { compileSubagentPermissionContract, type ToolsPolicy } from "../unit-context-manifest.js";
 import { logWarning } from "../workflow-logger.js";
 import { isGsdWorktreePath, resolveWorktreeProjectRoot } from "../worktree-root.js";
 
@@ -811,7 +811,8 @@ export function shouldBlockPlanningUnit(
   if (PLANNING_SUBAGENT_TOOLS.has(tool)) {
     if (policy.mode === "planning-dispatch") {
       const requested = (agentClasses ?? []).map(a => a.trim()).filter(Boolean);
-      const allowedSubagents = Array.isArray(policy.allowedSubagents) ? policy.allowedSubagents : [];
+      const dispatchContract = compileSubagentPermissionContract(policy);
+      const allowedSubagents = dispatchContract.allowedSubagents;
       const allowed = new Set(allowedSubagents);
       // When agentClasses is undefined, the caller has not been updated to extract
       // agent identities yet. Block and warn so stale callers surface in telemetry

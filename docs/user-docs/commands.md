@@ -180,6 +180,12 @@ Install sources are auto-detected: starts with `http(s)://` or ends with `.git` 
 | `/gsd cmux sidebar on/off` | Toggle cmux sidebar metadata |
 | `/gsd cmux splits on/off` | Toggle cmux visual subagent splits |
 
+## Subagents
+
+| Command | Description |
+|---------|-------------|
+| `/subagent` | List available user and project subagents. Run records, status checks, and follow-up resume are handled through the `subagent` tool; see [Subagents](./subagents.md). |
+
 ## GitHub Sync (v2.39)
 
 | Command | Description |

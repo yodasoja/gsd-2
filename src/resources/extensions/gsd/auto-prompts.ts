@@ -3197,7 +3197,7 @@ export async function buildParallelResearchSlicesPrompt(
     subagentSections.push([
       `### ${slice.id}: ${slice.title}`,
       "",
-      `Use this as the prompt for a \`subagent\` call${modelSuffix} (agent: \`gsd-executor\` or the default agent):`,
+      `Use this as the prompt for a \`subagent\` call${modelSuffix} (agent: \`scout\`):`,
       "",
       "```",
       slicePrompt,
@@ -3279,7 +3279,7 @@ export async function buildGateEvaluatePrompt(
     subagentSections.push([
       `### ${def.id}: ${def.question}`,
       "",
-      `Use this as the prompt for a \`subagent\` call${modelSuffix}:`,
+      `Use this as the prompt for a \`subagent\` call${modelSuffix} (agent: \`tester\`):`,
       "",
       "```",
       subPrompt,
