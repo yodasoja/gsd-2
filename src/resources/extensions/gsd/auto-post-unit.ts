@@ -472,6 +472,7 @@ export async function autoCommitUnit(
 async function runCloseoutGitAction(
   pctx: PostUnitContext,
   unit: NonNullable<AutoSession["currentUnit"]>,
+  opts?: { softFailure?: boolean },
 ): Promise<"continue" | "dispatched"> {
   const { s, ctx, pi, pauseAuto } = pctx;
   const prefs = loadEffectiveGSDPreferences()?.preferences;
@@ -506,13 +507,24 @@ async function runCloseoutGitAction(
         unitId: unit.id,
       });
     } else {
-      const gitResult = runTurnGitAction({
+      const maxAttempts = opts?.softFailure ? 3 : 1;
+      let gitResult = runTurnGitAction({
         basePath: s.basePath,
         action: turnAction,
         unitType: unit.type,
         unitId: unit.id,
         taskContext,
       });
+      for (let attempt = 1; gitResult.status === "failed" && attempt < maxAttempts; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+        gitResult = runTurnGitAction({
+          basePath: s.basePath,
+          action: turnAction,
+          unitType: unit.type,
+          unitId: unit.id,
+          taskContext,
+        });
+      }
 
       if (uokFlags.gitops) {
         writeTurnGitTransaction({
@@ -563,12 +575,15 @@ async function runCloseoutGitAction(
         }
 
         const failureMsg = `Git ${turnAction} failed: ${(gitResult.error ?? "unknown error").split("\n")[0]}`;
-        ctx.ui.notify(failureMsg, "error");
+        ctx.ui.notify(failureMsg, opts?.softFailure ? "warning" : "error");
         debugLog("postUnit", {
-          phase: "git-action-failed-blocking",
+          phase: opts?.softFailure ? "git-action-failed-soft" : "git-action-failed-blocking",
           action: turnAction,
           error: gitResult.error ?? "unknown error",
         });
+        if (opts?.softFailure) {
+          return "continue";
+        }
         await pauseAuto(ctx, pi);
         return "dispatched";
       }
@@ -586,7 +601,10 @@ async function runCloseoutGitAction(
     s.lastGitActionFailure = message;
     s.lastGitActionStatus = "failed";
     debugLog("postUnit", { phase: "git-action", error: message, action: turnAction });
-    ctx.ui.notify(`Git ${turnAction} failed: ${message.split("\n")[0]}`, uokFlags.gitops ? "error" : "warning");
+    ctx.ui.notify(`Git ${turnAction} failed: ${message.split("\n")[0]}`, uokFlags.gitops && !opts?.softFailure ? "error" : "warning");
+    if (opts?.softFailure) {
+      return "continue";
+    }
     if (uokFlags.gitops) {
       await pauseAuto(ctx, pi);
       return "dispatched";
@@ -1220,7 +1238,7 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
 
   if (s.currentUnit) {
     if (shouldDeferCloseoutGitAction(s.currentUnit.type)) {
-      const gitActionResult = await runCloseoutGitAction(pctx, s.currentUnit);
+      const gitActionResult = await runCloseoutGitAction(pctx, s.currentUnit, { softFailure: true });
       if (gitActionResult === "dispatched") {
         return "stopped";
       }
