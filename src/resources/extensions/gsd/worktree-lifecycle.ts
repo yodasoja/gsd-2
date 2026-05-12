@@ -846,14 +846,12 @@ function rebuildGitService(
 function emitWorktreeMergeFailedOnce(
   basePath: string,
   milestoneId: string,
-  error: string,
-  cause: unknown,
+  err: unknown,
 ): void {
+  const msg = err instanceof Error ? err.message : String(err);
+  const errorCategory = err instanceof Error ? err.name : "Error";
   const now = Date.now();
-  const errorIdentifier = cause instanceof MergeConflictError
-    ? cause.name
-    : error;
-  const key = `${basePath}\0${milestoneId}\0${errorIdentifier}`;
+  const key = `${basePath}\0${milestoneId}\0${errorCategory}`;
   const previous = recentWorktreeMergeFailures.get(key);
   if (previous && now - previous < MERGE_FAILURE_DEDUPE_MS) return;
   for (const [candidate, ts] of recentWorktreeMergeFailures) {
@@ -866,7 +864,7 @@ function emitWorktreeMergeFailedOnce(
     flowId: randomUUID(),
     seq: 0,
     eventType: "worktree-merge-failed",
-    data: { milestoneId, error, errorIdentifier },
+    data: { milestoneId, error: msg },
   });
   recentWorktreeMergeFailures.set(key, now);
 }
@@ -1020,7 +1018,7 @@ function _mergeWorktreeModeImpl(
       error: msg,
       fallback: "chdir-to-project-root",
     });
-    emitWorktreeMergeFailedOnce(originalBasePath || worktreeBasePath, milestoneId, msg, err);
+    emitWorktreeMergeFailedOnce(originalBasePath || worktreeBasePath, milestoneId, err);
     // Surface a clear, actionable error. Worktree and milestone branch
     // are intentionally preserved — nothing has been deleted. User can
     // retry /gsd dispatch complete-milestone or merge manually once the

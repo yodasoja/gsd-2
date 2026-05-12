@@ -337,7 +337,6 @@ describe("worktree journal events", () => {
     assert.ok(failed, "worktree-merge-failed event should be emitted");
     assert.equal(failed!.data?.milestoneId, "M001");
     assert.equal(failed!.data?.error, "conflict in main");
-    assert.equal(failed!.data?.errorIdentifier, "conflict in main");
     assert.equal(failures.length, 1, "duplicate merge failures are journaled once");
   });
 
@@ -365,7 +364,11 @@ describe("worktree journal events", () => {
 
     let failures = readJournalEntries(tmp).filter(e => e.eventType === "worktree-merge-failed");
     assert.equal(failures.length, 1, "variable conflict filenames should not bypass dedupe");
-    assert.equal(failures[0]!.data?.errorIdentifier, "MergeConflictError");
+    assert.match(
+      String(failures[0]!.data?.error),
+      /src\/a\.ts/,
+      "journal payload keeps the original error message",
+    );
 
     now += 60_001;
     lifecycle.exitMilestone("M001", { merge: true }, makeNotifyCtx());
