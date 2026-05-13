@@ -528,6 +528,7 @@ export function getRecentUnitKeysForProjectRoot(
      FROM unit_dispatches ud
      INNER JOIN workers w ON w.worker_id = ud.worker_id
      WHERE w.project_root_realpath = :project_root_realpath
+       AND w.status != 'crashed'
      ORDER BY ud.started_at DESC, ud.id DESC
      LIMIT :limit`,
   ).all({
