@@ -79,6 +79,7 @@ import {
   hasPendingAutoStart,
   setPendingAutoStart,
 } from "./pending-auto-start.js";
+import { clearGuidedUnitContext, setGuidedUnitContext } from "./guided-unit-context.js";
 
 export {
   _getPendingAutoStart,
@@ -1089,14 +1090,20 @@ async function dispatchWorkflow(
     const workflowPath = process.env.GSD_WORKFLOW_PATH ?? join(gsdHome(), "agent", "GSD-WORKFLOW.md");
     const workflow = readFileSync(workflowPath, "utf-8");
 
-    pi.sendMessage(
-      {
-        customType,
-        content: buildWorkflowDispatchContent({ workflow, workflowPath, task: note }),
-        display: false,
-      },
-      { triggerTurn: true },
-    );
+    if (unitType) setGuidedUnitContext(projectRoot, unitType);
+    try {
+      pi.sendMessage(
+        {
+          customType,
+          content: buildWorkflowDispatchContent({ workflow, workflowPath, task: note }),
+          display: false,
+        },
+        { triggerTurn: true },
+      );
+    } catch (err) {
+      clearGuidedUnitContext(projectRoot);
+      throw err;
+    }
   } finally {
     // Restore full tool set after the message is queued. The LLM turn has
     // already captured the scoped set — restoring prevents the narrowed

@@ -31,6 +31,7 @@ import { resolveWorktreeProjectRoot } from "../worktree-root.js";
 import { extractSubagentAgentClasses } from "./subagent-input.js";
 import { approvalGateIdForUnit, isExplicitApprovalResponse, shouldPauseForUserApprovalQuestion } from "../user-input-boundary.js";
 import { resolveSkillManifest } from "../skill-manifest.js";
+import { getGuidedUnitContext } from "../guided-unit-context.js";
 
 let approvalQuestionAbortInFlight = false;
 
@@ -772,7 +773,8 @@ export function registerHooks(
     // subagent dispatch. Closes the b23 bug class where a discuss-milestone
     // turn used the host Edit tool to modify user source files.
     const dash = getAutoRuntimeSnapshot();
-    const activeUnitType = dash.currentUnit?.type;
+    const guidedUnit = getGuidedUnitContext(discussionBasePath);
+    const activeUnitType = dash.currentUnit?.type ?? guidedUnit?.unitType;
     if (activeUnitType) {
       const manifest = resolveManifest(activeUnitType);
       if (manifest) {
@@ -791,7 +793,7 @@ export function registerHooks(
         const planningGuard = shouldBlockPlanningUnit(
           event.toolName,
           planningInput,
-          dash.basePath || discussionBasePath,
+          dash.basePath || guidedUnit?.basePath || discussionBasePath,
           activeUnitType,
           manifest.tools,
           agentClasses,

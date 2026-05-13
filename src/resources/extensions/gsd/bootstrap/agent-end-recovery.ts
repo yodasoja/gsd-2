@@ -32,6 +32,7 @@ import { shouldIgnoreAgentEndForActiveUnit } from "../auto/unit-runner-events.js
 import { resolveModelId } from "../auto-model-selection.js";
 import { resolveProjectRoot } from "../worktree.js";
 import { clearDiscussionFlowState } from "./write-gate.js";
+import { clearGuidedUnitContext } from "../guided-unit-context.js";
 import { resumeAutoAfterProviderDelay } from "./provider-error-resume.js";
 import {
   classifyError,
@@ -258,6 +259,7 @@ export async function handleAgentEnd(
   // rejected" loop even though the files are on disk.
   clearPathCache();
   const basePath = resolveAgentEndBasePath();
+  clearGuidedUnitContext(basePath);
 
   try {
     if (await checkDeepProjectSetupAfterTurn(event, ctx, basePath)) {
