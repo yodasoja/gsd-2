@@ -6,6 +6,7 @@
 // execSync calls because git2 credential handling is too complex.
 
 import { execSync, execFileSync } from "node:child_process";
+import type { ExecFileSyncOptionsWithStringEncoding } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { GSDError, GSD_GIT_ERROR } from "./errors.js";
@@ -16,6 +17,8 @@ import { isInfrastructureError } from "./auto/infra-errors.js";
 // Issue #453: keep auto-mode bookkeeping on the stable git CLI path unless a
 // caller explicitly opts into the native helper.
 const NATIVE_GSD_GIT_ENABLED = process.env.GSD_ENABLE_NATIVE_GSD_GIT === "1";
+const TRANSIENT_GIT_RETRY_CODES = new Set(["ENOBUFS", "EAGAIN"]);
+const GIT_RETRY_DELAY_MS = 200;
 
 // ─── Native Module Types ──────────────────────────────────────────────────
 
@@ -147,6 +150,43 @@ function gitExec(basePath: string, args: string[], allowFailure = false): string
   } catch (err) {
     if (allowFailure) return "";
     throw new GSDError(GSD_GIT_ERROR, `git ${args.join(" ")} failed in ${basePath}: ${getErrorMessage(err)}`);
+  }
+}
+
+/** sleepSync uses Atomics.wait for a blocking pause without busy-waiting; it blocks the current thread and requires Atomics.wait support. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function isRetryableGitError(err: unknown): boolean {
+  const code = isInfrastructureError(err)
+    ?? isInfrastructureError((err as { stderr?: string })?.stderr ?? "");
+  return code !== null && TRANSIENT_GIT_RETRY_CODES.has(code);
+}
+
+function execGitFileSyncWithRetry(
+  basePath: string,
+  args: string[],
+  options: Partial<ExecFileSyncOptionsWithStringEncoding>,
+): string {
+  try {
+    return execFileSync("git", args, {
+      cwd: basePath,
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf-8",
+      env: GIT_NO_PROMPT_ENV,
+      ...options,
+    }).trim();
+  } catch (err) {
+    if (!isRetryableGitError(err)) throw err;
+    sleepSync(GIT_RETRY_DELAY_MS);
+    return execFileSync("git", args, {
+      cwd: basePath,
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf-8",
+      env: GIT_NO_PROMPT_ENV,
+      ...options,
+    }).trim();
   }
 }
 
@@ -940,13 +980,10 @@ export function nativeCommit(
   try {
     const args = ["commit", "-F", "-"];
     if (options?.allowEmpty) args.push("--allow-empty");
-    const result = execFileSync("git", args, {
-      cwd: basePath,
+    const result = execGitFileSyncWithRetry(basePath, args, {
       stdio: ["pipe", "pipe", "pipe"],
-      encoding: "utf-8",
-      env: GIT_NO_PROMPT_ENV,
       input: message,
-    }).trim();
+    });
     return result;
   } catch (err: unknown) {
     const errObj = err as { stdout?: string; stderr?: string; message?: string };
