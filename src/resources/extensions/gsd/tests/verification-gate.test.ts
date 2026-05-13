@@ -227,6 +227,7 @@ describe("verification-gate: discovery", () => {
 
   test("Python project with tests discovers pytest when package.json is absent", () => {
     mkdirSync(join(tmp, "tests"));
+    writeFileSync(join(tmp, "tests", "test_sample.py"), "def test_sample():\n    assert True\n");
     writeFileSync(
       join(tmp, "pyproject.toml"),
       `[project]
@@ -241,6 +242,58 @@ pythonpath = ["."]
 
     assert.equal(result.source, "python-project");
     assert.deepStrictEqual(result.commands, ["python3 -m pytest"]);
+  });
+
+  test("Python project with nested Python test file discovers pytest", () => {
+    mkdirSync(join(tmp, "tests", "unit"), { recursive: true });
+    writeFileSync(join(tmp, "tests", "unit", "sample_test.py"), "def test_sample():\n    assert True\n");
+
+    const result = discoverCommands({ cwd: tmp });
+
+    assert.equal(result.source, "python-project");
+    assert.deepStrictEqual(result.commands, ["python3 -m pytest"]);
+  });
+
+  test("Python project with pytest.ini discovers pytest", () => {
+    writeFileSync(join(tmp, "pytest.ini"), "[pytest]\npythonpath = .\n");
+
+    const result = discoverCommands({ cwd: tmp });
+
+    assert.equal(result.source, "python-project");
+    assert.deepStrictEqual(result.commands, ["python3 -m pytest"]);
+  });
+
+  test("Python project with explicit pyproject pytest marker discovers pytest", () => {
+    writeFileSync(
+      join(tmp, "pyproject.toml"),
+      `[tool.pytest]
+pythonpath = ["."]
+`,
+    );
+
+    const result = discoverCommands({ cwd: tmp });
+
+    assert.equal(result.source, "python-project");
+    assert.deepStrictEqual(result.commands, ["python3 -m pytest"]);
+  });
+
+  test("Python project markers without pytest evidence do not discover pytest", () => {
+    mkdirSync(join(tmp, "tests"));
+    writeFileSync(join(tmp, "tests", "README.md"), "# tests\n");
+    writeFileSync(join(tmp, "tox.ini"), "[tox]\nenvlist = py\n");
+    writeFileSync(join(tmp, "setup.cfg"), "[metadata]\nname = sample\n");
+    writeFileSync(
+      join(tmp, "pyproject.toml"),
+      `[project]
+name = "sample"
+dependencies = ["pytest-cov"]
+`,
+    );
+
+    const result = discoverCommands({ cwd: tmp });
+
+    assert.equal(result.source, "none");
+    assert.deepStrictEqual(result.commands, []);
   });
 });
 

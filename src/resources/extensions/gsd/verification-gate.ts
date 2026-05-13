@@ -4,7 +4,7 @@
 // First non-empty source wins.
 
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, type Dirent } from "node:fs";
 import { join, basename } from "node:path";
 import type { AuditWarning, RuntimeError, VerificationCheck, VerificationResult } from "./types.js";
 import { DEFAULT_COMMAND_TIMEOUT_MS } from "./constants.js";
@@ -102,25 +102,27 @@ export function discoverCommands(options: DiscoverCommandsOptions): DiscoveredCo
 }
 
 function discoverPythonPytestCommand(cwd: string): string | null {
-  const hasTestsDir = existsSync(join(cwd, "tests"));
-  const hasPytestConfig =
-    existsSync(join(cwd, "pytest.ini")) ||
-    existsSync(join(cwd, "tox.ini")) ||
-    existsSync(join(cwd, "setup.cfg"));
+  const hasPythonTestFiles = hasPythonTests(join(cwd, "tests"));
+  const hasPytestConfig = existsSync(join(cwd, "pytest.ini"));
   const pyprojectPath = join(cwd, "pyproject.toml");
   const hasPyproject = existsSync(pyprojectPath);
 
-  if (!hasTestsDir && !hasPytestConfig && !hasPyproject) {
+  if (!hasPythonTestFiles && !hasPytestConfig && !hasPyproject) {
     return null;
   }
 
-  if (hasPytestConfig || hasTestsDir) {
+  if (hasPytestConfig || hasPythonTestFiles) {
     return "python3 -m pytest";
   }
 
   try {
     const pyproject = readFileSync(pyprojectPath, "utf-8");
-    if (pyproject.includes("[tool.pytest") || pyproject.includes("pytest")) {
+    if (
+      pyproject.includes("[tool.pytest]") ||
+      pyproject.includes("[tool.pytest.") ||
+      pyproject.includes("[pytest]") ||
+      pyproject.includes("[tool:pytest]")
+    ) {
       return "python3 -m pytest";
     }
   } catch {
@@ -128,6 +130,27 @@ function discoverPythonPytestCommand(cwd: string): string | null {
   }
 
   return null;
+}
+
+function hasPythonTests(dir: string): boolean {
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+
+  for (const entry of entries) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory() && hasPythonTests(path)) {
+      return true;
+    }
+    if (entry.isFile() && /^test_.*\.py$|^.*_test\.py$/.test(entry.name)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 // ─── Failure Context Formatting ──────────────────────────────────────────────
