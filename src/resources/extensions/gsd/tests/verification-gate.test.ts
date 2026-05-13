@@ -445,6 +445,10 @@ test("isLikelyCommand: prose descriptions are rejected", () => {
   assert.equal(isLikelyCommand("Build succeeds without errors or warnings"), false);
 });
 
+test("isLikelyCommand: non-ASCII prose descriptions are rejected", () => {
+  assert.equal(isLikelyCommand("所有 命令 输出 一行 JSONL go test ./... 通过"), false);
+});
+
 test("isLikelyCommand: empty or whitespace-only strings are rejected", () => {
   assert.equal(isLikelyCommand(""), false);
   assert.equal(isLikelyCommand("   "), false);

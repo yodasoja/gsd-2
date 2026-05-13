@@ -78,7 +78,10 @@ import { createWorkflowTurnReporter } from "./workflow-turn-reporter.js";
 import { validateWorkflowSessionLock } from "./workflow-session-lock.js";
 import { dequeueSidecarItem } from "./workflow-sidecar-queue.js";
 import { maintainWorkerHeartbeat } from "./workflow-worker-heartbeat.js";
-import { measureMemoryPressure } from "./workflow-memory-pressure.js";
+import {
+  measureMemoryPressure,
+  shouldCheckMemoryPressure,
+} from "./workflow-memory-pressure.js";
 import { buildSidecarIterationData } from "./workflow-sidecar-iteration.js";
 import {
   createExecutionGraphUnitDispatchDeps,
@@ -203,9 +206,9 @@ function logCustomVerifyRetrySaveFailure(err: unknown): void {
 }
 
 // ── Memory pressure monitoring (#3331) ──────────────────────────────────
-// Check heap usage every N iterations and trigger graceful shutdown before
-// the OS OOM killer sends SIGKILL. The threshold is 90% of the V8 heap
-// limit (--max-old-space-size or default ~1.5-4GB depending on platform).
+// Check heap usage on session startup, then every N iterations, and trigger
+// graceful shutdown before the OS OOM killer sends SIGKILL. The threshold is
+// 90% of the V8 heap limit (--max-old-space-size or default ~1.5-4GB depending on platform).
 const MEMORY_CHECK_INTERVAL = 5; // check every 5 iterations
 const MAX_CUSTOM_ENGINE_VERIFY_RETRIES = 3;
 
@@ -372,7 +375,7 @@ export async function autoLoop(
 
     // ── Memory pressure check (#3331) ──
     // Graceful shutdown before OOM killer sends SIGKILL.
-    if (iteration % MEMORY_CHECK_INTERVAL === 0) {
+    if (shouldCheckMemoryPressure(iteration, MEMORY_CHECK_INTERVAL)) {
       const mem = measureMemoryPressure();
       debugLog("autoLoop", { phase: "memory-check", ...mem });
       const memoryDecision = decideMemoryPressure({ ...mem, iteration });

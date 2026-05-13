@@ -99,11 +99,11 @@
   - "Improve UI"
 
   Each task should usually include:
-  - Why: why this task exists / what part of the slice it closes
-  - Files: the main files likely touched
-  - Do: concrete implementation steps and important constraints
-  - Verify: the command, test, or runtime check that proves it worked
-  - Done when: a measurable acceptance condition
+  - description: why this task exists, concrete steps, and done-when acceptance
+  - files: JSON array of likely touched paths
+  - verify: the command, test, or runtime check that proves it worked
+  - inputs: JSON array of existing paths or prior task outputs this task consumes
+  - expectedOutput: JSON array of paths this task creates or overwrites
 
   Keep the checkbox line format exactly:
   - [ ] **T01: Title** `est:30m`

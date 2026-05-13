@@ -100,6 +100,8 @@ After writing the file, GSD attempts to open it in a browser using the local pla
 | `/gsd unpark` | Reactivate a parked milestone |
 | Discard milestone | Available via `/gsd` wizard → "Milestone actions" → "Discard" |
 
+Milestone and slice titles created during planning must not contain forward slash (`/`), en dash, or em dash characters. GSD reserves those characters as state-document delimiters, so `plan-milestone` rejects titles that include them.
+
 ## Parallel Orchestration
 
 | Command | Description |

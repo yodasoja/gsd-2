@@ -1327,9 +1327,15 @@ export async function runDispatch(
   }
 
   const guardBasePath = _resolveDispatchGuardBasePath(s);
+  let mainBranch = "main";
+  try {
+    mainBranch = deps.getMainBranch(guardBasePath);
+  } catch (err) {
+    debugLog("autoLoop", { phase: "getMainBranch-failed", error: String(err) });
+  }
   const priorSliceBlocker = deps.getPriorSliceCompletionBlocker(
     guardBasePath,
-    deps.getMainBranch(guardBasePath),
+    mainBranch,
     unitType,
     unitId,
   );

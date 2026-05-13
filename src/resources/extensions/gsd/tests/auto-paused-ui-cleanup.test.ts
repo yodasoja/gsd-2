@@ -43,7 +43,7 @@ test("cleanupAfterLoopExit preserves paused auto badge after provider pause", as
   }
 });
 
-test("cleanupAfterLoopExit clears status without replacing the last auto surface", async () => {
+test("cleanupAfterLoopExit clears status and progress widget without replacing outcome surface", async () => {
   const statusCalls: unknown[] = [];
   const widgetCalls: unknown[] = [];
 
@@ -64,8 +64,8 @@ test("cleanupAfterLoopExit clears status without replacing the last auto surface
     assert.deepEqual(statusCalls, [["gsd-auto", undefined]]);
     assert.equal(
       widgetCalls.some((args) => Array.isArray(args) && args[0] === "gsd-progress" && args[1] === undefined),
-      false,
-      "cleanup must not clear the last meaningful auto progress surface",
+      true,
+      "cleanup must clear the stale auto progress widget",
     );
     assert.equal(
       widgetCalls.some((args) => Array.isArray(args) && args[0] === "gsd-outcome"),
@@ -79,7 +79,7 @@ test("cleanupAfterLoopExit clears status without replacing the last auto surface
   }
 });
 
-test("cleanupAfterLoopExit preserves completion roll-up after stopAuto reset", async () => {
+test("cleanupAfterLoopExit clears progress widget after stopAuto reset", async () => {
   const statusCalls: unknown[] = [];
   const widgetCalls: unknown[] = [];
 
@@ -103,8 +103,8 @@ test("cleanupAfterLoopExit preserves completion roll-up after stopAuto reset", a
     assert.deepEqual(statusCalls, [["gsd-auto", undefined]]);
     assert.equal(
       widgetCalls.some((args) => Array.isArray(args) && args[0] === "gsd-progress" && args[1] === undefined),
-      false,
-      "completion cleanup must not clear the roll-up progress widget",
+      true,
+      "completion cleanup must clear the stale progress widget",
     );
     assert.equal(
       widgetCalls.some((args) => Array.isArray(args) && args[0] === "gsd-outcome"),

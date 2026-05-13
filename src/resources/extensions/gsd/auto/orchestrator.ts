@@ -128,6 +128,17 @@ export class AutoOrchestrator implements AutoOrchestrationModule {
         await this.deps.health.postAdvanceRecord(stopped);
         return stopped;
       }
+      if (!("unitType" in decision)) {
+        const blocked: AutoAdvanceResult = {
+          kind: "blocked",
+          reason: decision.reason,
+          action: decision.action,
+          stateSnapshot: reconciliation.stateSnapshot,
+        };
+        await this.deps.runtime.journalTransition({ name: "advance-blocked", reason: blocked.reason });
+        await this.deps.health.postAdvanceRecord(blocked);
+        return blocked;
+      }
 
       const nextKey = `${decision.unitType}:${decision.unitId}`;
 
