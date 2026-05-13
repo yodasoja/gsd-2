@@ -156,6 +156,13 @@ function formatWorktreeSafetyFailure(result: Extract<WorktreeSafetyResult, { ok:
   return `Worktree Safety failed (${result.kind}): ${result.reason} ${result.remediation}`;
 }
 
+function formatWorktreeSafetyStopReason(result: Extract<WorktreeSafetyResult, { ok: false }>): string {
+  if (result.kind === "empty-worktree-with-project-content") {
+    return `Worktree Safety failed (${result.kind}). Run /gsd doctor fix, then /gsd auto.`;
+  }
+  return `Worktree Safety failed (${result.kind}).`;
+}
+
 function resolveEmptyWorktreeWithProjectContent(
   unitRoot: string,
   projectRoot: string,
@@ -238,7 +245,7 @@ async function validateSourceWriteWorktreeSafety(
     projectRoot,
   });
   ctx.ui.notify(msg, "error");
-  await deps.stopAuto(ctx, pi, msg);
+  await deps.stopAuto(ctx, pi, formatWorktreeSafetyStopReason(result));
   return { action: "break", reason: result.kind };
 }
 

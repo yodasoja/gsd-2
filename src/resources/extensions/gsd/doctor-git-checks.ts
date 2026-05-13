@@ -9,7 +9,7 @@ import { parseRoadmap as parseLegacyRoadmap } from "./parsers-legacy.js";
 import { isDbAvailable, getMilestone } from "./gsd-db.js";
 import { resolveMilestoneFile } from "./paths.js";
 import { deriveState, isMilestoneComplete } from "./state.js";
-import { listWorktrees, resolveGitDir, worktreesDir } from "./worktree-manager.js";
+import { createWorktree, listWorktrees, resolveGitDir, worktreesDir } from "./worktree-manager.js";
 import { abortAndReset } from "./git-self-heal.js";
 import { RUNTIME_EXCLUSION_PATHS, resolveMilestoneIntegrationBranch, writeIntegrationBranch } from "./git-service.js";
 import { nativeIsRepo, nativeWorktreeList, nativeWorktreeRemove, nativeBranchList, nativeBranchDelete, nativeLsFiles, nativeRmCached, nativeHasChanges, nativeLastCommitEpoch, nativeGetCurrentBranch, nativeAddTracked, nativeCommit } from "./native-git-bridge.js";
@@ -52,6 +52,19 @@ function isSameOrNestedPath(candidate: string, container: string): boolean {
   const normalizedContainer = normalizePathForComparison(container);
   return normalizedCandidate === normalizedContainer ||
     normalizedCandidate.startsWith(`${normalizedContainer}/`);
+}
+
+function hasProjectContentOnDisk(dirPath: string): boolean {
+  try {
+    for (const entry of readdirSync(dirPath, { withFileTypes: true })) {
+      if (entry.name === ".git" || entry.name === ".gsd") continue;
+      if (entry.name === ".DS_Store") continue;
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
 }
 
 function getSnapshotDiffCheckFailure(basePath: string): string | null {
@@ -122,6 +135,37 @@ export async function checkGitHealth(
       const isComplete = milestoneEntry
         ? await isCompletedMilestoneTerminal(basePath, milestoneId)
         : false;
+
+      if (!isComplete && !hasProjectContentOnDisk(wt.path) && hasProjectContentOnDisk(basePath)) {
+        issues.push({
+          severity: "error",
+          code: "worktree_empty_with_project_content",
+          scope: "milestone",
+          unitId: milestoneId,
+          message: `Worktree ${wt.path} has no project content, but project root ${basePath} does. Run doctor --fix to recreate the worktree.`,
+          fixable: true,
+        });
+
+        if (shouldFix("worktree_empty_with_project_content")) {
+          try {
+            nativeWorktreeRemove(basePath, wt.path, true);
+            const recreated = createWorktree(basePath, milestoneId, {
+              branch: wt.branch,
+              reuseExistingBranch: true,
+            });
+            const reset = spawnSync("git", ["reset", "--hard"], {
+              cwd: recreated.path,
+              encoding: "utf-8",
+            });
+            if (reset.status !== 0) {
+              throw new Error(reset.stderr || reset.error?.message || "git reset --hard failed");
+            }
+            fixesApplied.push(`recreated empty worktree ${wt.path}`);
+          } catch {
+            fixesApplied.push(`failed to recreate empty worktree ${wt.path}`);
+          }
+        }
+      }
 
       if (isComplete) {
         issues.push({

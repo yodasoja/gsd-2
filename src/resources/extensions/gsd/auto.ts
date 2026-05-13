@@ -317,6 +317,13 @@ import { normalizeRealPath } from "./paths.js";
 /** Throttle STATE.md rebuilds — at most once per 30 seconds */
 const STATE_REBUILD_MIN_INTERVAL_MS = 30_000;
 
+export function formatAutoStopNotification(prefix: string, totals: { cost: number; tokens: { total: number } }, unitCount: number): string {
+  return [
+    `${prefix}.`,
+    `Session: ${formatCost(totals.cost)} · ${formatTokenCount(totals.tokens.total)} tokens · ${unitCount} units`,
+  ].join("\n");
+}
+
 /**
  * Phase B — register this auto-mode process in the workers table so other
  * workers and janitors can detect liveness via heartbeat. Best-effort: if
@@ -1417,7 +1424,7 @@ export async function stopAuto(
       if (ledger && ledger.units.length > 0) {
         const totals = getProjectTotals(ledger.units);
         ctx?.ui.notify(
-          `${notificationPrefix}. Session: ${formatCost(totals.cost)} · ${formatTokenCount(totals.tokens.total)} tokens · ${ledger.units.length} units`,
+          formatAutoStopNotification(notificationPrefix, totals, ledger.units.length),
           "info",
         );
       } else {
