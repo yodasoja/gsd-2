@@ -67,7 +67,7 @@ Then:
 5. Decompose the slice into tasks that fit one context window each. Every task passed to `gsd_plan_slice` must use the exact keys `taskId`, `title`, `description`, `estimate`, `files`, `verify`, `inputs`, `expectedOutput`, and optional `observabilityImpact`. Put Why / Do / Done-when detail in `description`. `files`, `inputs`, and `expectedOutput` must be JSON arrays of strings, even for one path (for example, `"expectedOutput": ["src/index.ts"]`, never `"expectedOutput": "src/index.ts"`).
 6. **Persist planning state through `gsd_plan_slice`.** Call it with the full payload. The tool writes to the DB and renders `{{outputPath}}` and `{{slicePath}}/tasks/T##-PLAN.md` automatically. Do NOT rely on direct `PLAN.md` writes.
 7. **Self-audit the plan.** If every task were completed exactly as written, the slice goal/demo should be true. Every must-have maps to a task. Inputs and Expected Output are backtick-wrapped file paths.
-8. If refinement produced structural decisions that diverge from the sketch, append them to `.gsd/DECISIONS.md`.
+8. If refinement produced structural decisions that diverge from the sketch, call `gsd_decision_save` for each; the tool persists the decision and regenerates `.gsd/DECISIONS.md`.
 9. {{commitInstruction}}
 
 The slice directory and tasks/ subdirectory already exist. Do NOT mkdir.

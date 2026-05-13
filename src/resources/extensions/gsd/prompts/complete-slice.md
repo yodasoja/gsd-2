@@ -34,7 +34,7 @@ Use `subagent` only for fresh-context review when useful: reviewer for cross-cut
 12. Review the inlined task-summary excerpts for DECISIONS.md and KNOWLEDGE.md-worthy decisions, patterns, and gotchas. Read full `*-SUMMARY.md` files only when an excerpt is absent, truncated, or lacks the specific evidence needed for the slice narrative. Capture significant items with `capture_thought`; do not append knowledge files directly.
 13. When verification passes, call `gsd_slice_complete`. The DB-backed tool is the canonical write path. Do **not** manually write `{{sliceSummaryPath}}`. Do **not** manually write `{{sliceUatPath}}`. Do not edit roadmap checkboxes; the tool renders files and updates projections.
 14. Do not run git commands.
-15. Update `.gsd/PROJECT.md` with a full `write` only if the current project state needs refresh.
+15. If the current project state needs refresh, call `gsd_summary_save` with `artifact_type: "PROJECT"` and the full updated project markdown as `content`; omit `milestone_id`. Do not write or edit `.gsd/PROJECT.md` directly.
 
 **Autonomous execution:** no human is available. Do not call `ask_user_questions` or `secure_env_collect`; make reasonable assumptions and document them.
 
