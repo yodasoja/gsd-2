@@ -9,11 +9,12 @@ import {
   resolveGuidedExecuteLaunchMode,
   type ActiveTaskChoice,
   type ActiveTaskRoute,
+  type SmartEntryIsolationMode,
 } from "../smart-entry-routing.ts";
 
 test("guided execute route enters auto step bootstrap only for worktree isolation", () => {
   const cases: Array<{
-    isolationMode: string;
+    isolationMode: SmartEntryIsolationMode;
     expectedRoute: ActiveTaskRoute;
   }> = [
     {
@@ -91,6 +92,18 @@ test("active task smart entry choices resolve to explicit routes", () => {
       testCase.expectedRoute,
     );
   }
+});
+
+test("active task route rejects invalid choices from untyped callers", () => {
+  assert.throws(
+    () =>
+      resolveActiveTaskChoiceRoute({
+        choice: "not_yet" as ActiveTaskChoice,
+        isolationMode: "worktree",
+        milestoneId: "M001",
+      }),
+    /Invalid ActiveTaskChoice: not_yet/,
+  );
 });
 
 test("guided execute launch mode remains a small compatibility helper", () => {

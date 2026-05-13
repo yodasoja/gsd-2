@@ -2721,6 +2721,8 @@ export async function showSmartEntry(
       notYetMessage: "Run /gsd when ready.",
     });
 
+    if (choice === "not_yet") return;
+
     const route = resolveActiveTaskChoiceRoute({
       choice: choice as ActiveTaskChoice,
       isolationMode: getIsolationMode(basePath),

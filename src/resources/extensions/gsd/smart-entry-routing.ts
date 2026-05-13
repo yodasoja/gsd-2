@@ -1,7 +1,7 @@
 // GSD-2 — Smart entry routing decisions.
 // Pure route selection for /gsd guided wizard choices.
 
-export type SmartEntryIsolationMode = "worktree" | string;
+export type SmartEntryIsolationMode = "worktree" | "branch" | "none";
 
 export type ActiveTaskChoice =
   | "execute"
@@ -69,5 +69,9 @@ export function resolveActiveTaskChoiceRoute(input: {
     return { kind: "status" };
   }
 
-  return { kind: "milestone-actions" };
+  if (input.choice === "milestone_actions") {
+    return { kind: "milestone-actions" };
+  }
+
+  throw new Error(`Invalid ActiveTaskChoice: ${input.choice}`);
 }
