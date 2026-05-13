@@ -2124,18 +2124,19 @@ export async function showSmartEntry(
 
   if (interrupted.classification !== "recoverable") {
     try {
-      const { autoImportMarkdownHierarchyIfDbMismatch } = await import("./migration-auto-check.js");
-      const result = await autoImportMarkdownHierarchyIfDbMismatch(basePath);
-      if (result.action === "imported") {
+      const { checkMarkdownHierarchyAgainstDb } = await import("./migration-auto-check.js");
+      const result = await checkMarkdownHierarchyAgainstDb(basePath);
+      if (result.action === "recovery-required") {
         ctx.ui.notify(
-          `Recovered migrated planning state into gsd.db (${result.reason}): ${result.afterDb.milestones} milestone(s), ${result.afterDb.slices} slice(s), ${result.afterDb.tasks} task(s).`,
-          "info",
+          result.message ??
+            `Markdown planning artifacts do not match the authoritative DB. Run \`${result.recoveryCommand ?? "gsd recover"}\` to import markdown explicitly.`,
+          "warning",
         );
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      ctx.ui.notify(`GSD could not auto-import existing planning state into gsd.db: ${message}`, "warning");
-      logWarning("guided", `planning state auto-import failed: ${message}`, { file: "guided-flow.ts" });
+      ctx.ui.notify(`GSD could not compare markdown planning artifacts with gsd.db: ${message}`, "warning");
+      logWarning("guided", `planning state DB/markdown comparison failed: ${message}`, { file: "guided-flow.ts" });
     }
   }
 
