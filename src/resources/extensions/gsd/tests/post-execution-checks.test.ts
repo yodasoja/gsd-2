@@ -127,6 +127,61 @@ import { b } from './b';
     assert.equal(imports.length, 2);
   });
 
+  test("ignores import-looking string literals in test fixtures", () => {
+    const source = `
+const rewritten = source.replace(
+  'import { normalizeZagrebBusinessDeadline } from "./cutoff";',
+  'const helper = true;'
+);
+
+import realThing from "./real-thing";
+`;
+    const imports = extractRelativeImports(source);
+    assert.deepEqual(imports, [
+      { importPath: "./real-thing", lineNum: 7 },
+    ]);
+  });
+
+  test("ignores import-looking lines inside template literals", () => {
+    const source = [
+      "const fixture = `",
+      "import missingThing from './missing-thing';",
+      "`;",
+      "",
+      "import realThing from './real-thing';",
+    ].join("\n");
+    const imports = extractRelativeImports(source);
+    assert.deepEqual(imports, [
+      { importPath: "./real-thing", lineNum: 5 },
+    ]);
+  });
+
+  test("ignores require() inside string literals", () => {
+    const source = [
+      'const fixture = "const x = require(\'./missing\');";',
+      "const otherFixture = 'const y = require(\"./also-missing\");';",
+      "const real = require('./real');",
+    ].join("\n");
+    const imports = extractRelativeImports(source);
+    assert.deepEqual(imports, [
+      { importPath: "./real", lineNum: 3 },
+    ]);
+  });
+
+  test("ignores require() inside template literals", () => {
+    const source = [
+      "const fixture = `",
+      "const x = require('./missing');",
+      "`;",
+      "",
+      "const real = require('./real');",
+    ].join("\n");
+    const imports = extractRelativeImports(source);
+    assert.deepEqual(imports, [
+      { importPath: "./real", lineNum: 5 },
+    ]);
+  });
+
   test("handles empty source", () => {
     const imports = extractRelativeImports("");
     assert.deepEqual(imports, []);
@@ -805,6 +860,37 @@ describe("runPostExecutionChecks", () => {
       assert.equal(result.status, "pass");
       assert.equal(result.checks.length, 0);
       assert.ok(result.durationMs >= 0);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("does not fail on import-looking strings in task key files", () => {
+    tempDir = join(tmpdir(), `post-exec-test-${Date.now()}`);
+    mkdirSync(tempDir, { recursive: true });
+    mkdirSync(join(tempDir, "tests"), { recursive: true });
+    writeFileSync(join(tempDir, "tests", "real-thing.ts"), "export default true;");
+    writeFileSync(
+      join(tempDir, "tests", "source-verifier.test.ts"),
+      `
+const rewritten = source.replace(
+  'import { normalizeZagrebBusinessDeadline } from "./cutoff";',
+  'const helper = true;'
+);
+
+import realThing from "./real-thing";
+assert.ok(realThing);
+`
+    );
+
+    try {
+      const task = createTask({
+        id: "T03",
+        key_files: ["tests/source-verifier.test.ts"],
+      });
+      const result = runPostExecutionChecks(task, [], tempDir);
+      assert.equal(result.status, "pass");
+      assert.deepEqual(result.checks, []);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
