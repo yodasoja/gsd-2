@@ -280,8 +280,6 @@ pythonpath = ["."]
   test("Python project markers without pytest evidence do not discover pytest", () => {
     mkdirSync(join(tmp, "tests"));
     writeFileSync(join(tmp, "tests", "README.md"), "# tests\n");
-    writeFileSync(join(tmp, "tox.ini"), "[tox]\nenvlist = py\n");
-    writeFileSync(join(tmp, "setup.cfg"), "[metadata]\nname = sample\n");
     writeFileSync(
       join(tmp, "pyproject.toml"),
       `[project]
@@ -289,6 +287,24 @@ name = "sample"
 dependencies = ["pytest-cov"]
 `,
     );
+
+    const result = discoverCommands({ cwd: tmp });
+
+    assert.equal(result.source, "none");
+    assert.deepStrictEqual(result.commands, []);
+  });
+
+  test("Python project with setup.cfg alone does not discover pytest", () => {
+    writeFileSync(join(tmp, "setup.cfg"), "[tool:pytest]\npythonpath = .\n");
+
+    const result = discoverCommands({ cwd: tmp });
+
+    assert.equal(result.source, "none");
+    assert.deepStrictEqual(result.commands, []);
+  });
+
+  test("Python project with tox.ini alone does not discover pytest", () => {
+    writeFileSync(join(tmp, "tox.ini"), "[pytest]\npythonpath = .\n");
 
     const result = discoverCommands({ cwd: tmp });
 
