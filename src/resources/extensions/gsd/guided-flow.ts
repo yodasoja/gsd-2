@@ -550,6 +550,7 @@ async function dispatchNextDeepProjectSetupStage(entry: PendingDeepProjectSetupE
     "gsd-run",
     entry.ctx,
     result.unitType,
+    { basePath: entry.basePath },
   );
   return true;
 }
@@ -1030,6 +1031,19 @@ type UIContext = ExtensionContext;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+interface DispatchWorkflowOptions {
+  basePath?: string;
+  deps?: {
+    loadPreferences?: typeof loadEffectiveGSDPreferences;
+    selectModel?: typeof selectAndApplyModel;
+    getTransportSupportError?: typeof getWorkflowTransportSupportError;
+  };
+}
+
+export function resolveGuidedDispatchProjectRoot(basePath?: string): string {
+  return basePath ?? process.cwd();
+}
+
 /**
  * Read GSD-WORKFLOW.md and dispatch it to the LLM with a contextual note.
  * This is the only way the wizard triggers work — everything else is the LLM's job.
@@ -1045,13 +1059,19 @@ async function dispatchWorkflow(
   customType = "gsd-run",
   ctx?: ExtensionContext,
   unitType?: string,
+  options: DispatchWorkflowOptions = {},
 ): Promise<void> {
+  const projectRoot = resolveGuidedDispatchProjectRoot(options.basePath);
+  const loadPreferences = options.deps?.loadPreferences ?? loadEffectiveGSDPreferences;
+  const selectModel = options.deps?.selectModel ?? selectAndApplyModel;
+  const getTransportSupportError = options.deps?.getTransportSupportError ?? getWorkflowTransportSupportError;
+
   // Route through the dynamic routing pipeline (complexity classification,
   // tier downgrade, fallback chains) — same path as auto-mode dispatches (#2958).
   if (ctx && unitType) {
-    const prefs = loadEffectiveGSDPreferences()?.preferences;
-    const result = await selectAndApplyModel(
-      ctx, pi, unitType, /* unitId */ "", /* basePath */ process.cwd(),
+    const prefs = loadPreferences(projectRoot)?.preferences;
+    const result = await selectModel(
+      ctx, pi, unitType, /* unitId */ "", projectRoot,
       prefs, /* verbose */ false, /* autoModeStartModel */ null,
       /* retryContext */ undefined, /* isAutoMode */ false,
     );
@@ -1063,11 +1083,11 @@ async function dispatchWorkflow(
       });
     }
 
-    const compatibilityError = getWorkflowTransportSupportError(
+    const compatibilityError = getTransportSupportError(
       result.appliedModel?.provider ?? ctx.model?.provider,
       getRequiredWorkflowToolsForGuidedUnit(unitType),
       {
-        projectRoot: process.cwd(),
+        projectRoot,
         surface: "guided flow",
         unitType,
         authMode: result.appliedModel?.provider
@@ -1363,7 +1383,7 @@ export async function showHeadlessMilestoneCreation(
   // model/tool routing to skip discuss-flow tool scoping and
   // `checkAutoStartAfterDiscuss` guardrails that rely on the
   // "discuss-"-prefixed unitType.
-  await dispatchWorkflow(pi, prompt, "gsd-run", ctx, "discuss-milestone");
+  await dispatchWorkflow(pi, prompt, "gsd-run", ctx, "discuss-milestone", { basePath });
 }
 
 
@@ -1554,7 +1574,7 @@ export async function showDiscuss(
         ? `${basePrompt}\n\n## Prior Discussion (Draft Seed)\n\n${draftContent}`
         : basePrompt;
       setPendingAutoStart(basePath, { ctx, pi, basePath, milestoneId: mid, step: false });
-      await dispatchWorkflow(pi, seed, "gsd-discuss", ctx, "discuss-milestone");
+      await dispatchWorkflow(pi, seed, "gsd-discuss", ctx, "discuss-milestone", { basePath });
     } else if (choice === "discuss_fresh") {
       const discussMilestoneTemplates = inlineTemplate("context", "Context");
       const structuredQuestionsAvailable = getStructuredQuestionsAvailability(pi, ctx);
@@ -1564,7 +1584,7 @@ export async function showDiscuss(
         milestoneId: mid, milestoneTitle, inlinedTemplates: discussMilestoneTemplates, structuredQuestionsAvailable,
         commitInstruction: buildDocsCommitInstruction(`docs(${mid}): milestone context from discuss`),
         fastPathInstruction: "",
-      }), "gsd-discuss", ctx, "discuss-milestone");
+      }), "gsd-discuss", ctx, "discuss-milestone", { basePath });
     } else if (choice === "skip_milestone") {
       const { ensureDbOpen } = await import("./bootstrap/dynamic-tools.js");
       await ensureDbOpen(basePath);
@@ -1572,7 +1592,7 @@ export async function showDiscuss(
       const uniqueMilestoneIds = !!loadEffectiveGSDPreferences()?.preferences?.unique_milestone_ids;
       const nextId = nextMilestoneIdReserved(milestoneIds, uniqueMilestoneIds, basePath);
       setPendingAutoStart(basePath, { ctx, pi, basePath, milestoneId: nextId, step: false });
-      await dispatchWorkflow(pi, await prepareAndBuildDiscussPrompt(ctx, pi, nextId, `New milestone ${nextId}.`, basePath), "gsd-run", ctx, "discuss-milestone");
+      await dispatchWorkflow(pi, await prepareAndBuildDiscussPrompt(ctx, pi, nextId, `New milestone ${nextId}.`, basePath), "gsd-run", ctx, "discuss-milestone", { basePath });
     }
     return;
   }
@@ -1720,7 +1740,7 @@ export async function showDiscuss(
 
     const sqAvail = getStructuredQuestionsAvailability(pi, ctx);
     const prompt = await buildDiscussSlicePrompt(mid, chosen.id, chosen.title, basePath, { rediscuss: isRediscuss, structuredQuestionsAvailable: sqAvail });
-    await dispatchWorkflow(pi, prompt, "gsd-discuss", ctx, "discuss-slice");
+    await dispatchWorkflow(pi, prompt, "gsd-discuss", ctx, "discuss-slice", { basePath });
 
     // Wait for the discuss session to finish, then loop back to the picker
     await ctx.waitForIdle();
@@ -1841,7 +1861,7 @@ async function dispatchDiscussForMilestone(
   const prompt = draftContent
     ? `${basePrompt}\n\n## Prior Discussion (Draft Seed)\n\n${draftContent}`
     : basePrompt;
-  await dispatchWorkflow(pi, prompt, "gsd-discuss", ctx, "discuss-milestone");
+  await dispatchWorkflow(pi, prompt, "gsd-discuss", ctx, "discuss-milestone", { basePath });
 }
 
 // ─── Smart Entry Point ────────────────────────────────────────────────────────
@@ -1984,7 +2004,7 @@ async function handleMilestoneActions(
     await dispatchWorkflow(pi, await prepareAndBuildDiscussPrompt(ctx, pi, nextId,
       `New milestone ${nextId}.`,
       basePath
-    ), "gsd-run", ctx, "discuss-milestone");
+    ), "gsd-run", ctx, "discuss-milestone", { basePath });
     return true;
   }
 
@@ -2233,7 +2253,7 @@ export async function showSmartEntry(
       await dispatchWorkflow(pi, await prepareAndBuildDiscussPrompt(ctx, pi, nextId,
         `New project, milestone ${nextId}. Do NOT read or explore .gsd/ — it's empty scaffolding.`,
         basePath
-      ), "gsd-run", ctx, "discuss-milestone");
+      ), "gsd-run", ctx, "discuss-milestone", { basePath });
     } else {
       const choice = await showNextAction(ctx, {
         title: "GSD — Get Shit Done",
@@ -2262,7 +2282,7 @@ export async function showSmartEntry(
         await dispatchWorkflow(pi, await prepareAndBuildDiscussPrompt(ctx, pi, nextId,
           `New milestone ${nextId}.`,
           basePath
-        ), "gsd-run", ctx, "discuss-milestone");
+        ), "gsd-run", ctx, "discuss-milestone", { basePath });
       }
     }
     return;
@@ -2284,6 +2304,7 @@ export async function showSmartEntry(
       "gsd-discuss",
       ctx,
       "discuss-milestone",
+      { basePath },
     );
     return;
   }
@@ -2375,7 +2396,7 @@ export async function showSmartEntry(
         ? `${basePrompt}\n\n## Prior Discussion (Draft Seed)\n\n${draftContent}`
         : basePrompt;
       setPendingAutoStart(basePath, { ctx, pi, basePath, milestoneId, step: stepMode });
-      await dispatchWorkflow(pi, seed, "gsd-discuss", ctx, "discuss-milestone");
+      await dispatchWorkflow(pi, seed, "gsd-discuss", ctx, "discuss-milestone", { basePath });
     } else if (choice === "discuss_fresh") {
       const discussMilestoneTemplates = inlineTemplate("context", "Context");
       const structuredQuestionsAvailable = getStructuredQuestionsAvailability(pi, ctx);
@@ -2385,7 +2406,7 @@ export async function showSmartEntry(
         milestoneId, milestoneTitle, inlinedTemplates: discussMilestoneTemplates, structuredQuestionsAvailable,
         commitInstruction: buildDocsCommitInstruction(`docs(${milestoneId}): milestone context from discuss`),
         fastPathInstruction: "",
-      }), "gsd-discuss", ctx, "discuss-milestone");
+      }), "gsd-discuss", ctx, "discuss-milestone", { basePath });
     } else if (choice === "skip_milestone") {
       const milestoneIds = findMilestoneIds(basePath);
       const uniqueMilestoneIds = !!loadEffectiveGSDPreferences()?.preferences?.unique_milestone_ids;
@@ -2394,7 +2415,7 @@ export async function showSmartEntry(
       await dispatchWorkflow(pi, await prepareAndBuildDiscussPrompt(ctx, pi, nextId,
         `New milestone ${nextId}.`,
         basePath
-      ), "gsd-run", ctx, "discuss-milestone");
+      ), "gsd-run", ctx, "discuss-milestone", { basePath });
     }
     return;
   }
@@ -2469,6 +2490,7 @@ export async function showSmartEntry(
           "gsd-run",
           ctx,
           "plan-milestone",
+          { basePath },
         );
       } else if (choice === "discuss") {
         const discussMilestoneTemplates = inlineTemplate("context", "Context");
@@ -2478,7 +2500,7 @@ export async function showSmartEntry(
           milestoneId, milestoneTitle, inlinedTemplates: discussMilestoneTemplates, structuredQuestionsAvailable,
           commitInstruction: buildDocsCommitInstruction(`docs(${milestoneId}): milestone context from discuss`),
           fastPathInstruction: "",
-        }), "gsd-run", ctx, "discuss-milestone");
+        }), "gsd-run", ctx, "discuss-milestone", { basePath });
       } else if (choice === "skip_milestone") {
         const milestoneIds = findMilestoneIds(basePath);
         const uniqueMilestoneIds = !!loadEffectiveGSDPreferences()?.preferences?.unique_milestone_ids;
@@ -2487,7 +2509,7 @@ export async function showSmartEntry(
         await dispatchWorkflow(pi, await prepareAndBuildDiscussPrompt(ctx, pi, nextId,
           `New milestone ${nextId}.`,
           basePath
-        ), "gsd-run", ctx, "discuss-milestone");
+        ), "gsd-run", ctx, "discuss-milestone", { basePath });
       } else if (choice === "discard_milestone") {
         const confirmed = await showConfirm(ctx, {
           title: "Discard milestone?",
@@ -2602,10 +2624,11 @@ export async function showSmartEntry(
         "gsd-run",
         ctx,
         "plan-slice",
+        { basePath },
       );
     } else if (choice === "discuss") {
       const sqAvail = getStructuredQuestionsAvailability(pi, ctx);
-      await dispatchWorkflow(pi, await buildDiscussSlicePrompt(milestoneId, sliceId, sliceTitle, basePath, { rediscuss: hasContext, structuredQuestionsAvailable: sqAvail }), "gsd-run", ctx, "discuss-slice");
+      await dispatchWorkflow(pi, await buildDiscussSlicePrompt(milestoneId, sliceId, sliceTitle, basePath, { rediscuss: hasContext, structuredQuestionsAvailable: sqAvail }), "gsd-run", ctx, "discuss-slice", { basePath });
     } else if (choice === "research") {
       const researchTemplates = inlineTemplate("research", "Research");
       await dispatchWorkflow(pi, loadPrompt("guided-research-slice", {
@@ -2620,7 +2643,7 @@ export async function showSmartEntry(
           sliceTitle,
           extraContext: [researchTemplates],
         }),
-      }), "gsd-run", ctx, "research-slice");
+      }), "gsd-run", ctx, "research-slice", { basePath });
     } else if (choice === "status") {
       const { fireStatusViaCommand } = await import("./commands.js");
       await fireStatusViaCommand(ctx);
@@ -2665,6 +2688,7 @@ export async function showSmartEntry(
         "gsd-run",
         ctx,
         "complete-slice",
+        { basePath },
       );
     } else if (choice === "status") {
       const { fireStatusViaCommand } = await import("./commands.js");
@@ -2747,7 +2771,7 @@ export async function showSmartEntry(
             taskId,
             taskTitle,
           }),
-        }), "gsd-run", ctx, "execute-task");
+        }), "gsd-run", ctx, "execute-task", { basePath });
       } else {
         await dispatchWorkflow(
           pi,
@@ -2755,6 +2779,7 @@ export async function showSmartEntry(
           "gsd-run",
           ctx,
           "execute-task",
+          { basePath },
         );
       }
     } else if (route.kind === "status") {
