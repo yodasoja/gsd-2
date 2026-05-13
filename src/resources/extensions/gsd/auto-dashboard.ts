@@ -1165,17 +1165,6 @@ function normalizeRollupText(value: string | null | undefined): string | null {
   return clean;
 }
 
-function extractLastAssistantSummary(messages: unknown[] | null | undefined): string | null {
-  if (!messages || messages.length === 0) return null;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (!isAssistantMessage(messages[i])) continue;
-    const text = extractMessageText(messages[i]);
-    const clean = normalizeRollupText(text);
-    if (clean) return truncateToWidth(clean, 220, "…");
-  }
-  return null;
-}
-
 function isAssistantMessage(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
   const record = value as Record<string, unknown>;
@@ -1187,6 +1176,17 @@ function isAssistantMessage(value: unknown): boolean {
   }
 
   return false;
+}
+
+function extractLastAssistantSummary(messages: unknown[] | null | undefined): string | null {
+  if (!messages || messages.length === 0) return null;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (!isAssistantMessage(messages[i])) continue;
+    const text = extractMessageText(messages[i]);
+    const clean = normalizeRollupText(text);
+    if (clean) return truncateToWidth(clean, 220, "…");
+  }
+  return null;
 }
 
 function extractMessageText(value: unknown): string | null {
