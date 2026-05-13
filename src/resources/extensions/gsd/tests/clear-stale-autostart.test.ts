@@ -17,6 +17,15 @@ import {
   setPendingAutoStart,
 } from "../guided-flow.ts";
 
+function pendingInput(basePath: string, milestoneId: string) {
+  return {
+    basePath,
+    milestoneId,
+    ctx: { ui: { notify: () => undefined } } as any,
+    pi: { sendMessage: () => undefined } as any,
+  };
+}
+
 afterEach(() => {
   clearPendingAutoStart();
 });
@@ -28,7 +37,7 @@ describe("clear stale pending auto-start (#3667)", () => {
     mkdirSync(join(base, ".gsd"), { recursive: true });
     const before = Date.now();
 
-    setPendingAutoStart(base, { basePath: base, milestoneId: "M001" });
+    setPendingAutoStart(base, pendingInput(base, "M001"));
 
     const entry = _getPendingAutoStart(base);
     assert.ok(entry);
@@ -41,7 +50,7 @@ describe("clear stale pending auto-start (#3667)", () => {
     t.after(() => rmSync(base, { recursive: true, force: true }));
     mkdirSync(join(base, ".gsd"), { recursive: true });
 
-    setPendingAutoStart(base, { basePath: base, milestoneId: "M001", createdAt: 123 });
+    setPendingAutoStart(base, { ...pendingInput(base, "M001"), createdAt: 123 });
 
     assert.equal(_getPendingAutoStart(base)?.createdAt, 123);
   });

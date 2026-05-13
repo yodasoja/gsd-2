@@ -2298,7 +2298,7 @@ export async function showSmartEntry(
       await dispatchWorkflow(pi, await prepareAndBuildDiscussPrompt(ctx, pi, nextId,
         `New milestone ${nextId}.`,
         basePath
-      ), "gsd-run", ctx, "discuss-milestone");
+      ), "gsd-run", ctx, "discuss-milestone", { basePath });
     } else if (choice === "status") {
       const { fireStatusViaCommand } = await import("./commands.js");
       await fireStatusViaCommand(ctx);

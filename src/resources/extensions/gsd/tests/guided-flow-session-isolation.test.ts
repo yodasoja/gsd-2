@@ -21,6 +21,15 @@ import {
   checkAutoStartAfterDiscuss,
 } from "../guided-flow.ts";
 
+function pendingInput(basePath: string, milestoneId: string) {
+  return {
+    basePath,
+    milestoneId,
+    ctx: { ui: { notify: () => undefined } } as any,
+    pi: { setActiveTools: () => undefined, getActiveTools: () => [] } as any,
+  };
+}
+
 // ─── Tests ─────────────────────────────────────────────────────────────────
 
 describe("#2985 Bug 3 — concurrent discuss sessions must be independent", () => {
@@ -34,13 +43,11 @@ describe("#2985 Bug 3 — concurrent discuss sessions must be independent", () =
     const projectB = "/projects/beta";
 
     setPendingAutoStart(projectA, {
-      basePath: projectA,
-      milestoneId: "M001-aaa111",
+      ...pendingInput(projectA, "M001-aaa111"),
     });
 
     setPendingAutoStart(projectB, {
-      basePath: projectB,
-      milestoneId: "M002-bbb222",
+      ...pendingInput(projectB, "M002-bbb222"),
     });
 
     // Both sessions should be retrievable
@@ -55,8 +62,8 @@ describe("#2985 Bug 3 — concurrent discuss sessions must be independent", () =
     const projectA = "/projects/alpha";
     const projectB = "/projects/beta";
 
-    setPendingAutoStart(projectA, { basePath: projectA, milestoneId: "M001-aaa111" });
-    setPendingAutoStart(projectB, { basePath: projectB, milestoneId: "M002-bbb222" });
+    setPendingAutoStart(projectA, pendingInput(projectA, "M001-aaa111"));
+    setPendingAutoStart(projectB, pendingInput(projectB, "M002-bbb222"));
 
     // Clear only projectA
     clearPendingAutoStart(projectA);
@@ -72,8 +79,8 @@ describe("#2985 Bug 4 — getDiscussionMilestoneId must be keyed by basePath", (
   });
 
   test("getDiscussionMilestoneId(basePath) returns correct milestone for each project", () => {
-    setPendingAutoStart("/proj/a", { basePath: "/proj/a", milestoneId: "M001" });
-    setPendingAutoStart("/proj/b", { basePath: "/proj/b", milestoneId: "M002" });
+    setPendingAutoStart("/proj/a", pendingInput("/proj/a", "M001"));
+    setPendingAutoStart("/proj/b", pendingInput("/proj/b", "M002"));
 
     assert.equal(getDiscussionMilestoneId("/proj/a"), "M001");
     assert.equal(getDiscussionMilestoneId("/proj/b"), "M002");
@@ -81,8 +88,8 @@ describe("#2985 Bug 4 — getDiscussionMilestoneId must be keyed by basePath", (
   });
 
   test("getDiscussionMilestoneId() without basePath returns null when multiple sessions exist", () => {
-    setPendingAutoStart("/proj/a", { basePath: "/proj/a", milestoneId: "M001" });
-    setPendingAutoStart("/proj/b", { basePath: "/proj/b", milestoneId: "M002" });
+    setPendingAutoStart("/proj/a", pendingInput("/proj/a", "M001"));
+    setPendingAutoStart("/proj/b", pendingInput("/proj/b", "M002"));
 
     // Without a key, the function should not blindly return the first entry
     const result = getDiscussionMilestoneId();
@@ -92,7 +99,7 @@ describe("#2985 Bug 4 — getDiscussionMilestoneId must be keyed by basePath", (
   });
 
   test("getDiscussionMilestoneId() without basePath returns the milestone when only one session", () => {
-    setPendingAutoStart("/proj/a", { basePath: "/proj/a", milestoneId: "M001" });
+    setPendingAutoStart("/proj/a", pendingInput("/proj/a", "M001"));
 
     // With only one session, backward compat — return it
     const result = getDiscussionMilestoneId();

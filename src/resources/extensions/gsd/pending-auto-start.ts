@@ -41,6 +41,9 @@ export function hasPendingAutoStart(basePath?: string): boolean {
 }
 
 export function setPendingAutoStart(basePath: string, entry: PendingAutoStartInput): void {
+  if (!entry.ctx || !entry.pi) {
+    throw new Error("setPendingAutoStart requires ctx and pi");
+  }
   const ws = createWorkspace(entry.basePath);
   const scope = scopeMilestone(ws, entry.milestoneId);
   pendingAutoStartMap.set(basePath, {
@@ -48,7 +51,9 @@ export function setPendingAutoStart(basePath: string, entry: PendingAutoStartInp
     planBlockedRecoveryCount: 0,
     ...entry,
     scope,
-  } as PendingAutoStartEntry);
+    ctx: entry.ctx,
+    pi: entry.pi,
+  });
 }
 
 export function deletePendingAutoStart(basePath: string): void {
