@@ -92,6 +92,12 @@ import { deleteRuntimeKv } from "./db/runtime-kv.js";
 import { PAUSED_SESSION_KV_KEY } from "./interrupted-session.js";
 import { buildWorkflowDispatchContent } from "./workflow-protocol.js";
 import { isFullGsdToolSurfaceRequested, restoreGsdWorkflowTools, scopeGsdWorkflowToolsForDispatch } from "./bootstrap/register-hooks.js";
+import {
+  resolveActiveTaskChoiceRoute,
+  type ActiveTaskChoice,
+} from "./smart-entry-routing.js";
+
+export { resolveGuidedExecuteLaunchMode } from "./smart-entry-routing.js";
 
 type AutoStartOptions = Parameters<typeof startAutoDetached>[4];
 type AutoStartLauncher = typeof startAutoDetached;
@@ -211,12 +217,6 @@ function runPlanV2Gate(
 
 export const _needsPlanV2GateForTest = needsPlanV2Gate;
 export const _runPlanV2GateForTest = runPlanV2Gate;
-
-export function resolveGuidedExecuteLaunchMode(
-  isolationMode: string,
-): "auto-step" | "guided-dispatch" {
-  return isolationMode === "worktree" ? "auto-step" : "guided-dispatch";
-}
 
 export function _roadmapHasParseableSlicesForTest(
   roadmapContent: string | null | undefined,
@@ -2721,20 +2721,18 @@ export async function showSmartEntry(
       notYetMessage: "Run /gsd when ready.",
     });
 
-    if (choice === "auto") {
-      startAutoDetached(ctx, pi, basePath, false);
+    const route = resolveActiveTaskChoiceRoute({
+      choice: choice as ActiveTaskChoice,
+      isolationMode: getIsolationMode(basePath),
+      milestoneId,
+    });
+
+    if (route.kind === "auto-bootstrap") {
+      startAutoDetached(ctx, pi, basePath, route.verboseMode, route.options);
       return;
     }
 
-    if (choice === "execute") {
-      if (resolveGuidedExecuteLaunchMode(getIsolationMode(basePath)) === "auto-step") {
-        startAutoDetached(ctx, pi, basePath, false, {
-          step: true,
-          milestoneLock: milestoneId,
-        });
-        return;
-      }
-
+    if (route.kind === "guided-dispatch") {
       ctx.ui.setStatus("gsd-step", "Executing Task · follow progress above");
       if (hasInterrupted) {
         await dispatchWorkflow(pi, loadPrompt("guided-resume-task", {
@@ -2757,10 +2755,10 @@ export async function showSmartEntry(
           "execute-task",
         );
       }
-    } else if (choice === "status") {
+    } else if (route.kind === "status") {
       const { fireStatusViaCommand } = await import("./commands.js");
       await fireStatusViaCommand(ctx);
-    } else if (choice === "milestone_actions") {
+    } else if (route.kind === "milestone-actions") {
       const acted = await handleMilestoneActions(ctx, pi, basePath, milestoneId, milestoneTitle, options);
       if (acted) return showSmartEntry(ctx, pi, basePath, options);
     }
