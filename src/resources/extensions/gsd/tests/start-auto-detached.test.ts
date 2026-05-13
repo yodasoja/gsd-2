@@ -4,7 +4,10 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { _withDetachedAutoKeepaliveForTest } from "../auto.ts";
-import { _scheduleAutoStartAfterIdleForTest } from "../guided-flow.ts";
+import {
+  _scheduleAutoStartAfterIdleForTest,
+  resolveGuidedExecuteLaunchMode,
+} from "../guided-flow.ts";
 
 const gsdDir = resolve(import.meta.dirname, "..");
 
@@ -61,6 +64,24 @@ test("bare /gsd stays in the foreground smart-entry flow (#5125 regression)", ()
   assert.ok(
     !bareCommandBranch.includes("startAutoDetached("),
     "bare /gsd must not enter detached auto bootstrap directly",
+  );
+});
+
+test("guided execute uses auto step bootstrap when worktree isolation is enabled", () => {
+  assert.equal(
+    resolveGuidedExecuteLaunchMode("worktree"),
+    "auto-step",
+    "guided execute must enter auto bootstrap so the milestone worktree is created before execution",
+  );
+  assert.equal(
+    resolveGuidedExecuteLaunchMode("none"),
+    "guided-dispatch",
+    "non-isolated projects can keep the foreground guided dispatch path",
+  );
+  assert.equal(
+    resolveGuidedExecuteLaunchMode("branch"),
+    "guided-dispatch",
+    "this regression fix is scoped to worktree isolation",
   );
 });
 

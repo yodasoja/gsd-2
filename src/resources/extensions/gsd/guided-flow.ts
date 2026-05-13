@@ -44,7 +44,7 @@ import { readSessionLockData, isSessionLockProcessAlive } from "./session-lock.j
 import { nativeAddAll, nativeCommit, nativeHasCommittedHead, nativeIsRepo, nativeInit } from "./native-git-bridge.js";
 import { isInheritedRepo } from "./repo-identity.js";
 import { ensureGitignore, ensurePreferences, untrackRuntimeFiles } from "./gitignore.js";
-import { loadEffectiveGSDPreferences } from "./preferences.js";
+import { getIsolationMode, loadEffectiveGSDPreferences } from "./preferences.js";
 import { resolveUokFlags } from "./uok/flags.js";
 import { ensurePlanV2Graph, isMissingFinalizedContextResult } from "./uok/plan-v2.js";
 import { detectProjectState, hasGsdBootstrapArtifacts } from "./detection.js";
@@ -211,6 +211,12 @@ function runPlanV2Gate(
 
 export const _needsPlanV2GateForTest = needsPlanV2Gate;
 export const _runPlanV2GateForTest = runPlanV2Gate;
+
+export function resolveGuidedExecuteLaunchMode(
+  isolationMode: string,
+): "auto-step" | "guided-dispatch" {
+  return isolationMode === "worktree" ? "auto-step" : "guided-dispatch";
+}
 
 export function _roadmapHasParseableSlicesForTest(
   roadmapContent: string | null | undefined,
@@ -2721,6 +2727,14 @@ export async function showSmartEntry(
     }
 
     if (choice === "execute") {
+      if (resolveGuidedExecuteLaunchMode(getIsolationMode(basePath)) === "auto-step") {
+        startAutoDetached(ctx, pi, basePath, false, {
+          step: true,
+          milestoneLock: milestoneId,
+        });
+        return;
+      }
+
       ctx.ui.setStatus("gsd-step", "Executing Task · follow progress above");
       if (hasInterrupted) {
         await dispatchWorkflow(pi, loadPrompt("guided-resume-task", {
