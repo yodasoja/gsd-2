@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 
-import { verifyExpectedArtifact, hasImplementationArtifacts, resolveExpectedArtifactPath, diagnoseExpectedArtifact, buildLoopRemediationSteps, writeBlockerPlaceholder, refreshRecoveryDbForArtifact } from "../auto-recovery.ts";
+import { verifyExpectedArtifact, hasImplementationArtifacts, resolveExpectedArtifactPath, diagnoseExpectedArtifact, diagnoseWorktreeIntegrityFailure, buildLoopRemediationSteps, writeBlockerPlaceholder, refreshRecoveryDbForArtifact } from "../auto-recovery.ts";
 import { resolveMilestoneFile } from "../paths.ts";
 import { openDatabase, closeDatabase, insertMilestone, insertSlice, insertGateRow, insertTask, getMilestoneCommitAttributionShas } from "../gsd-db.ts";
 import { clearParseCache } from "../files.ts";
@@ -139,6 +139,20 @@ test("resolveExpectedArtifactPath returns null for unknown type", () => {
   } finally {
     cleanup(base);
   }
+});
+
+test("diagnoseWorktreeIntegrityFailure reports missing GSD worktree paths only", () => {
+  const missingWorktreePath = join(tmpdir(), `gsd-test-${randomUUID()}`, ".gsd", "worktrees", "M001-S01");
+  assert.equal(
+    diagnoseWorktreeIntegrityFailure(join(tmpdir(), `gsd-test-${randomUUID()}`)),
+    null,
+    "non-GSD paths should keep falling through to artifact recovery",
+  );
+  assert.equal(
+    diagnoseWorktreeIntegrityFailure(missingWorktreePath),
+    `Worktree integrity failure: ${missingWorktreePath} does not exist. Repair or recreate the worktree before retrying.`,
+    "missing GSD worktree paths should fail terminally before artifact retry",
+  );
 });
 
 test("resolveExpectedArtifactPath returns correct path for all milestone-level types", () => {

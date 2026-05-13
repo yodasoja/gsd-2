@@ -38,9 +38,9 @@ export interface CompleteMilestoneParams {
   definitionOfDoneResults?: string;
   /** @optional — empty/omitted renders as "Not provided." */
   requirementOutcomes?: string;
-  /** @optional — empty/omitted renders as "(none)" */
+  /** @optional — empty/omitted renders as an empty frontmatter list */
   keyDecisions?: string[];
-  /** @optional — empty/omitted renders as "(none)" */
+  /** @optional — empty/omitted renders as an empty frontmatter list */
   keyFiles?: string[];
   /** @optional — empty/omitted renders as "(none)" */
   lessonsLearned?: string[];
@@ -70,12 +70,12 @@ function renderMilestoneSummaryMarkdown(params: CompleteMilestoneParams, complet
   const lessonsLearned = params.lessonsLearned ?? [];
 
   const keyDecisionsYaml = keyDecisions.length > 0
-    ? keyDecisions.map(d => `  - ${d}`).join("\n")
-    : "  - (none)";
+    ? `\n${keyDecisions.map(d => `  - ${d}`).join("\n")}`
+    : " []";
 
   const keyFilesYaml = keyFiles.length > 0
-    ? keyFiles.map(f => `  - ${f}`).join("\n")
-    : "  - (none)";
+    ? `\n${keyFiles.map(f => `  - ${f}`).join("\n")}`
+    : " []";
 
   const lessonsYaml = lessonsLearned.length > 0
     ? lessonsLearned.map(l => `  - ${l}`).join("\n")
@@ -86,10 +86,8 @@ id: ${params.milestoneId}
 title: "${displayTitle}"
 status: complete
 completed_at: ${completedAt}
-key_decisions:
-${keyDecisionsYaml}
-key_files:
-${keyFilesYaml}
+key_decisions:${keyDecisionsYaml}
+key_files:${keyFilesYaml}
 lessons_learned:
 ${lessonsYaml}
 ---

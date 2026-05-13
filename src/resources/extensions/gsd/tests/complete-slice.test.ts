@@ -408,10 +408,10 @@ console.log('\n=== complete-slice: handler with missing roadmap ===');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// complete-slice: step 13 specifies write tool for PROJECT.md (#2946)
+// complete-slice: PROJECT refresh uses DB-backed artifact tool.
 // ═══════════════════════════════════════════════════════════════════════════
 
-console.log('\n=== complete-slice: step 13 specifies write tool for PROJECT.md (#2946) ===');
+console.log('\n=== complete-slice: PROJECT refresh uses gsd_summary_save ===');
 {
   const promptPath = path.join(
     path.dirname(new URL(import.meta.url).pathname),
@@ -419,13 +419,9 @@ console.log('\n=== complete-slice: step 13 specifies write tool for PROJECT.md (
   );
   const prompt = fs.readFileSync(promptPath, 'utf-8');
 
-  // Step 13 must explicitly name the `write` tool so the LLM doesn't
-  // confuse it with `edit` (which requires path + oldText + newText).
-  // See: https://github.com/gsd-build/gsd-2/issues/2946
-  const mentionsWriteTool =
-    /PROJECT\.md.*\bwrite\b/i.test(prompt) ||
-    /\bwrite\b.*PROJECT\.md/i.test(prompt);
-  assertTrue(mentionsWriteTool, 'step 13 must name the `write` tool when updating PROJECT.md');
+  assertTrue(prompt.includes('gsd_summary_save'), 'PROJECT refresh must use gsd_summary_save');
+  assertTrue(prompt.includes('artifact_type: "PROJECT"'), 'PROJECT refresh must use artifact_type PROJECT');
+  assertTrue(!/with a full `write`/i.test(prompt), 'prompt must not instruct direct PROJECT.md writes');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -14,7 +14,10 @@ import {
   type SkillsPolicy,
   type UnitContextManifest,
 } from "../unit-context-manifest.ts";
-import { ALLOWED_PLANNING_DISPATCH_AGENTS } from "../bootstrap/write-gate.ts";
+import {
+  ALLOWED_PLANNING_DISPATCH_AGENTS,
+  shouldBlockPlanningUnit,
+} from "../bootstrap/write-gate.ts";
 import {
   getRequiredWorkflowToolsForAutoUnit,
   getRequiredWorkflowToolsForGuidedUnit,
@@ -217,7 +220,7 @@ test("#4934: every manifest declares a tools policy", () => {
 });
 
 test("#4934: tools.mode is one of the declared policies", () => {
-  const validModes = new Set(["all", "read-only", "planning", "planning-dispatch", "docs"]);
+  const validModes = new Set(["all", "read-only", "planning", "planning-dispatch", "docs", "verification"]);
   for (const [unitType, manifest] of Object.entries(UNIT_MANIFESTS)) {
     const mode = (manifest as { tools: { mode: string } }).tools.mode;
     assert.ok(
@@ -227,19 +230,75 @@ test("#4934: tools.mode is one of the declared policies", () => {
   }
 });
 
-test('#4934: only execute-task and reactive-execute may use tools.mode "all" (full source-tree write access)', () => {
-  const allowedAllUnits = new Set(["execute-task", "reactive-execute"]);
+test('#4934: only execution units and complete-milestone may use tools.mode "all"', () => {
+  const allowedAllUnits = new Set(["execute-task", "reactive-execute", "complete-milestone"]);
   for (const [unitType, manifest] of Object.entries(UNIT_MANIFESTS)) {
     const mode = (manifest as { tools: { mode: string } }).tools.mode;
     if (mode === "all") {
       assert.ok(
         allowedAllUnits.has(unitType),
-        `manifest "${unitType}" declares tools.mode = "all" but is not on the execute-track. ` +
-        'Only execute-task and reactive-execute should have full source write access; ' +
+        `manifest "${unitType}" declares tools.mode = "all" but is not explicitly allowed. ` +
+        'Only execute-task, reactive-execute, and complete-milestone should have full source write access; ' +
         'planning/discuss/research units must use "planning" or "planning-dispatch" (or "docs" for rewrite-docs).',
       );
     }
   }
+});
+
+test("#5453: complete-milestone uses all tools so bash verification is not planning-dispatch blocked", () => {
+  const manifest = UNIT_MANIFESTS["complete-milestone"];
+
+  assert.strictEqual(manifest.tools.mode, "all");
+  assert.deepEqual(resolveSubagentPermissionContract("complete-milestone"), {
+    allowed: true,
+    allowedSubagents: ["*"],
+    toolsMode: "all",
+  });
+  // Runtime gate-level regression: these verification commands were blocked
+  // under planning-dispatch in #5453; complete-milestone must bypass that gate.
+  for (const cmd of ["git diff --name-only HEAD~1", "git log -n1 --oneline"]) {
+    const result = shouldBlockPlanningUnit(
+      "bash",
+      cmd,
+      process.cwd(),
+      "complete-milestone",
+      manifest.tools,
+    );
+    assert.strictEqual(
+      result.block,
+      false,
+      `shouldBlockPlanningUnit must not block ${cmd} for complete-milestone: ${result.reason}`,
+    );
+  }
+});
+
+test("#5843: run-uat uses verification tools policy so build/test commands can run", () => {
+  const manifest = UNIT_MANIFESTS["run-uat"];
+
+  assert.strictEqual(manifest.tools.mode, "verification");
+
+  const buildResult = shouldBlockPlanningUnit(
+    "bash",
+    "npm run build 2>&1",
+    process.cwd(),
+    "run-uat",
+    manifest.tools,
+  );
+  assert.strictEqual(
+    buildResult.block,
+    false,
+    `run-uat must allow build verification commands: ${buildResult.reason}`,
+  );
+
+  const sourceWriteResult = shouldBlockPlanningUnit(
+    "edit",
+    "src/main.ts",
+    process.cwd(),
+    "run-uat",
+    manifest.tools,
+  );
+  assert.strictEqual(sourceWriteResult.block, true);
+  assert.match(sourceWriteResult.reason!, /tools-policy "verification"/);
 });
 
 test('planning-dispatch mode is reserved for slice-level decomposition and completion units', () => {
@@ -248,7 +307,6 @@ test('planning-dispatch mode is reserved for slice-level decomposition and compl
     "research-slice",
     "refine-slice",
     "complete-slice",
-    "complete-milestone",
     "gate-evaluate",
     // Deep planning mode: research-project orchestrates 4 parallel research
     // subagents (stack/features/architecture/pitfalls). Subagent dispatch is

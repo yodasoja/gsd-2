@@ -487,17 +487,18 @@ export function registerDbTools(pi: ExtensionAPI): void {
     promptGuidelines: [
       "Use gsd_plan_milestone for milestone planning instead of writing ROADMAP.md directly.",
       "Keep parameters flat and provide the full milestone planning payload, including slices.",
+      "Milestone and slice titles must not contain forward slash (/), en dash, or em dash characters.",
       "The tool validates input, writes milestone and slice planning data transactionally, renders ROADMAP.md from DB, and clears both state and parse caches after success.",
       "Use the canonical name gsd_plan_milestone; gsd_milestone_plan is only an alias.",
     ],
     parameters: Type.Object({
       // ── Core identification + content (required) ──────────────────────
       milestoneId: Type.String({ description: "Milestone ID (e.g. M001)" }),
-      title: Type.String({ description: "Milestone title" }),
+      title: Type.String({ description: "Milestone title; must not contain forward slash (/), en dash, or em dash characters" }),
       vision: Type.String({ description: "Milestone vision" }),
       slices: Type.Array(Type.Object({
         sliceId: Type.String({ description: "Slice ID (e.g. S01)" }),
-        title: Type.String({ description: "Slice title" }),
+        title: Type.String({ description: "Slice title; must not contain forward slash (/), en dash, or em dash characters" }),
         risk: Type.String({ description: "Slice risk" }),
         depends: Type.Array(Type.String(), { description: "Slice dependency IDs" }),
         demo: Type.String({ description: "Roadmap demo text / After this" }),
@@ -570,10 +571,10 @@ export function registerDbTools(pi: ExtensionAPI): void {
         title: Type.String({ description: "Task title" }),
         description: Type.String({ description: "Task description / steps block" }),
         estimate: Type.String({ description: "Task estimate string" }),
-        files: Type.Array(Type.String(), { description: "Files likely touched" }),
+        files: Type.Array(Type.String(), { description: "Array<string> of files likely touched; pass [\"path\"] or [], never a single string" }),
         verify: Type.String({ description: "Verification command or block" }),
-        inputs: Type.Array(Type.String(), { description: "Input files or references" }),
-        expectedOutput: Type.Array(Type.String(), { description: "Expected output files or artifacts" }),
+        inputs: Type.Array(Type.String(), { description: "Array<string> of input files or references; pass [\"path\"] or [], never a single string" }),
+        expectedOutput: Type.Array(Type.String(), { description: "Array<string> of expected output files or artifacts; pass [\"path\"] or [], never a single string" }),
         observabilityImpact: Type.Optional(Type.String({ description: "Task observability impact" })),
       }), { description: "Planned tasks for the slice" }),
       // ── Enrichment metadata (optional — defaults to empty) ────────────
@@ -650,10 +651,10 @@ export function registerDbTools(pi: ExtensionAPI): void {
       title: Type.String({ description: "Task title" }),
       description: Type.String({ description: "Task description / steps block" }),
       estimate: Type.String({ description: "Task estimate string" }),
-      files: Type.Array(Type.String(), { description: "Files likely touched" }),
+      files: Type.Array(Type.String(), { description: "Array<string> of files likely touched; pass [\"path\"] or [], never a single string" }),
       verify: Type.String({ description: "Verification command or block" }),
-      inputs: Type.Array(Type.String(), { description: "Input files or references" }),
-      expectedOutput: Type.Array(Type.String(), { description: "Expected output files or artifacts" }),
+      inputs: Type.Array(Type.String(), { description: "Array<string> of input files or references; pass [\"path\"] or [], never a single string" }),
+      expectedOutput: Type.Array(Type.String(), { description: "Array<string> of expected output files or artifacts; pass [\"path\"] or [], never a single string" }),
       observabilityImpact: Type.Optional(Type.String({ description: "Task observability impact" })),
       // Single-writer v3 audit trail (Stream 2): caller-provided actor identity + causation.
       actorName: Type.Optional(Type.String({ description: "Caller-provided actor identity for the audit trail (e.g. 'executor-01', 'gsd-orchestrator')" })),

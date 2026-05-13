@@ -1539,6 +1539,7 @@ export async function showDiscuss(
       const discussMilestoneTemplates = inlineTemplate("context", "Context");
       const structuredQuestionsAvailable = getStructuredQuestionsAvailability(pi, ctx);
       const basePrompt = loadPrompt("guided-discuss-milestone", {
+        workingDirectory: basePath,
         milestoneId: mid, milestoneTitle, inlinedTemplates: discussMilestoneTemplates, structuredQuestionsAvailable,
         commitInstruction: buildDocsCommitInstruction(`docs(${mid}): milestone context from discuss`),
         fastPathInstruction: "",
@@ -1553,6 +1554,7 @@ export async function showDiscuss(
       const structuredQuestionsAvailable = getStructuredQuestionsAvailability(pi, ctx);
       setPendingAutoStart(basePath, { ctx, pi, basePath, milestoneId: mid, step: false });
       await dispatchWorkflow(pi, loadPrompt("guided-discuss-milestone", {
+        workingDirectory: basePath,
         milestoneId: mid, milestoneTitle, inlinedTemplates: discussMilestoneTemplates, structuredQuestionsAvailable,
         commitInstruction: buildDocsCommitInstruction(`docs(${mid}): milestone context from discuss`),
         fastPathInstruction: "",
@@ -1822,6 +1824,7 @@ async function dispatchDiscussForMilestone(
   const discussMilestoneTemplates = inlineTemplate("context", "Context");
   const structuredQuestionsAvailable = getStructuredQuestionsAvailability(pi, ctx);
   const basePrompt = loadPrompt("guided-discuss-milestone", {
+    workingDirectory: basePath,
     milestoneId: mid,
     milestoneTitle,
     inlinedTemplates: discussMilestoneTemplates,
@@ -2121,18 +2124,19 @@ export async function showSmartEntry(
 
   if (interrupted.classification !== "recoverable") {
     try {
-      const { autoImportMarkdownHierarchyIfDbMismatch } = await import("./migration-auto-check.js");
-      const result = await autoImportMarkdownHierarchyIfDbMismatch(basePath);
-      if (result.action === "imported") {
+      const { checkMarkdownHierarchyAgainstDb } = await import("./migration-auto-check.js");
+      const result = await checkMarkdownHierarchyAgainstDb(basePath);
+      if (result.action === "recovery-required") {
         ctx.ui.notify(
-          `Recovered migrated planning state into gsd.db (${result.reason}): ${result.afterDb.milestones} milestone(s), ${result.afterDb.slices} slice(s), ${result.afterDb.tasks} task(s).`,
-          "info",
+          result.message ??
+            `Markdown planning artifacts do not match the authoritative DB. Run \`${result.recoveryCommand ?? "gsd recover"}\` to import markdown explicitly.`,
+          "warning",
         );
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      ctx.ui.notify(`GSD could not auto-import existing planning state into gsd.db: ${message}`, "warning");
-      logWarning("guided", `planning state auto-import failed: ${message}`, { file: "guided-flow.ts" });
+      ctx.ui.notify(`GSD could not compare markdown planning artifacts with gsd.db: ${message}`, "warning");
+      logWarning("guided", `planning state DB/markdown comparison failed: ${message}`, { file: "guided-flow.ts" });
     }
   }
 
@@ -2356,6 +2360,7 @@ export async function showSmartEntry(
       const discussMilestoneTemplates = inlineTemplate("context", "Context");
       const structuredQuestionsAvailable = getStructuredQuestionsAvailability(pi, ctx);
       const basePrompt = loadPrompt("guided-discuss-milestone", {
+        workingDirectory: basePath,
         milestoneId, milestoneTitle, inlinedTemplates: discussMilestoneTemplates, structuredQuestionsAvailable,
         commitInstruction: buildDocsCommitInstruction(`docs(${milestoneId}): milestone context from discuss`),
         fastPathInstruction: "",
@@ -2370,6 +2375,7 @@ export async function showSmartEntry(
       const structuredQuestionsAvailable = getStructuredQuestionsAvailability(pi, ctx);
       setPendingAutoStart(basePath, { ctx, pi, basePath, milestoneId, step: stepMode });
       await dispatchWorkflow(pi, loadPrompt("guided-discuss-milestone", {
+        workingDirectory: basePath,
         milestoneId, milestoneTitle, inlinedTemplates: discussMilestoneTemplates, structuredQuestionsAvailable,
         commitInstruction: buildDocsCommitInstruction(`docs(${milestoneId}): milestone context from discuss`),
         fastPathInstruction: "",
@@ -2462,6 +2468,7 @@ export async function showSmartEntry(
         const discussMilestoneTemplates = inlineTemplate("context", "Context");
         const structuredQuestionsAvailable = getStructuredQuestionsAvailability(pi, ctx);
         await dispatchWorkflow(pi, loadPrompt("guided-discuss-milestone", {
+          workingDirectory: basePath,
           milestoneId, milestoneTitle, inlinedTemplates: discussMilestoneTemplates, structuredQuestionsAvailable,
           commitInstruction: buildDocsCommitInstruction(`docs(${milestoneId}): milestone context from discuss`),
           fastPathInstruction: "",

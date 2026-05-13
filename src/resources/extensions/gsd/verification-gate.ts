@@ -4,7 +4,7 @@
 // First non-empty source wins.
 
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, type Dirent } from "node:fs";
 import { join, basename } from "node:path";
 import type { AuditWarning, RuntimeError, VerificationCheck, VerificationResult } from "./types.js";
 import { DEFAULT_COMMAND_TIMEOUT_MS } from "./constants.js";
@@ -44,7 +44,8 @@ const PACKAGE_SCRIPT_KEYS = ["typecheck", "lint", "test"] as const;
  *   1. Explicit preference commands
  *   2. Task plan verify field (split on &&)
  *   3. package.json scripts (typecheck, lint, test)
- *   4. None found
+ *   4. Python pytest project markers
+ *   5. None found
  */
 export function discoverCommands(options: DiscoverCommandsOptions): DiscoveredCommands {
   // 1. Preference commands
@@ -91,8 +92,65 @@ export function discoverCommands(options: DiscoverCommandsOptions): DiscoveredCo
     }
   }
 
-  // 4. Nothing found
+  const pythonCommand = discoverPythonPytestCommand(options.cwd);
+  if (pythonCommand) {
+    return { commands: [pythonCommand], source: "python-project" };
+  }
+
+  // 5. Nothing found
   return { commands: [], source: "none" };
+}
+
+function discoverPythonPytestCommand(cwd: string): string | null {
+  const hasPythonTestFiles = hasPythonTests(join(cwd, "tests"));
+  const hasPytestConfig = existsSync(join(cwd, "pytest.ini"));
+  const pyprojectPath = join(cwd, "pyproject.toml");
+  const hasPyproject = existsSync(pyprojectPath);
+
+  if (!hasPythonTestFiles && !hasPytestConfig && !hasPyproject) {
+    return null;
+  }
+
+  if (hasPytestConfig || hasPythonTestFiles) {
+    return "python3 -m pytest";
+  }
+
+  try {
+    const pyproject = readFileSync(pyprojectPath, "utf-8");
+    if (
+      pyproject.includes("[tool.pytest]") ||
+      pyproject.includes("[tool.pytest.") ||
+      pyproject.includes("[pytest]") ||
+      pyproject.includes("[tool:pytest]")
+    ) {
+      return "python3 -m pytest";
+    }
+  } catch {
+    // Ignore unreadable pyproject.toml and fall through.
+  }
+
+  return null;
+}
+
+function hasPythonTests(dir: string): boolean {
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+
+  for (const entry of entries) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory() && hasPythonTests(path)) {
+      return true;
+    }
+    if (entry.isFile() && /^test_.*\.py$|^.*_test\.py$/.test(entry.name)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 // ─── Failure Context Formatting ──────────────────────────────────────────────
@@ -144,7 +202,7 @@ export function formatFailureContext(result: VerificationResult): string {
 // ─── Gate Execution ─────────────────────────────────────────────────────────
 
 /** Characters that indicate shell injection when found in a command string. */
-const SHELL_INJECTION_PATTERN = /[;|`]|\$\(/;
+const SHELL_INJECTION_PATTERN = /[;|`<>]|\$\(/;
 
 /**
  * Known executable first-tokens that are safe to run.
@@ -182,6 +240,7 @@ const KNOWN_COMMAND_PREFIXES = new Set([
  * Heuristics (any true → prose-like):
  *   1. First token starts with an uppercase letter and the string has 4+ words
  *   2. String contains commas followed by spaces (prose clause structure)
+ *   3. First token has no ASCII letters or digits and the string has 4+ words
  */
 export function isLikelyCommand(cmd: string): boolean {
   const trimmed = cmd.trim();
@@ -208,6 +267,9 @@ export function isLikelyCommand(cmd: string): boolean {
   // First token has uppercase letters and no path separators → prose
   if (/[A-Z]/.test(firstToken) && !firstToken.includes("/")) return false;
 
+  // Non-ASCII prose with multiple words should not be executed as a command.
+  if (!/[A-Za-z0-9]/.test(firstToken) && tokens.length >= 4) return false;
+
   return true;
 }
 
@@ -215,9 +277,19 @@ export function isLikelyCommand(cmd: string): boolean {
  * Validate a command string for obvious shell injection patterns.
  * Returns the command unchanged if safe, or null if suspicious.
  */
+export function validateVerificationCommand(cmd: string): { ok: true } | { ok: false; reason: string } {
+  if (SHELL_INJECTION_PATTERN.test(cmd)) {
+    return { ok: false, reason: "contains shell control syntax such as pipes, redirects, semicolons, backticks, or command substitution" };
+  }
+  if (!isLikelyCommand(cmd)) {
+    return { ok: false, reason: "does not look like a runnable command" };
+  }
+  return { ok: true };
+}
+
 function sanitizeCommand(cmd: string): string | null {
-  if (SHELL_INJECTION_PATTERN.test(cmd)) return null;
-  if (!isLikelyCommand(cmd)) return null;
+  const validation = validateVerificationCommand(cmd);
+  if (!validation.ok) return null;
   return cmd;
 }
 

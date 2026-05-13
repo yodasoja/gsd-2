@@ -126,6 +126,8 @@ export function getVisualBriefModeProfile(mode: VisualBriefMode, slides: boolean
 					"Assumptions, limitations, and source references",
 				],
 			};
+		default:
+			throw new Error(`Unknown visual brief mode: ${mode as string}`);
 	}
 }
 

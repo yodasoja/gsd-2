@@ -46,6 +46,7 @@ import {
 import { classifyMilestoneSummaryContent } from "./milestone-summary-classifier.js";
 import { validateArtifact } from "./schemas/validate.js";
 import { getProjectResearchStatus } from "./project-research-policy.js";
+import { isGsdWorktreePath } from "./worktree-root.js";
 
 // Re-export so existing consumers of auto-recovery.ts keep working.
 export { resolveExpectedArtifactPath, diagnoseExpectedArtifact };
@@ -55,6 +56,29 @@ export {
 } from "./milestone-summary-classifier.js";
 
 // ─── Artifact Resolution & Verification ───────────────────────────────────────
+
+export function diagnoseWorktreeIntegrityFailure(basePath: string): string | null {
+  if (!isGsdWorktreePath(basePath)) return null;
+  if (!existsSync(basePath)) {
+    return `Worktree integrity failure: ${basePath} does not exist. Repair or recreate the worktree before retrying.`;
+  }
+
+  const gitPath = join(basePath, ".git");
+  if (!existsSync(gitPath)) {
+    return `Worktree integrity failure: ${basePath} is not a valid git worktree (.git missing). Repair or recreate the worktree before retrying.`;
+  }
+
+  try {
+    execFileSync("git", ["rev-parse", "--git-dir"], {
+      cwd: basePath,
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf-8",
+    });
+    return null;
+  } catch (err) {
+    return `Worktree integrity failure: ${basePath} is not a valid git worktree (git rev-parse failed: ${getErrorMessage(err).split("\n")[0]}). Repair or recreate the worktree before retrying.`;
+  }
+}
 
 export type ArtifactRecoveryDbRefreshResult =
   | { ok: true }
@@ -752,6 +776,11 @@ export function verifyExpectedArtifact(
     return false;
   }
   if (!existsSync(absPath)) {
+    const worktreeFailure = diagnoseWorktreeIntegrityFailure(base);
+    if (worktreeFailure) {
+      logError("recovery", `${worktreeFailure} Unit: ${unitType} ${unitId}.`);
+      return false;
+    }
     logWarning("recovery", `verify-fail ${unitType} ${unitId}: existsSync false for ${absPath}`);
     return false;
   }

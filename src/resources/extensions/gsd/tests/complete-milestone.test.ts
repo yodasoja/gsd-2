@@ -645,7 +645,7 @@ describe("complete-milestone", () => {
     assert.strictEqual(sanitized.triggerReason, undefined);
   });
 
-  test("rendered SUMMARY.md uses placeholder text for empty enrichment fields", async () => {
+  test("rendered SUMMARY.md uses empty frontmatter lists for empty key fields", async () => {
     const { handleCompleteMilestone } = await import("../tools/complete-milestone.ts");
     const base = createFixtureBase();
     const mid = "M001";
@@ -678,6 +678,9 @@ describe("complete-milestone", () => {
       assert.match(summary, /## Success Criteria Results\n\nNot provided\./);
       assert.match(summary, /## Definition of Done Results\n\nNot provided\./);
       assert.match(summary, /## Requirement Outcomes\n\nNot provided\./);
+      assert.match(summary, /key_decisions:\s*\[\]/);
+      assert.match(summary, /key_files:\s*\[\]/);
+      assert.doesNotMatch(summary, /key_(?:decisions|files):\n  - \(none\)/);
       assert.match(summary, /## Deviations\n\nNone\./);
       assert.match(summary, /## Follow-ups\n\nNone\./);
     } finally {

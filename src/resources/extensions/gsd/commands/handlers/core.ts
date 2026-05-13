@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@gsd/pi-coding-agent";
 import type { Model } from "@gsd/pi-ai";
 import type { GSDState } from "../../types.js";
+import { createRequire } from "node:module";
 
 import { computeProgressScore, formatProgressLine } from "../../progress-score.js";
 import { loadEffectiveGSDPreferences, getGlobalGSDPreferencesPath, getProjectGSDPreferencesPath } from "../../preferences.js";
@@ -220,7 +221,22 @@ export async function handleBrief(args: string, ctx: ExtensionCommandContext, pi
   }
 
   const outputDir = getVisualBriefOutputDir();
-  pi.sendUserMessage(buildVisualBriefPrompt(request, { outputDir }));
+  const version = resolveGsdVersion();
+  pi.sendUserMessage(buildVisualBriefPrompt(request, { outputDir, version }));
+}
+
+const briefRequire = createRequire(import.meta.url);
+
+function resolveGsdVersion(): string | undefined {
+  const envVersion = process.env.GSD_VERSION?.trim();
+  if (envVersion) return envVersion;
+  try {
+    const pkg = briefRequire("../../../../../../package.json") as { version?: unknown };
+    const fromPkg = typeof pkg.version === "string" ? pkg.version.trim() : "";
+    return fromPkg || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function handleSetup(args: string, ctx: ExtensionCommandContext, pi?: ExtensionAPI): Promise<void> {

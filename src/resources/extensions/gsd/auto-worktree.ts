@@ -252,7 +252,17 @@ function gitPathspecForWorktreePath(basePath: string, targetPath: string): strin
   let base = basePath;
   let target = targetPath;
   try {
-    base = realpathSync.native(basePath);
+    base = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd: basePath,
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf-8",
+    }).trim() || basePath;
+  } catch {
+    /* keep original */
+    void base;
+  }
+  try {
+    base = realpathSync.native(base);
   } catch {
     /* keep original */
     void base;
@@ -269,6 +279,10 @@ function gitPathspecForWorktreePath(basePath: string, targetPath: string): strin
   return rel.replaceAll("\\", "/");
 }
 
+export function _gitPathspecForWorktreePath(basePath: string, targetPath: string): string | null {
+  return gitPathspecForWorktreePath(basePath, targetPath);
+}
+
 function gitRemoteExists(basePath: string, remote: string): boolean {
   try {
     execFileSync("git", ["remote", "get-url", remote], {
@@ -280,6 +294,50 @@ function gitRemoteExists(basePath: string, remote: string): boolean {
   } catch {
     return false;
   }
+}
+
+function findRegularMergeChangedPaths(basePath: string, milestoneBranch: string, mainBranch: string): Set<string> {
+  const changedPaths = new Set<string>();
+  let mergeLog = "";
+  try {
+    mergeLog = execFileSync("git", ["rev-list", "--merges", "--parents", mainBranch], {
+      cwd: basePath,
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf-8",
+    }).trim();
+  } catch (err) {
+    logWarning("worktree", `regular merge lookup failed: ${err instanceof Error ? err.message : String(err)}`);
+    return changedPaths;
+  }
+
+  for (const line of mergeLog.split("\n").filter(Boolean)) {
+    const [mergeCommit, firstParent, ...otherParents] = line.split(" ");
+    if (!mergeCommit || !firstParent || otherParents.length === 0) continue;
+    const mergedMilestone = otherParents.some((parent) => {
+      try {
+        return nativeIsAncestor(basePath, milestoneBranch, parent);
+      } catch {
+        return false;
+      }
+    });
+    if (!mergedMilestone) continue;
+
+    try {
+      const output = execFileSync("git", ["diff", "--name-only", firstParent, mergeCommit], {
+        cwd: basePath,
+        stdio: ["ignore", "pipe", "pipe"],
+        encoding: "utf-8",
+      }).trim();
+      for (const path of output.split("\n").filter(Boolean)) {
+        if (!path.startsWith(".gsd/")) changedPaths.add(path);
+      }
+    } catch (err) {
+      logWarning("worktree", `regular merge diff lookup failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return changedPaths;
+  }
+
+  return changedPaths;
 }
 
 function clearProjectRootStateFiles(basePath: string, milestoneId: string): void {
@@ -1737,6 +1795,66 @@ export function mergeMilestoneToMain(
         reason: String(err),
       });
     }
+  }
+
+  // Already regular-merged milestones can skip the squash path and proceed to cleanup (#5831).
+  if (nativeIsAncestor(originalBasePath_, milestoneBranch, mainBranch)) {
+    const codeChanges = nativeDiffNumstat(
+      originalBasePath_,
+      mainBranch,
+      milestoneBranch,
+    ).filter((entry) => !entry.path.startsWith(".gsd/"));
+    if (codeChanges.length > 0) {
+      const regularMergeChangedPaths = findRegularMergeChangedPaths(
+        originalBasePath_,
+        milestoneBranch,
+        mainBranch,
+      );
+      const unanchoredCodeChanges = codeChanges.filter((entry) =>
+        regularMergeChangedPaths.has(entry.path)
+      );
+      if (unanchoredCodeChanges.length > 0) {
+        process.chdir(previousCwd);
+        throw new GSDError(
+          GSD_GIT_ERROR,
+          `Milestone branch "${milestoneBranch}" is reachable from "${mainBranch}" ` +
+            `but has ${unanchoredCodeChanges.length} milestone-touched code file(s) not on current "${mainBranch}". ` +
+            `Aborting worktree teardown to prevent data loss.`,
+        );
+      }
+    }
+    debugLog("mergeMilestoneToMain", {
+      action: "skip-squash-already-merged",
+      milestoneId,
+      milestoneBranch,
+      mainBranch,
+    });
+    try {
+      clearProjectRootStateFiles(originalBasePath_, milestoneId);
+    } catch (err) {
+      logWarning("worktree", `clearProjectRootStateFiles failed during already-merged cleanup: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    try {
+      removeWorktree(originalBasePath_, milestoneId, {
+        branch: milestoneBranch,
+        deleteBranch: false,
+      });
+    } catch (err) {
+      logWarning("worktree", `worktree removal failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    try {
+      nativeBranchDelete(originalBasePath_, milestoneBranch);
+    } catch (err) {
+      logWarning("worktree", `git branch-delete failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    setActiveWorkspace(null);
+    nudgeGitBranchCache(previousCwd);
+    try {
+      process.chdir(originalBasePath_);
+    } catch (err) {
+      logWarning("worktree", `chdir to project root after already-merged cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return { commitMessage, pushed: false, prCreated: false, codeFilesChanged: true };
   }
 
   // 7. Shelter queued milestone directories before the squash merge (#2505).

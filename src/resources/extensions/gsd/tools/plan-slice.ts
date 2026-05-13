@@ -1,3 +1,5 @@
+import { existsSync, rmSync } from "node:fs";
+import { join, relative } from "node:path";
 import { clearParseCache } from "../files.js";
 import { isClosedStatus, isDeferredStatus } from "../status-guards.js";
 import { isNonEmptyString, validateStringArray } from "../validation.js";
@@ -5,11 +7,15 @@ import {
   transaction,
   getMilestone,
   getSlice,
+  getSliceTasks,
   insertTask,
   upsertSlicePlanning,
   upsertTaskPlanning,
   insertGateRow,
   updateSliceStatus,
+  setSliceSketchFlag,
+  deleteTask,
+  deleteArtifactByPath,
 } from "../gsd-db.js";
 import type { GateId } from "../types.js";
 import { invalidateStateCache } from "../state.js";
@@ -19,6 +25,9 @@ import { writeManifest } from "../workflow-manifest.js";
 import { appendEvent } from "../workflow-events.js";
 import { logWarning } from "../workflow-logger.js";
 import { validatePlanningPathScope } from "../planning-path-scope.js";
+import { checkFilePathConsistency, checkTaskOrdering } from "../pre-execution-checks.js";
+import type { TaskRow } from "../db-task-slice-rows.js";
+import { buildTaskFileName, gsdRoot, resolveTasksDir } from "../paths.js";
 
 export interface PlanSliceTaskInput {
   taskId: string;
@@ -86,16 +95,10 @@ function validateTasks(value: unknown): PlanSliceTaskInput[] {
     if (!isNonEmptyString(title)) throw new Error(`tasks[${index}].title must be a non-empty string`);
     if (!isNonEmptyString(description)) throw new Error(`tasks[${index}].description must be a non-empty string`);
     if (!isNonEmptyString(estimate)) throw new Error(`tasks[${index}].estimate must be a non-empty string`);
-    if (!Array.isArray(files) || files.some((item) => !isNonEmptyString(item))) {
-      throw new Error(`tasks[${index}].files must be an array of non-empty strings`);
-    }
+    const validatedFiles = validateStringArray(files, `tasks[${index}].files`);
     if (!isNonEmptyString(verify)) throw new Error(`tasks[${index}].verify must be a non-empty string`);
-    if (!Array.isArray(inputs) || inputs.some((item) => !isNonEmptyString(item))) {
-      throw new Error(`tasks[${index}].inputs must be an array of non-empty strings`);
-    }
-    if (!Array.isArray(expectedOutput) || expectedOutput.some((item) => !isNonEmptyString(item))) {
-      throw new Error(`tasks[${index}].expectedOutput must be an array of non-empty strings`);
-    }
+    const validatedInputs = validateStringArray(inputs, `tasks[${index}].inputs`);
+    const validatedExpectedOutput = validateStringArray(expectedOutput, `tasks[${index}].expectedOutput`);
     if (observabilityImpact !== undefined && !isNonEmptyString(observabilityImpact)) {
       throw new Error(`tasks[${index}].observabilityImpact must be a non-empty string when provided`);
     }
@@ -105,10 +108,10 @@ function validateTasks(value: unknown): PlanSliceTaskInput[] {
       title,
       description,
       estimate,
-      files,
+      files: validatedFiles,
       verify,
-      inputs,
-      expectedOutput,
+      inputs: validatedInputs,
+      expectedOutput: validatedExpectedOutput,
       observabilityImpact: typeof observabilityImpact === "string" ? observabilityImpact : "",
     };
   });
@@ -129,6 +132,56 @@ function validateParams(params: PlanSliceParams): PlanSliceParams {
     observabilityImpact: params.observabilityImpact ?? "",
     tasks: validateTasks(params.tasks),
   };
+}
+
+function toTaskRows(params: PlanSliceParams): TaskRow[] {
+  return params.tasks.map((task, index) => ({
+    milestone_id: params.milestoneId,
+    slice_id: params.sliceId,
+    id: task.taskId,
+    title: task.title,
+    status: "pending",
+    one_liner: "",
+    narrative: "",
+    verification_result: "",
+    duration: "",
+    completed_at: null,
+    blocker_discovered: false,
+    deviations: "",
+    known_issues: "",
+    key_files: [],
+    key_decisions: [],
+    full_summary_md: "",
+    description: task.description,
+    estimate: task.estimate,
+    files: task.files,
+    verify: task.verify,
+    inputs: task.inputs,
+    expected_output: task.expectedOutput,
+    observability_impact: task.observabilityImpact ?? "",
+    full_plan_md: task.fullPlanMd ?? "",
+    sequence: index + 1,
+    blocker_source: "",
+    escalation_pending: 0,
+    escalation_awaiting_review: 0,
+    escalation_artifact_path: null,
+    escalation_override_applied_at: null,
+  }));
+}
+
+function validateTaskPathsBeforePersist(params: PlanSliceParams, basePath: string): string | null {
+  const taskRows = toTaskRows(params);
+  const checks = [
+    ...checkFilePathConsistency(taskRows, basePath),
+    ...checkTaskOrdering(taskRows, basePath),
+  ];
+  const blocking = checks.filter((check) => !check.passed && check.blocking);
+
+  if (blocking.length === 0) return null;
+
+  return blocking
+    .map((check) => `[${check.category}] ${check.target}: ${check.message}`)
+    .join("\n");
 }
 
 export async function handlePlanSlice(
@@ -154,10 +207,16 @@ export async function handlePlanSlice(
     return { error: `validation failed: ${pathScopeError}` };
   }
 
+  const pathError = validateTaskPathsBeforePersist(params, basePath);
+  if (pathError) {
+    return { error: `pre-execution validation failed:\n${pathError}` };
+  }
+
   // ── Guards + DB writes inside a single transaction (prevents TOCTOU) ───
   // Guards must be inside the transaction so the state they check cannot
   // change between the read and the write (#2723).
   let guardError: string | null = null;
+  let omittedTaskIds: string[] = [];
 
   try {
     transaction(() => {
@@ -181,9 +240,23 @@ export async function handlePlanSlice(
         return;
       }
 
+      const newTaskIds = new Set(params.tasks.map((task) => task.taskId));
+      const existingTasks = getSliceTasks(params.milestoneId, params.sliceId);
+      omittedTaskIds = existingTasks
+        .filter((task) => !newTaskIds.has(task.id))
+        .map((task) => task.id);
+
+      for (const task of existingTasks) {
+        if (!newTaskIds.has(task.id) && isClosedStatus(task.status)) {
+          guardError = `cannot remove completed task ${task.id}`;
+          return;
+        }
+      }
+
       if (isDeferredStatus(parentSlice.status)) {
         updateSliceStatus(params.milestoneId, params.sliceId, "pending");
       }
+      setSliceSketchFlag(params.milestoneId, params.sliceId, false);
 
       upsertSlicePlanning(params.milestoneId, params.sliceId, {
         goal: params.goal,
@@ -192,6 +265,10 @@ export async function handlePlanSlice(
         integrationClosure: params.integrationClosure,
         observabilityImpact: params.observabilityImpact,
       });
+
+      for (const taskId of omittedTaskIds) {
+        deleteTask(params.milestoneId, params.sliceId, taskId);
+      }
 
       for (const task of params.tasks) {
         insertTask({
@@ -237,6 +314,15 @@ export async function handlePlanSlice(
   }
 
   try {
+    const tasksDir = resolveTasksDir(basePath, params.milestoneId, params.sliceId);
+    for (const taskId of omittedTaskIds) {
+      if (!tasksDir) continue;
+      const taskPlanPath = join(tasksDir, buildTaskFileName(taskId, "PLAN"));
+      if (existsSync(taskPlanPath)) rmSync(taskPlanPath, { force: true });
+      const artifactPath = relative(gsdRoot(basePath), taskPlanPath).replace(/\\/g, "/");
+      deleteArtifactByPath(artifactPath);
+    }
+
     const renderResult = await renderPlanFromDb(basePath, params.milestoneId, params.sliceId);
     invalidateStateCache();
     clearParseCache();

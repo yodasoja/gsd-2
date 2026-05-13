@@ -23,6 +23,7 @@ import { homedir } from "node:os";
 import { resolve } from "node:path";
 import type { TaskRow } from "./db-task-slice-rows.js";
 import type { PreExecutionCheckJSON } from "./verification-evidence.ts";
+import { validateVerificationCommand } from "./verification-gate.js";
 
 const NPM_COMMAND = process.platform === "win32" ? "npm.cmd" : "npm";
 
@@ -35,6 +36,35 @@ export interface PreExecutionResult {
   checks: PreExecutionCheckJSON[];
   /** Total duration in milliseconds */
   durationMs: number;
+}
+
+export function checkVerificationCommands(tasks: TaskRow[]): PreExecutionCheckJSON[] {
+  const results: PreExecutionCheckJSON[] = [];
+
+  for (const task of tasks) {
+    const verify = task.verify.trim();
+    if (!verify) continue;
+
+    const commands = verify
+      .split("&&")
+      .map((command) => command.trim())
+      .filter(Boolean);
+
+    for (const command of commands) {
+      const validation = validateVerificationCommand(command);
+      if (!validation.ok) {
+        results.push({
+          category: "tool",
+          target: `${task.id} Verify`,
+          passed: false,
+          message: `Unsafe or non-runnable Verify command: ${command} (${validation.reason})`,
+          blocking: true,
+        });
+      }
+    }
+  }
+
+  return results;
 }
 
 // ─── Package Existence Check ─────────────────────────────────────────────────
@@ -757,8 +787,9 @@ export async function runPreExecutionChecks(
   const fileChecks = checkFilePathConsistency(tasks, basePath);
   const orderingChecks = checkTaskOrdering(tasks, basePath);
   const contractChecks = checkInterfaceContracts(tasks, basePath);
+  const verificationChecks = checkVerificationCommands(tasks);
 
-  allChecks.push(...fileChecks, ...orderingChecks, ...contractChecks);
+  allChecks.push(...fileChecks, ...orderingChecks, ...contractChecks, ...verificationChecks);
 
   // Run async package checks
   const packageChecks = await checkPackageExistence(tasks, basePath);

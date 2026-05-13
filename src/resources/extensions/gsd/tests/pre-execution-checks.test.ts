@@ -9,6 +9,7 @@
  *   2. File path consistency — files exist vs prior expected_output
  *   3. Task ordering — detect impossible read-before-create
  *   4. Interface contracts — contradictory function signatures
+ *   5. Verify commands — reject unsafe or non-runnable task verification
  */
 
 import { describe, test, mock } from "node:test";
@@ -22,6 +23,7 @@ import {
   checkFilePathConsistency,
   checkTaskOrdering,
   checkInterfaceContracts,
+  checkVerificationCommands,
   runPreExecutionChecks,
   normalizeFilePath,
   type PreExecutionResult,
@@ -812,6 +814,33 @@ function process(a: number): number
   });
 });
 
+describe("checkVerificationCommands", () => {
+  test("accepts pipe-free pytest Verify command", () => {
+    const results = checkVerificationCommands([
+      createTask({
+        id: "T01",
+        verify: "python3 -m pytest tests/ -q --tb=short",
+      }),
+    ]);
+
+    assert.deepEqual(results, []);
+  });
+
+  test("rejects piped pytest Verify command", () => {
+    const results = checkVerificationCommands([
+      createTask({
+        id: "T01",
+        verify: "python3 -m pytest tests/ -q --tb=short 2>&1 | tail -5",
+      }),
+    ]);
+
+    assert.equal(results.length, 1);
+    assert.equal(results[0]?.category, "tool");
+    assert.equal(results[0]?.blocking, true);
+    assert.match(results[0]?.message ?? "", /shell control syntax/);
+  });
+});
+
 // ─── runPreExecutionChecks Integration Tests ─────────────────────────────────
 
 describe("runPreExecutionChecks", () => {
@@ -842,6 +871,30 @@ describe("runPreExecutionChecks", () => {
       assert.equal(result.status, "pass");
       assert.equal(result.checks.length, 0);
       assert.ok(result.durationMs >= 0);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test("returns fail status for unsafe Verify command before execution", async () => {
+    tempDir = join(tmpdir(), `pre-exec-test-${Date.now()}`);
+    mkdirSync(tempDir, { recursive: true });
+
+    try {
+      const tasks = [
+        createTask({
+          id: "T01",
+          verify: "python3 -m pytest tests/ -q --tb=short 2>&1 | tail -5",
+        }),
+      ];
+
+      const result = await runPreExecutionChecks(tasks, tempDir);
+
+      assert.equal(result.status, "fail");
+      assert.equal(result.checks.length, 1);
+      assert.equal(result.checks[0]?.category, "tool");
+      assert.equal(result.checks[0]?.blocking, true);
+      assert.match(result.checks[0]?.message ?? "", /Unsafe or non-runnable Verify command/);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

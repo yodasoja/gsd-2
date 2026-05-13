@@ -65,6 +65,7 @@ const QUEUE_SAFE_TOOLS = new Set([
  *   true / false        — shell no-ops / test exit codes
  */
 const BASH_READ_ONLY_RE = /^\s*(cat|head|tail|less|more|wc|file|stat|du|df|which|type|echo|printf|ls|find|grep|rg|awk|sed\b(?!.*-i)|sort|uniq|diff|comm|tr|cut|tee\s+-a\s+\/dev\/null|git\s+(log|show|diff|status|branch|tag|remote|rev-parse|ls-files|blame|shortlog|describe|stash\s+list|config\s+--get|cat-file)|gh\s+(issue|pr|api|repo|release)\s+(view|list|diff|status|checks)|mkdir\s+-p\s+\.gsd|rtk\s|npm\s+run\s+(test|test:\w+|lint|lint:\w+|typecheck|type-check|type-check:\w+|check|verify|audit|outdated|format:check|ci|validate)\b|npm\s+(ls|list|info|view|show|outdated|audit|explain|doctor|ping|--version|-v)\b|npx\s|tsx\s|node\s+(--print|--version|-v\b)|python[23]?\s+(-c\s+'[^']*'|--version|-V\b|-m\s+(pip\s+show|pip\s+list|site))|pip[23]?\s+(show|list|freeze|check|index\s+versions)\b|jq\s|yq\s|curl\s+(-s\b|--silent\b)(?!\s+[^|>]*\s-[oO]\b)(?!\s+[^|>]*\s--output\b)[^|>]*$|openssl\s+(version|x509|s_client)|env\b|printenv\b|true\b|false\b)/;
+const BASH_VERIFICATION_RE = /^\s*(npm\s+(run\s+(build|test|test:\w+|lint|lint:\w+|typecheck|type-check|verify|ci|validate)\b|test\b)|pnpm\s+(build|test|lint|typecheck|verify)\b|yarn\s+(build|test|lint|typecheck|verify)\b|vitest\b|jest\b|go\s+test\b)/;
 
 interface InMemoryWriteGateState {
   verifiedDepthMilestones: Set<string>;
@@ -767,6 +768,9 @@ function blockReason(unitType: string, mode: string, what: string): string {
  *                    and listed in the policy's allowedSubagents.
  *   - "docs"       → like "planning" but also allows writes to paths
  *                    matching `allowedPathGlobs` relative to basePath.
+ *   - "verification"
+ *                  → allows Bash for project verification commands, but keeps
+ *                    writes restricted to .gsd/ and blocks subagent dispatch.
  *
  * `pathOrCommand` is the file path for write/edit-shaped tools and the
  * shell command for bash. Other tools ignore this argument.
@@ -804,7 +808,7 @@ export function shouldBlockPlanningUnit(
     return { block: true, reason: blockReason(unitType, policy.mode, `tool "${tool}" is not on the read-only allowlist`) };
   }
 
-  // planning / planning-dispatch / docs modes share the same surface for safe tools, bash, and subagent.
+  // planning / planning-dispatch / docs / verification modes share the same surface for safe tools, bash, and subagent.
   if (PLANNING_SAFE_TOOLS.has(tool)) return { block: false };
   if (tool.startsWith("gsd_")) return { block: false };
 
@@ -862,6 +866,17 @@ export function shouldBlockPlanningUnit(
   }
 
   if (tool === "bash") {
+    if (policy.mode === "verification") {
+      if (BASH_VERIFICATION_RE.test(pathOrCommand) || BASH_READ_ONLY_RE.test(pathOrCommand)) return { block: false };
+      return {
+        block: true,
+        reason: blockReason(
+          unitType,
+          policy.mode,
+          `bash is restricted to build/test verification commands (npm run build, npm test, etc.); cannot run "${pathOrCommand.slice(0, 80)}${pathOrCommand.length > 80 ? "…" : ""}"`,
+        ),
+      };
+    }
     if (BASH_READ_ONLY_RE.test(pathOrCommand)) return { block: false };
     return {
       block: true,

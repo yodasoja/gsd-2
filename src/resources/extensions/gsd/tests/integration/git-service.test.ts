@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, symlinkSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 
 import {
   inferCommitType,
@@ -371,6 +371,18 @@ describe('git-service', async () => {
     return dir;
   }
 
+  function gitRun(args: string[], cwd: string): string {
+    return execFileSync("git", args, {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf-8",
+      env: {
+        ...process.env,
+        GIT_ALLOW_PROTOCOL: "file",
+      },
+    }).trim();
+  }
+
   // ─── GitServiceImpl: smart staging ─────────────────────────────────────
 
   test('GitServiceImpl: smart staging', () => {
@@ -411,6 +423,96 @@ describe('git-service', async () => {
     assert.ok(statusOut.includes(".gsd/STATE.md"), "STATE.md still untracked after commit");
 
     rmSync(repo, { recursive: true, force: true });
+  });
+
+  test('GitServiceImpl: task autoCommit skips keyFiles inside submodules', () => {
+    const repo = initTempRepo();
+    const subSrc = mkdtempSync(join(tmpdir(), "gsd-git-submodule-src-"));
+
+    try {
+      gitRun(["init", "-b", "main"], subSrc);
+      gitRun(["config", "user.name", "Pi Test"], subSrc);
+      gitRun(["config", "user.email", "pi@example.com"], subSrc);
+      createFile(subSrc, "tracked.txt", "initial\n");
+      gitRun(["add", "-A"], subSrc);
+      gitRun(["commit", "-m", "init submodule"], subSrc);
+
+      gitRun(["-c", "protocol.file.allow=always", "submodule", "add", `file://${subSrc}`, "sub"], repo);
+      gitRun(["commit", "-m", "add submodule"], repo);
+
+      createFile(repo, "sub/copied.txt", "copied from source\n");
+      createFile(repo, "src/feature.ts", "export const feature = true;\n");
+      createFile(repo, "src/unrelated.ts", "export const unrelated = true;\n");
+
+      const svc = new GitServiceImpl(repo);
+      const taskContext: TaskCommitContext = {
+        taskId: "S01/T01",
+        taskDisplayId: "T01",
+        taskTitle: "fix submodule staging",
+        milestoneId: "M001",
+        milestoneTitle: "Submodule auto commit",
+        sliceId: "S01",
+        sliceTitle: "Commit scoped files",
+        oneLiner: "Fixed auto commit when key files include submodule paths",
+        keyFiles: ["sub/copied.txt", "src/feature.ts"],
+      };
+
+      const result = svc.autoCommit("execute-task", "M001/S01/T01", [], taskContext);
+
+      assert.ok(result !== null, "autoCommit should commit non-submodule changes");
+      const committed = gitRun(["show", "--name-only", "--format=", "HEAD"], repo);
+      assert.ok(committed.includes("src/feature.ts"), "non-submodule keyFile is committed");
+      assert.ok(!committed.includes("sub/copied.txt"), "submodule inner keyFile is not pathspec-staged");
+      assert.ok(!committed.includes("src/unrelated.ts"), "scoped staging does not fall back to smartStage");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+      rmSync(subSrc, { recursive: true, force: true });
+    }
+  });
+
+  test('GitServiceImpl: all keyFiles inside submodules falls back to smartStage', () => {
+    const repo = initTempRepo();
+    const subSrc = mkdtempSync(join(tmpdir(), "gsd-git-all-submodule-src-"));
+
+    try {
+      gitRun(["init", "-b", "main"], subSrc);
+      gitRun(["config", "user.name", "Pi Test"], subSrc);
+      gitRun(["config", "user.email", "pi@example.com"], subSrc);
+      createFile(subSrc, "tracked.txt", "initial\n");
+      gitRun(["add", "-A"], subSrc);
+      gitRun(["commit", "-m", "init submodule"], subSrc);
+
+      gitRun(["-c", "protocol.file.allow=always", "submodule", "add", `file://${subSrc}`, "sub"], repo);
+      gitRun(["commit", "-m", "add submodule"], repo);
+
+      createFile(repo, "sub/file1.txt", "inside submodule\n");
+      createFile(repo, "sub/file2.txt", "also inside\n");
+      createFile(repo, "src/real.ts", "export const real = true;\n");
+
+      const svc = new GitServiceImpl(repo);
+      const taskContext: TaskCommitContext = {
+        taskId: "S01/T02",
+        taskDisplayId: "T02",
+        taskTitle: "all keyFiles inside submodule",
+        milestoneId: "M001",
+        milestoneTitle: "Submodule auto commit",
+        sliceId: "S01",
+        sliceTitle: "Commit scoped files",
+        oneLiner: "Fell back when all key files are inside submodules",
+        keyFiles: ["sub", "sub/file1.txt", "sub/file2.txt"],
+      };
+
+      const result = svc.autoCommit("execute-task", "M001/S01/T02", [], taskContext);
+
+      assert.ok(result !== null, "autoCommit falls back to smartStage when all keyFiles are filtered");
+      const committed = gitRun(["show", "--name-only", "--format=", "HEAD"], repo);
+      assert.ok(!committed.includes("sub/file1.txt"), "submodule keyFile is not committed");
+      assert.ok(!committed.includes("sub/file2.txt"), "submodule keyFile is not committed");
+      assert.ok(committed.includes("src/real.ts"), "smartStage fallback commits other dirty files");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+      rmSync(subSrc, { recursive: true, force: true });
+    }
   });
 
   // ─── GitServiceImpl: smart staging excludes tracked runtime files ──────

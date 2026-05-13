@@ -239,6 +239,12 @@ function missingSliceStop(mid: string, phase: string): DispatchAction {
   };
 }
 
+function isRegistryMilestoneComplete(state: GSDState, mid: string): boolean {
+  return state.registry.some((milestone) =>
+    milestone.id === mid && milestone.status === "complete"
+  );
+}
+
 /**
  * Check for milestone slices missing SUMMARY files.
  * Returns array of missing slice IDs, or empty array if all present or DB unavailable.
@@ -395,6 +401,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
     match: async ({ state, mid, midTitle, basePath, prefs, structuredQuestionsAvailable }) => {
       if (!EXECUTION_ENTRY_PHASES.has(state.phase)) return null;
       if (!MILESTONE_ID_RE.test(mid)) return null;
+      if (isRegistryMilestoneComplete(state, mid)) return null;
       // Align with the plan-v2 gate's lookup semantics: whitespace-only counts
       // as missing, and an auto worktree may fall back to GSD_PROJECT_ROOT.
       if (hasFinalizedMilestoneContext(basePath, mid)) return null;
@@ -709,6 +716,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
     name: "pre-planning (no context) → discuss-milestone",
     match: async ({ state, mid, midTitle, basePath, prefs, structuredQuestionsAvailable }) => {
       if (state.phase !== "pre-planning") return null;
+      if (isRegistryMilestoneComplete(state, mid)) return null;
       const contextFile = resolveMilestoneFile(basePath, mid, "CONTEXT");
       const hasContext = !!(contextFile && (await loadFile(contextFile)));
       if (hasContext) return null; // fall through to next rule
@@ -1322,19 +1330,19 @@ export const DISPATCH_RULES: DispatchRule[] = [
         }
       }
 
-      // Safety guard (#2675): block completion when VALIDATION verdict is
-      // needs-remediation. The state machine treats needs-remediation as
-      // terminal (to prevent validate-milestone loops per #832), but
-      // completing-milestone should NOT proceed — remediation work is needed.
+      // Safety guard (#2675, #5747): block completion when VALIDATION
+      // verdict is non-passing. The state machine treats these verdicts as
+      // terminal, but completing-milestone should NOT proceed — remediation
+      // or human attention is needed.
       const validationFile = resolveMilestoneFile(basePath, mid, "VALIDATION");
       if (validationFile) {
         const validationContent = await loadFile(validationFile);
         if (validationContent) {
           const verdict = extractVerdict(validationContent);
-          if (verdict === "needs-remediation") {
+          if (verdict === "needs-remediation" || verdict === "needs-attention") {
             return {
               action: "stop",
-              reason: `Cannot complete milestone ${mid}: VALIDATION verdict is "needs-remediation". Address the remediation findings and re-run validation, or update the verdict manually.`,
+              reason: `Cannot complete milestone ${mid}: VALIDATION verdict is "${verdict}". Address the validation findings and re-run validation, or update the verdict manually.`,
               level: "warning",
             };
           }

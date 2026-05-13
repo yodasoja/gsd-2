@@ -79,6 +79,23 @@ test('handlePlanTask rejects invalid payloads', async () => {
   }
 });
 
+test('handlePlanTask explains string IO fields must be arrays', async () => {
+  const base = makeTmpBase();
+  openDatabase(join(base, '.gsd', 'gsd.db'));
+
+  try {
+    seedParent();
+    const result = await handlePlanTask({
+      ...validParams(),
+      expectedOutput: 'src/output.ts' as unknown as string[],
+    }, base);
+    assert.ok('error' in result);
+    assert.match(result.error, /validation failed: expectedOutput must be an array of strings, not string/);
+  } finally {
+    cleanup(base);
+  }
+});
+
 test('handlePlanTask rejects absolute task IO paths outside the active worktree', async () => {
   const base = makeTmpBase();
   openDatabase(join(base, '.gsd', 'gsd.db'));

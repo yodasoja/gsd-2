@@ -270,6 +270,30 @@ function isExcludedScopedPath(path: string, exclusions: readonly string[]): bool
   return false;
 }
 
+function submodulePathsFromLsFiles(output: string): Set<string> {
+  const submodulePaths = new Set<string>();
+  if (!output) return submodulePaths;
+
+  for (const line of output.split("\n")) {
+    const match = line.match(/^160000\s+\S+\s+\d+\t(.+)$/);
+    if (!match) continue;
+    submodulePaths.add(match[1].replace(/\\/g, "/").replace(/\/+$/, ""));
+  }
+  return submodulePaths;
+}
+
+function isInsideSubmodule(path: string, submodulePaths: ReadonlySet<string>): boolean {
+  const normalizedPath = path.replace(/\\/g, "/");
+  if (submodulePaths.has(normalizedPath)) return true;
+
+  let slashIndex = normalizedPath.lastIndexOf("/");
+  while (slashIndex > 0) {
+    if (submodulePaths.has(normalizedPath.slice(0, slashIndex))) return true;
+    slashIndex = normalizedPath.lastIndexOf("/", slashIndex - 1);
+  }
+  return false;
+}
+
 /**
  * Thrown when a slice merge hits code conflicts in non-.gsd files.
  * The working tree is left in a conflicted state (no reset) so the
@@ -764,6 +788,26 @@ export class GitServiceImpl {
       .filter(file => !nativeIsIgnored(this.basePath, file))
       .filter(file => !isExcludedScopedPath(file, allExclusions));
 
+    const scopedPaths: string[] = [];
+    const submodulePaths: string[] = [];
+    const repoSubmodules = submodulePathsFromLsFiles(
+      runGit(this.basePath, ["ls-files", "--stage"], { allowFailure: true }),
+    );
+    for (const path of normalized) {
+      if (isInsideSubmodule(path, repoSubmodules)) {
+        submodulePaths.push(path);
+      } else {
+        scopedPaths.push(path);
+      }
+    }
+    if (submodulePaths.length > 0) {
+      logWarning(
+        "engine",
+        `scoped stage: dropping ${submodulePaths.length} keyFile(s) inside git submodule(s): ${submodulePaths.join(", ")}`,
+        { file: "git-service.ts" },
+      );
+    }
+
     // Drop entries that don't exist on disk. The LLM occasionally lists files
     // it intended to write but didn't (or names them with wrong casing/path).
     // Pre-`b304f738b` `git add -A` swallowed these silently; the scoped
@@ -771,7 +815,7 @@ export class GitServiceImpl {
     // the whole commit fail (see #5500). Filter so valid paths still commit.
     const missing: string[] = [];
     const existing: string[] = [];
-    for (const path of normalized) {
+    for (const path of scopedPaths) {
       if (existsSync(join(this.basePath, path))) {
         existing.push(path);
       } else {

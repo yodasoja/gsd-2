@@ -41,6 +41,7 @@ import {
   resolveExpectedArtifactPath,
   writeBlockerPlaceholder,
   diagnoseExpectedArtifact,
+  diagnoseWorktreeIntegrityFailure,
 } from "./auto-recovery.js";
 import { regenerateIfMissing } from "./workflow-projections.js";
 import { WorktreeStateProjection } from "./worktree-state-projection.js";
@@ -163,7 +164,7 @@ async function buildTaskCommitContextForUnit(
     sliceTitle: stripKnownIdPrefix(slice?.title, sid),
     oneLiner: summary?.oneLiner || task?.one_liner || undefined,
     keyFiles:
-      summary?.frontmatter.key_files?.filter(f => !f.includes("{{")) ??
+      summary?.frontmatter.key_files?.filter(f => !f.includes("{{") && f.trim() !== "(none)") ??
       task?.key_files ??
       undefined,
     issueNumber: ghIssueNumber,
@@ -381,6 +382,23 @@ export function buildStepCompleteMessage(nextState: import("./types.js").GSDStat
     + `Run /clear, then /gsd to continue (or /gsd auto to run continuously).`;
 }
 
+/**
+ * Decide whether step mode should stop at the step wizard after a unit finishes.
+ *
+ * @param currentUnitType The just-finished unit type, such as "execute-task" or
+ *   "complete-milestone"; may be null/undefined when no current unit is known.
+ * @param phaseAfterUnit The freshly derived next phase, such as "executing" or
+ *   "complete"; may be null/undefined if state derivation failed.
+ * @returns true to show the step wizard; false to keep the loop running so
+ *   terminal milestone completion can reach the merge/finalization path.
+ */
+export function shouldReturnStepWizardAfterUnit(
+  currentUnitType: string | null | undefined,
+  phaseAfterUnit: string | null | undefined,
+): boolean {
+  return currentUnitType !== "complete-milestone" && phaseAfterUnit !== "complete";
+}
+
 export interface PreVerificationOpts {
   skipSettleDelay?: boolean;
   skipWorktreeSync?: boolean;
@@ -413,6 +431,11 @@ function artifactValidationKind(unitType: string): "project" | "requirements" | 
 }
 
 function describeArtifactVerificationFailure(unitType: string, unitId: string, basePath: string): string {
+  const worktreeFailure = diagnoseWorktreeIntegrityFailure(basePath);
+  if (worktreeFailure) {
+    return `${worktreeFailure} Unit: ${unitType} ${unitId}.`;
+  }
+
   const artifactPath = resolveExpectedArtifactPath(unitType, unitId, basePath);
   if (!artifactPath) {
     return `Artifact verification failed: ${unitType} "${unitId}" has no resolvable artifact path.`;
@@ -469,9 +492,17 @@ export async function autoCommitUnit(
   }
 }
 
+/**
+ * Execute the turn-level git action (commit, snapshot, or status-only).
+ *
+ * @param opts.softFailure - Defaults to false. When true, retry git failures,
+ * warn, and continue without pausing auto-mode; use for best-effort deferred
+ * closeout work where a git failure should not block the run.
+ */
 async function runCloseoutGitAction(
   pctx: PostUnitContext,
   unit: NonNullable<AutoSession["currentUnit"]>,
+  opts?: { softFailure?: boolean },
 ): Promise<"continue" | "dispatched"> {
   const { s, ctx, pi, pauseAuto } = pctx;
   const prefs = loadEffectiveGSDPreferences()?.preferences;
@@ -506,13 +537,24 @@ async function runCloseoutGitAction(
         unitId: unit.id,
       });
     } else {
-      const gitResult = runTurnGitAction({
+      const maxAttempts = opts?.softFailure ? 3 : 1;
+      let gitResult = runTurnGitAction({
         basePath: s.basePath,
         action: turnAction,
         unitType: unit.type,
         unitId: unit.id,
         taskContext,
       });
+      for (let attempt = 1; gitResult.status === "failed" && attempt < maxAttempts; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+        gitResult = runTurnGitAction({
+          basePath: s.basePath,
+          action: turnAction,
+          unitType: unit.type,
+          unitId: unit.id,
+          taskContext,
+        });
+      }
 
       if (uokFlags.gitops) {
         writeTurnGitTransaction({
@@ -563,12 +605,15 @@ async function runCloseoutGitAction(
         }
 
         const failureMsg = `Git ${turnAction} failed: ${(gitResult.error ?? "unknown error").split("\n")[0]}`;
-        ctx.ui.notify(failureMsg, "error");
+        ctx.ui.notify(failureMsg, opts?.softFailure ? "warning" : "error");
         debugLog("postUnit", {
-          phase: "git-action-failed-blocking",
+          phase: opts?.softFailure ? "git-action-failed-soft" : "git-action-failed-blocking",
           action: turnAction,
           error: gitResult.error ?? "unknown error",
         });
+        if (opts?.softFailure) {
+          return "continue";
+        }
         await pauseAuto(ctx, pi);
         return "dispatched";
       }
@@ -586,7 +631,10 @@ async function runCloseoutGitAction(
     s.lastGitActionFailure = message;
     s.lastGitActionStatus = "failed";
     debugLog("postUnit", { phase: "git-action", error: message, action: turnAction });
-    ctx.ui.notify(`Git ${turnAction} failed: ${message.split("\n")[0]}`, uokFlags.gitops ? "error" : "warning");
+    ctx.ui.notify(`Git ${turnAction} failed: ${message.split("\n")[0]}`, opts?.softFailure ? "warning" : "error");
+    if (opts?.softFailure) {
+      return "continue";
+    }
     if (uokFlags.gitops) {
       await pauseAuto(ctx, pi);
       return "dispatched";
@@ -1133,6 +1181,24 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
           "warning",
         );
         // Fall through to "continue" — do NOT enter the retry or db-unavailable paths.
+      } else if (!triggerArtifactVerified && diagnoseWorktreeIntegrityFailure(s.basePath)) {
+        const retryKey = `${s.currentUnit.type}:${s.currentUnit.id}`;
+        const worktreeFailure = diagnoseWorktreeIntegrityFailure(s.basePath)!;
+        s.pendingVerificationRetry = null;
+        s.verificationRetryCount.delete(retryKey);
+        s.verificationRetryFailureHashes.delete(retryKey);
+        debugLog("postUnit", {
+          phase: "worktree-integrity-failure",
+          unitType: s.currentUnit.type,
+          unitId: s.currentUnit.id,
+          basePath: s.basePath,
+        });
+        ctx.ui.notify(
+          `${worktreeFailure} Retry ${s.currentUnit.id} after repair.`,
+          "error",
+        );
+        await pauseAuto(ctx, pi);
+        return "dispatched";
       } else if (!triggerArtifactVerified && !isDbAvailable()) {
         debugLog("postUnit", { phase: "artifact-verify-skip-db-unavailable", unitType: s.currentUnit.type, unitId: s.currentUnit.id });
         const dbSkipDiag = diagnoseExpectedArtifact(s.currentUnit.type, s.currentUnit.id, s.basePath);
@@ -1220,7 +1286,7 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
 
   if (s.currentUnit) {
     if (shouldDeferCloseoutGitAction(s.currentUnit.type)) {
-      const gitActionResult = await runCloseoutGitAction(pctx, s.currentUnit);
+      const gitActionResult = await runCloseoutGitAction(pctx, s.currentUnit, { softFailure: true });
       if (gitActionResult === "dispatched") {
         return "stopped";
       }
@@ -1668,14 +1734,18 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
   // Without this notify(), /gsd in step mode finishes a unit and silently
   // exits the loop, leaving the user with no hint to /clear and /gsd again.
   if (s.stepMode) {
+    let phaseAfterUnit: string | null = null;
     try {
       const nextState = await deriveState(s.canonicalProjectRoot);
+      phaseAfterUnit = nextState.phase;
       ctx.ui.notify(buildStepCompleteMessage(nextState), "info");
     } catch (e) {
       debugLog("postUnit", { phase: "step-wizard-notify", error: String(e) });
       ctx.ui.notify(STEP_COMPLETE_FALLBACK_MESSAGE, "info");
     }
-    return "step-wizard";
+    return shouldReturnStepWizardAfterUnit(s.currentUnit?.type, phaseAfterUnit)
+      ? "step-wizard"
+      : "continue";
   }
 
   return "continue";

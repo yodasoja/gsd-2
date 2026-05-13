@@ -3353,6 +3353,60 @@ test("runDispatch runs stuck detection while artifact verification retry is pend
   );
 });
 
+test("runDispatch falls back to main when dispatch guard cannot read main branch (#5530)", async (t) => {
+  _resetPendingResolve();
+
+  const ctx = makeMockCtx();
+  const pi = makeMockPi();
+  const basePath = mkdtempSync(join(tmpdir(), "gsd-5530-main-branch-fallback-"));
+  t.after(() => rmSync(basePath, { recursive: true, force: true }));
+
+  let guardBranch: string | null = null;
+  const s = makeLoopSession({ basePath });
+  const deps = makeMockDeps({
+    getMainBranch: () => {
+      throw new Error("fatal: detected dubious ownership");
+    },
+    getPriorSliceCompletionBlocker: (_basePath, mainBranch) => {
+      guardBranch = mainBranch;
+      return null;
+    },
+  });
+
+  const result = await runDispatch(
+    {
+      ctx,
+      pi,
+      s,
+      deps,
+      prefs: undefined,
+      iteration: 1,
+      flowId: "test-flow",
+      nextSeq: () => 1,
+    },
+    {
+      state: {
+        phase: "executing",
+        activeMilestone: { id: "M001", title: "Test", status: "active" },
+        activeSlice: { id: "S01", title: "Slice 1" },
+        activeTask: { id: "T01" },
+        registry: [{ id: "M001", status: "active" }],
+        blockers: [],
+      } as any,
+      mid: "M001",
+      midTitle: "Test",
+    },
+    {
+      recentUnits: [],
+      stuckRecoveryAttempts: 0,
+      consecutiveFinalizeTimeouts: 0,
+    },
+  );
+
+  assert.equal(guardBranch, "main");
+  assert.equal(result.action, "next");
+});
+
 test("dispatch Worktree Safety stops unknown unit types with missing Tool Contract", async (t) => {
   _resetPendingResolve();
 

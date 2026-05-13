@@ -3,7 +3,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildStepCompleteMessage, STEP_COMPLETE_FALLBACK_MESSAGE } from "../auto-post-unit.ts";
+import {
+  buildStepCompleteMessage,
+  shouldReturnStepWizardAfterUnit,
+  STEP_COMPLETE_FALLBACK_MESSAGE,
+} from "../auto-post-unit.ts";
 import type { GSDState } from "../types.ts";
 
 function makeState(overrides: Partial<GSDState>): GSDState {
@@ -50,4 +54,11 @@ test("buildStepCompleteMessage: unknown phase falls back to generic continue lab
 test("STEP_COMPLETE_FALLBACK_MESSAGE: used when deriveState throws, still points users at /clear + /gsd", () => {
   assert.match(STEP_COMPLETE_FALLBACK_MESSAGE, /\/clear/);
   assert.match(STEP_COMPLETE_FALLBACK_MESSAGE, /\/gsd/);
+});
+
+test("shouldReturnStepWizardAfterUnit: terminal milestone completion continues to merge-back path", () => {
+  assert.equal(shouldReturnStepWizardAfterUnit("complete-milestone", "complete"), false);
+  assert.equal(shouldReturnStepWizardAfterUnit("complete-milestone", null), false);
+  assert.equal(shouldReturnStepWizardAfterUnit("execute-task", "complete"), false);
+  assert.equal(shouldReturnStepWizardAfterUnit("execute-task", "executing"), true);
 });

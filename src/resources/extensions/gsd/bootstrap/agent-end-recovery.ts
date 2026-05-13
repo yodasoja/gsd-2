@@ -48,6 +48,11 @@ const MAX_NETWORK_RETRIES = 2;
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object";
 }
+
+export function _hasEmptyAgentEndContent(content: unknown): boolean {
+  return content == null || (Array.isArray(content) && content.length === 0);
+}
+
 /**
  * Cap on auto-resume attempts for sustained transient-provider errors.
  *
@@ -310,7 +315,7 @@ export async function handleAgentEnd(
     // that carry error context — e.g. errorMessage field or non-empty content
     // indicating a mid-stream failure. (#2695)
     const content = "content" in lastMsg ? lastMsg.content : undefined;
-    const hasEmptyContent = Array.isArray(content) && content.length === 0;
+    const hasEmptyContent = _hasEmptyAgentEndContent(content);
     const hasErrorMessage = "errorMessage" in lastMsg && !!lastMsg.errorMessage;
 
     if (hasEmptyContent && !hasErrorMessage) {

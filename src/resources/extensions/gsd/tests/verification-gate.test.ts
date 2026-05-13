@@ -22,7 +22,7 @@ import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { discoverCommands, runVerificationGate, formatFailureContext, captureRuntimeErrors, runDependencyAudit, isLikelyCommand } from "../verification-gate.ts";
+import { discoverCommands, runVerificationGate, formatFailureContext, captureRuntimeErrors, runDependencyAudit, isLikelyCommand, validateVerificationCommand } from "../verification-gate.ts";
 import type { CaptureRuntimeErrorsOptions, DependencyAuditOptions } from "../verification-gate.ts";
 import { validatePreferences } from "../preferences.ts";
 
@@ -214,6 +214,102 @@ describe("verification-gate: discovery", () => {
     // "npm run test" is a valid command
     assert.equal(result.source, "task-plan");
     assert.deepStrictEqual(result.commands, ["npm run test"]);
+  });
+
+  test("taskPlanVerify rejects piped pytest command", () => {
+    const result = discoverCommands({
+      taskPlanVerify: "python3 -m pytest tests/ -q --tb=short 2>&1 | tail -5",
+      cwd: tmp,
+    });
+    assert.equal(result.source, "none");
+    assert.deepStrictEqual(result.commands, []);
+  });
+
+  test("Python project with tests discovers pytest when package.json is absent", () => {
+    mkdirSync(join(tmp, "tests"));
+    writeFileSync(join(tmp, "tests", "test_sample.py"), "def test_sample():\n    assert True\n");
+    writeFileSync(
+      join(tmp, "pyproject.toml"),
+      `[project]
+name = "sample"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+`,
+    );
+
+    const result = discoverCommands({ cwd: tmp });
+
+    assert.equal(result.source, "python-project");
+    assert.deepStrictEqual(result.commands, ["python3 -m pytest"]);
+  });
+
+  test("Python project with nested Python test file discovers pytest", () => {
+    mkdirSync(join(tmp, "tests", "unit"), { recursive: true });
+    writeFileSync(join(tmp, "tests", "unit", "sample_test.py"), "def test_sample():\n    assert True\n");
+
+    const result = discoverCommands({ cwd: tmp });
+
+    assert.equal(result.source, "python-project");
+    assert.deepStrictEqual(result.commands, ["python3 -m pytest"]);
+  });
+
+  test("Python project with pytest.ini discovers pytest", () => {
+    writeFileSync(join(tmp, "pytest.ini"), "[pytest]\npythonpath = .\n");
+
+    const result = discoverCommands({ cwd: tmp });
+
+    assert.equal(result.source, "python-project");
+    assert.deepStrictEqual(result.commands, ["python3 -m pytest"]);
+  });
+
+  test("Python project with explicit pyproject pytest marker discovers pytest", () => {
+    writeFileSync(
+      join(tmp, "pyproject.toml"),
+      `[tool.pytest]
+pythonpath = ["."]
+`,
+    );
+
+    const result = discoverCommands({ cwd: tmp });
+
+    assert.equal(result.source, "python-project");
+    assert.deepStrictEqual(result.commands, ["python3 -m pytest"]);
+  });
+
+  test("Python project markers without pytest evidence do not discover pytest", () => {
+    mkdirSync(join(tmp, "tests"));
+    writeFileSync(join(tmp, "tests", "README.md"), "# tests\n");
+    writeFileSync(
+      join(tmp, "pyproject.toml"),
+      `[project]
+name = "sample"
+dependencies = ["pytest-cov"]
+`,
+    );
+
+    const result = discoverCommands({ cwd: tmp });
+
+    assert.equal(result.source, "none");
+    assert.deepStrictEqual(result.commands, []);
+  });
+
+  test("Python project with setup.cfg alone does not discover pytest", () => {
+    writeFileSync(join(tmp, "setup.cfg"), "[tool:pytest]\npythonpath = .\n");
+
+    const result = discoverCommands({ cwd: tmp });
+
+    assert.equal(result.source, "none");
+    assert.deepStrictEqual(result.commands, []);
+  });
+
+  test("Python project with tox.ini alone does not discover pytest", () => {
+    writeFileSync(join(tmp, "tox.ini"), "[pytest]\npythonpath = .\n");
+
+    const result = discoverCommands({ cwd: tmp });
+
+    assert.equal(result.source, "none");
+    assert.deepStrictEqual(result.commands, []);
   });
 });
 
@@ -445,6 +541,10 @@ test("isLikelyCommand: prose descriptions are rejected", () => {
   assert.equal(isLikelyCommand("Build succeeds without errors or warnings"), false);
 });
 
+test("isLikelyCommand: non-ASCII prose descriptions are rejected", () => {
+  assert.equal(isLikelyCommand("所有 命令 输出 一行 JSONL go test ./... 通过"), false);
+});
+
 test("isLikelyCommand: empty or whitespace-only strings are rejected", () => {
   assert.equal(isLikelyCommand(""), false);
   assert.equal(isLikelyCommand("   "), false);
@@ -453,6 +553,15 @@ test("isLikelyCommand: empty or whitespace-only strings are rejected", () => {
 test("isLikelyCommand: short lowercase tokens without flags are accepted (could be custom scripts)", () => {
   assert.equal(isLikelyCommand("custom-verify"), true);
   assert.equal(isLikelyCommand("mycheck"), true);
+});
+
+test("validateVerificationCommand rejects shell control syntax", () => {
+  assert.deepEqual(validateVerificationCommand("python3 -m pytest tests/ -q --tb=short").ok, true);
+  const result = validateVerificationCommand("python3 -m pytest tests/ -q --tb=short 2>&1 | tail -5");
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.match(result.reason, /shell control syntax/);
+  }
 });
 
 // ─── Additional Preference Validation Tests (T02) ──────────────────────────

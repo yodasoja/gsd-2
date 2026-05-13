@@ -25,3 +25,8 @@ export function isDeferredStatus(status: string): boolean {
 export function isInactiveStatus(status: string): boolean {
   return isClosedStatus(status) || isDeferredStatus(status);
 }
+
+/** Returns true when a prior milestone should not block dispatch ordering. */
+export function isSkippedForDispatch(status: string): boolean {
+  return isClosedStatus(status) || status === "parked" || isDeferredStatus(status);
+}

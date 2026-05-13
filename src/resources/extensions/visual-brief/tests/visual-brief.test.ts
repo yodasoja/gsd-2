@@ -88,6 +88,20 @@ test("builds a provider-neutral prompt with output instructions", () => {
 	assert.ok(prompt.indexOf("Gather evidence before writing the page") < prompt.indexOf("Write the HTML file"));
 });
 
+test("generated prompts require the shared GSD HTML shell", () => {
+	const request = parseVisualBriefArgs("diff");
+	assert.ok(request, "diff request should parse");
+
+	const prompt = buildVisualBriefPrompt(request, { outputDir: "/tmp/visual-brief" });
+
+	assert.match(prompt, /## Required HTML shell/);
+	assert.match(prompt, /<span class="logo">GSD<\/span>/);
+	assert.match(prompt, /<span class="kind-chip">Diff Brief<\/span>/);
+	assert.match(prompt, /{{MAIN_HTML}}/);
+	assert.match(prompt, /{{GENERATED_AT}}/);
+	assert.match(prompt, /Do not add new <style> blocks/);
+});
+
 test("returns first-argument completions for visual brief modes", () => {
 	const completions = getVisualBriefCompletions("di");
 
@@ -165,6 +179,32 @@ test("artifact policy formats output directory and opener guidance", () => {
 
 test("artifact output directory is under the configured GSD agent directory", () => {
 	assert.equal(getVisualBriefOutputDir("/tmp/gsd-agent-test"), join("/tmp/gsd-agent-test", "diagrams"));
+});
+
+test("prompt embeds the GSD version in the shell when provided", () => {
+	const request = parseVisualBriefArgs("diff release branch changes");
+	assert.ok(request, "request should parse");
+
+	const prompt = buildVisualBriefPrompt(request, { outputDir: "/tmp/visual-brief", version: "9.9.9" });
+	assert.match(prompt, /v9\.9\.9/);
+});
+
+test("prompt omits the version chip when version is missing or blank", () => {
+	const request = parseVisualBriefArgs("diff release branch changes");
+	assert.ok(request, "request should parse");
+
+	const blank = buildVisualBriefPrompt(request, { outputDir: "/tmp/visual-brief", version: "   " });
+	assert.doesNotMatch(blank, /class="version"/);
+
+	const missing = buildVisualBriefPrompt(request, { outputDir: "/tmp/visual-brief" });
+	assert.doesNotMatch(missing, /class="version"/);
+});
+
+test("getVisualBriefModeProfile throws on an unknown mode", () => {
+	assert.throws(
+		() => getVisualBriefModeProfile("not-a-real-mode" as unknown as Parameters<typeof getVisualBriefModeProfile>[0], false),
+		/Unknown visual brief mode: not-a-real-mode/,
+	);
 });
 
 function escapeRegExp(value: string): string {

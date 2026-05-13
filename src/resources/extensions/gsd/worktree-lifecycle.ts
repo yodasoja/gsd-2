@@ -23,6 +23,7 @@ import { join } from "node:path";
 
 import type { AutoSession } from "./auto/session.js";
 import { debugLog } from "./debug-logger.js";
+import { logWarning } from "./workflow-logger.js";
 import { emitJournalEvent } from "./journal.js";
 import { emitWorktreeCreated, emitWorktreeMerged } from "./worktree-telemetry.js";
 import {
@@ -75,6 +76,13 @@ import {
   isInAutoWorktree,
   teardownAutoWorktree,
 } from "./auto-worktree.js";
+
+const recentWorktreeMergeFailures = new Map<string, number>();
+const MERGE_FAILURE_DEDUPE_MS = 60_000;
+
+export function resetRecentWorktreeMergeFailuresForTest(): void {
+  recentWorktreeMergeFailures.clear();
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -525,7 +533,7 @@ export function _enterMilestoneCore(
 
   // Phase B: claim a milestone lease before any worktree mutation. Two
   // workers cannot enter the same milestone concurrently. Best-effort:
-  // skip if no worker registered (single-worker fallback) or DB
+  // warn if no worker registered (single-worker fallback) or skip if DB
   // unavailable; reuse existing lease if we already hold it on this
   // milestone (re-entry within the same session).
   if (s.workerId) {
@@ -618,6 +626,11 @@ export function _enterMilestoneCore(
         });
       }
     }
+  } else {
+    logWarning(
+      "worktree",
+      `enterMilestone(${milestoneId}) ran before auto worker registration; milestone lease was not claimed.`,
+    );
   }
 
   // Resolve the project root for worktree operations via shared helper.
@@ -836,6 +849,32 @@ function rebuildGitService(
   s.gitService = deps.gitServiceFactory(s.basePath);
 }
 
+function emitWorktreeMergeFailedOnce(
+  basePath: string,
+  milestoneId: string,
+  err: unknown,
+): void {
+  const msg = err instanceof Error ? err.message : String(err);
+  const errorCategory = err instanceof Error ? err.name : "Error";
+  const now = Date.now();
+  const key = `${basePath}\0${milestoneId}\0${errorCategory}`;
+  const previous = recentWorktreeMergeFailures.get(key);
+  if (previous && now - previous < MERGE_FAILURE_DEDUPE_MS) return;
+  for (const [candidate, ts] of recentWorktreeMergeFailures) {
+    if (now - ts >= MERGE_FAILURE_DEDUPE_MS) {
+      recentWorktreeMergeFailures.delete(candidate);
+    }
+  }
+  emitJournalEvent(basePath, {
+    ts: new Date().toISOString(),
+    flowId: randomUUID(),
+    seq: 0,
+    eventType: "worktree-merge-failed",
+    data: { milestoneId, error: msg },
+  });
+  recentWorktreeMergeFailures.set(key, now);
+}
+
 // ─── Session-less merge entry (ADR-016 phase 2 / A1) ─────────────────────
 
 /**
@@ -985,13 +1024,7 @@ function _mergeWorktreeModeImpl(
       error: msg,
       fallback: "chdir-to-project-root",
     });
-    emitJournalEvent(originalBasePath || worktreeBasePath, {
-      ts: new Date().toISOString(),
-      flowId: randomUUID(),
-      seq: 0,
-      eventType: "worktree-merge-failed",
-      data: { milestoneId, error: msg },
-    });
+    emitWorktreeMergeFailedOnce(originalBasePath || worktreeBasePath, milestoneId, err);
     // Surface a clear, actionable error. Worktree and milestone branch
     // are intentionally preserved — nothing has been deleted. User can
     // retry /gsd dispatch complete-milestone or merge manually once the

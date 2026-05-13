@@ -47,6 +47,33 @@ test("dispatch guard blocks when prior milestone has incomplete slices", (t) => 
   );
 });
 
+test("dispatch guard skips prior DB parked or deferred milestones without marker files", (t) => {
+  const repo = setupRepo();
+  t.after(() => teardownRepo(repo));
+
+  mkdirSync(join(repo, ".gsd", "milestones", "M001"), { recursive: true });
+  mkdirSync(join(repo, ".gsd", "milestones", "M002"), { recursive: true });
+  mkdirSync(join(repo, ".gsd", "milestones", "M003"), { recursive: true });
+
+  insertMilestone({ id: "M001", title: "Parked", status: "parked" });
+  insertSlice({ id: "S01", milestoneId: "M001", title: "Incomplete", status: "pending", depends: [], sequence: 1 });
+
+  insertMilestone({ id: "M002", title: "Deferred", status: "deferred" });
+  insertSlice({ id: "S01", milestoneId: "M002", title: "Incomplete", status: "pending", depends: [], sequence: 1 });
+
+  insertMilestone({ id: "M003", title: "Current", status: "active" });
+  insertSlice({ id: "S01", milestoneId: "M003", title: "First", status: "pending", depends: [], sequence: 1 });
+
+  writeFileSync(join(repo, ".gsd", "milestones", "M001", "M001-ROADMAP.md"), "# M001\n");
+  writeFileSync(join(repo, ".gsd", "milestones", "M002", "M002-ROADMAP.md"), "# M002\n");
+  writeFileSync(join(repo, ".gsd", "milestones", "M003", "M003-ROADMAP.md"), "# M003\n");
+
+  assert.equal(
+    getPriorSliceCompletionBlocker(repo, "main", "plan-slice", "M003/S01"),
+    null,
+  );
+});
+
 test("dispatch guard blocks later slice in same milestone when earlier incomplete", (t) => {
   const repo = setupRepo();
   t.after(() => teardownRepo(repo));

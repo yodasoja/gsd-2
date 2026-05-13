@@ -95,6 +95,17 @@ function parsePhaseEntry(line: string): PlanningRoadmapEntry | null {
     };
   }
 
+  // Format 3: - ✅ v1.0 MVP — Phases 1-6
+  const fmtVersionPhases = stripped.match(/^-\s+([✅🚧])\s+v\d+(?:\.\d+)*\s+(.+?)\s*[—–]\s*Phases?\s+(\d+(?:\.\d+)?)(?:\s*-\s*\d+(?:\.\d+)?)?(?:\s+\(.*\))?\s*$/iu);
+  if (fmtVersionPhases) {
+    return {
+      number: parseFloat(fmtVersionPhases[3]),
+      title: fmtVersionPhases[2].trim(),
+      done: fmtVersionPhases[1] === '✅',
+      raw: line,
+    };
+  }
+
   return null;
 }
 

@@ -58,6 +58,7 @@ import {
 import {
   writeLock,
   clearLock,
+  clearStaleWorkerLock,
   readCrashLock,
   isLockProcessAlive,
   formatCrashInfo,
@@ -240,7 +241,7 @@ import { runAutoLoopWithUok } from "./uok/kernel.js";
 import { resolveUokFlags } from "./uok/flags.js";
 import { validateDirectory } from "./validate-directory.js";
 import { createAutoOrchestrator } from "./auto/orchestrator.js";
-import type { AutoOrchestrationModule, AutoOrchestratorDeps, DispatchAdapter } from "./auto/contracts.js";
+import type { AutoAdvanceResult, AutoOrchestrationModule, AutoOrchestratorDeps, DispatchAdapter } from "./auto/contracts.js";
 import { reconcileBeforeDispatch } from "./state-reconciliation.js";
 import { compileUnitToolContract } from "./tool-contract.js";
 import { createWorktreeSafetyModule } from "./worktree-safety.js";
@@ -1044,6 +1045,7 @@ export async function cleanupAfterLoopExit(ctx: ExtensionContext): Promise<void>
   // visible so the user still has a resumable auto-mode signal on screen.
   if (!s.paused) {
     ctx.ui.setStatus("gsd-auto", undefined);
+    ctx.ui.setWidget("gsd-progress", undefined);
     if (s.completionStopInProgress) {
       s.completionStopInProgress = false;
     }
@@ -1839,6 +1841,13 @@ export function createWiredDispatchAdapter(
         modelRegistry,
       });
 
+      if (action.action === "stop") {
+        return {
+          kind: "blocked",
+          reason: action.reason,
+          action: action.level === "warning" ? "pause" : "stop",
+        };
+      }
       if (action.action !== "dispatch") return null;
       return {
         unitType: action.unitType,
@@ -2063,6 +2072,18 @@ export function createWiredAutoOrchestrationModule(
   };
 
   return createAutoOrchestrator(deps);
+}
+
+function notifyResumeBlocked(ctx: ExtensionContext, result: Extract<AutoAdvanceResult, { kind: "blocked" }>): void {
+  const resumeCmd = s.stepMode ? "/gsd next" : "/gsd auto";
+  ctx.ui.notify(`Auto-mode blocked: ${result.reason}. Fix and run ${resumeCmd} to resume.`, "warning");
+  setLifecycleOutcome(ctx, {
+    status: "blocked",
+    title: "Auto-mode blocked",
+    detail: result.reason,
+    nextAction: `Fix the blocker, then run ${resumeCmd} to resume.`,
+    commands: ["/gsd status for overview", `${resumeCmd} to resume`, "/gsd doctor to diagnose"],
+  });
 }
 
 function ensureOrchestrationModule(ctx: ExtensionContext, pi: ExtensionAPI, basePath: string): void {
@@ -2402,7 +2423,7 @@ export async function startAuto(
     // This closes the journal gap reported in #3348 where the worker wrote side
     // effects (SUMMARY.md, DB updates) but died before emitting unit-end.
     emitCrashRecoveredUnitEnd(base, freshStartAssessment.lock);
-    clearLock(base);
+    clearStaleWorkerLock(base);
   }
 
   if (!s.paused) {
@@ -2473,6 +2494,8 @@ export async function startAuto(
     s.unitLifetimeDispatches.clear();
     if (!getLedger()) initMetrics(base);
     if (s.currentMilestoneId) setActiveMilestoneId(base, s.currentMilestoneId);
+    await openProjectDbIfPresent(base);
+    registerAutoWorkerForSession(s, base);
 
     // Re-register health level notification callback lost across process restart
     setLevelChangeCallback((_from, to, summary) => {
@@ -2580,7 +2603,12 @@ export async function startAuto(
     pi.events.emit(CMUX_CHANNELS.LOG, { preferences: loadEffectiveGSDPreferences(s.basePath || undefined)?.preferences, message: s.stepMode ? "Step-mode resumed." : "Auto-mode resumed.", level: "progress" });
 
     try {
-      await s.orchestration?.resume();
+      const resumeResult = await s.orchestration?.resume();
+      if (resumeResult?.kind === "blocked") {
+        notifyResumeBlocked(ctx, resumeResult);
+        await cleanupAfterLoopExit(ctx);
+        return;
+      }
     } catch (err) {
       debugLog("resume-orchestration-resume", { error: err instanceof Error ? err.message : String(err) });
     }
@@ -2601,6 +2629,7 @@ export async function startAuto(
   const bootstrapDeps: BootstrapDeps = {
     shouldUseWorktreeIsolation,
     registerSigtermHandler,
+    registerAutoWorkerForSession: (projectRoot) => registerAutoWorkerForSession(s, projectRoot),
     lockBase,
     buildLifecycle,
   };

@@ -19,14 +19,15 @@ import {
   insertMilestone,
   _getAdapter,
 } from "../gsd-db.ts";
-import { registerAutoWorker } from "../db/auto-workers.ts";
+import { getAutoWorker, registerAutoWorker } from "../db/auto-workers.ts";
 import { claimMilestoneLease } from "../db/milestone-leases.ts";
-import { recordDispatchClaim } from "../db/unit-dispatches.ts";
+import { getLatestForUnit, markRunning, recordDispatchClaim } from "../db/unit-dispatches.ts";
 import { setRuntimeKv, getRuntimeKv } from "../db/runtime-kv.ts";
 import {
   writeLock,
   readCrashLock,
   clearLock,
+  clearStaleWorkerLock,
   isLockProcessAlive,
 } from "../crash-recovery.ts";
 import { normalizeRealPath } from "../paths.ts";
@@ -222,4 +223,44 @@ test("clearLock removes the session_file row for the active worker", (t) => {
   clearLock(base);
   assert.equal(getRuntimeKv("worker", workerId, "session_file"), null,
     "session_file row deleted by clearLock");
+});
+
+test("clearStaleWorkerLock crashes stale worker and cancels latest active dispatch", (t) => {
+  const base = makeBase();
+  t.after(() => cleanup(base));
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  insertMilestone({ id: "M001", title: "T", status: "active" });
+  const projectRoot = normalizeRealPath(base);
+  const workerId = registerAutoWorker({ projectRootRealpath: projectRoot });
+  const lease = claimMilestoneLease(workerId, "M001");
+  assert.equal(lease.ok, true);
+  if (!lease.ok) return;
+  const claim = recordDispatchClaim({
+    traceId: "t1",
+    workerId,
+    milestoneLeaseToken: lease.token,
+    milestoneId: "M001",
+    sliceId: "S01",
+    taskId: "T02",
+    unitType: "hook/codex-review",
+    unitId: "M001/S01/T02",
+  });
+  assert.equal(claim.ok, true);
+  if (!claim.ok) return;
+  markRunning(claim.dispatchId);
+  setRuntimeKv("worker", workerId, "session_file", "/tmp/pi-session-hook.jsonl");
+  setWorkerPid(workerId, 99999);
+  expireWorker(workerId);
+
+  assert.ok(readCrashLock(base), "stale worker is detected before cleanup");
+
+  clearStaleWorkerLock(base);
+
+  assert.equal(getAutoWorker(workerId)?.status, "crashed");
+  const dispatch = getLatestForUnit("M001/S01/T02");
+  assert.ok(dispatch);
+  assert.equal(dispatch!.status, "canceled");
+  assert.equal(dispatch!.exit_reason, "crash-recovered");
+  assert.equal(getRuntimeKv("worker", workerId, "session_file"), null);
+  assert.equal(readCrashLock(base), null);
 });
