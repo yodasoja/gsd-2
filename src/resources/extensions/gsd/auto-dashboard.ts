@@ -120,6 +120,26 @@ export interface AutoOutcomeSurfaceSnapshot {
   startedAt?: number;
 }
 
+export function buildPhaseHandoffOutcome(input: {
+  unitType: string;
+  unitId: string;
+  agentEndMessages?: unknown[] | null;
+}): AutoOutcomeSurfaceSnapshot {
+  const phase = unitPhaseLabel(input.unitType);
+  const detail =
+    extractLastAssistantSummary(input.agentEndMessages) ??
+    `Completed ${unitVerb(input.unitType)} ${input.unitId}.`;
+
+  return {
+    status: "complete",
+    title: `${phase} complete`,
+    detail,
+    unitLabel: `${unitVerb(input.unitType)} ${input.unitId}`,
+    nextAction: "Preparing the next phase. Review this handoff while the next session starts.",
+    commands: ["/gsd status for overview", "/gsd visualize to inspect", "/gsd notifications for history"],
+  };
+}
+
 // ─── Unit Description Helpers ─────────────────────────────────────────────────
 
 export function unitVerb(unitType: string): string {
@@ -631,7 +651,6 @@ export function updateProgressWidget(
   tierBadge?: string,
 ): void {
   if (!ctx.hasUI) return;
-  ctx.ui.setWidget("gsd-outcome", undefined);
 
   // Welcome header is a startup-only banner — permanently suppress it once
   // auto-mode activates. The dashboard widget owns all status from here.
@@ -1144,4 +1163,56 @@ function normalizeRollupText(value: string | null | undefined): string | null {
     .trim();
   if (!clean || clean === "(none)" || clean === "None." || clean === "Not provided.") return null;
   return clean;
+}
+
+function isAssistantMessage(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  if (record.role === "assistant") return true;
+
+  const message = record.message;
+  if (message && typeof message === "object") {
+    return (message as Record<string, unknown>).role === "assistant";
+  }
+
+  return false;
+}
+
+function extractLastAssistantSummary(messages: unknown[] | null | undefined): string | null {
+  if (!messages || messages.length === 0) return null;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (!isAssistantMessage(messages[i])) continue;
+    const text = extractMessageText(messages[i]);
+    const clean = normalizeRollupText(text);
+    if (clean) return truncateToWidth(clean, 220, "…");
+  }
+  return null;
+}
+
+function extractMessageText(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object") return null;
+
+  const record = value as Record<string, unknown>;
+  if (typeof record.content === "string") return record.content;
+
+  const message = record.message;
+  if (message && typeof message === "object") {
+    return extractMessageText(message);
+  }
+
+  const content = record.content;
+  if (Array.isArray(content)) {
+    const parts = content
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (!part || typeof part !== "object") return "";
+        const partRecord = part as Record<string, unknown>;
+        return typeof partRecord.text === "string" ? partRecord.text : "";
+      })
+      .filter(Boolean);
+    return parts.length > 0 ? parts.join(" ") : null;
+  }
+
+  return null;
 }

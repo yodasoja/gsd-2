@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { classifyError, isTransient, isTransientNetworkError } from "../error-classifier.ts";
 import { pauseAutoForProviderError } from "../provider-error-pause.ts";
 import { resumeAutoAfterProviderDelay } from "../bootstrap/provider-error-resume.ts";
-import { MAX_TRANSIENT_AUTO_RESUMES, resetTransientRetryState } from "../bootstrap/agent-end-recovery.ts";
+import { MAX_TRANSIENT_AUTO_RESUMES, isTerminalDeletedWorktreeProviderError, resetTransientRetryState } from "../bootstrap/agent-end-recovery.ts";
 import { _buildCancelledUnitStopReason } from "../auto/phases.ts";
 import { getNextFallbackModel } from "../preferences.ts";
 // Zero-import module — imported by path rather than through the package
@@ -397,6 +397,25 @@ test("pauseAutoForProviderError falls back to indefinite pause when not rate lim
   assert.deepEqual(notifications, [
     { message: "Auto-mode paused due to provider error: connection refused", level: "warning" },
   ]);
+});
+
+test("isTerminalDeletedWorktreeProviderError matches removed auto-worktree paths only", () => {
+  assert.equal(
+    isTerminalDeletedWorktreeProviderError('Path "/Users/dev/.gsd/projects/abc123/worktrees/M005" does not exist'),
+    true,
+  );
+  assert.equal(
+    isTerminalDeletedWorktreeProviderError('Path "/Users/dev/app/.gsd/worktrees/M005" does not exist'),
+    true,
+  );
+  assert.equal(
+    isTerminalDeletedWorktreeProviderError('Path "/Users/dev/app/src/file.ts" does not exist'),
+    false,
+  );
+  assert.equal(
+    isTerminalDeletedWorktreeProviderError('Path "/Users/dev/.gsd/projects/abc123/worktrees/M005" failed with EACCES'),
+    false,
+  );
 });
 
 // ── resumeAutoAfterProviderDelay ────────────────────────────────────────────

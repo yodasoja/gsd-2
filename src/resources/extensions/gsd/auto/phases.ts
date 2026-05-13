@@ -77,6 +77,7 @@ import { resolveManifest } from "../unit-context-manifest.js";
 import { createWorktreeSafetyModule, type WorktreeSafetyResult } from "../worktree-safety.js";
 import { isSuspiciousGhostCompletion } from "../auto-unit-closeout.js";
 import { decideVerificationRetry, verificationRetryKey } from "./verification-retry-policy.js";
+import { buildPhaseHandoffOutcome, setAutoOutcomeWidget } from "../auto-dashboard.js";
 
 // ─── Path Comparison Helper ───────────────────────────────────────────────
 /** Compare two paths for physical identity, tolerating trailing slashes and symlinks. */
@@ -2602,6 +2603,20 @@ export async function runFinalize(
       lastProgressAt: Date.now(),
       lastProgressKind: "finalize-success",
     });
+    if (
+      !preUnitSnapshot.type.startsWith("hook/") &&
+      preUnitSnapshot.type !== "custom-step" &&
+      preUnitSnapshot.type !== "complete-milestone"
+    ) {
+      setAutoOutcomeWidget(ctx, {
+        ...buildPhaseHandoffOutcome({
+          unitType: preUnitSnapshot.type,
+          unitId: preUnitSnapshot.id,
+          agentEndMessages: s.lastUnitAgentEndMessages,
+        }),
+        startedAt: s.autoStartTime,
+      });
+    }
   }
   s.currentUnit = null;
   clearCurrentPhase();

@@ -201,6 +201,14 @@ export function resolveAgentEndErrorDisplay(
   return rawErrorMsg;
 }
 
+export function isTerminalDeletedWorktreeProviderError(
+  message: string | undefined | null,
+): boolean {
+  if (!message) return false;
+  if (!/\bdoes not exist\b/i.test(message)) return false;
+  return /[/\\]\.gsd[/\\](?:projects[/\\][^/\\]+[/\\])?worktrees[/\\][^/\\\s"']+/i.test(message);
+}
+
 async function pauseTransientWithBackoff(
   cls: ErrorClass,
   pi: ExtensionAPI,
@@ -360,6 +368,17 @@ export async function handleAgentEnd(
       rawErrorMsg,
       "content" in lastMsg ? lastMsg.content : undefined,
     );
+    if (
+      isAutoCompletionStopInProgress() &&
+      isTerminalDeletedWorktreeProviderError(`${rawErrorMsg}\n${displayMsg}`)
+    ) {
+      resetRetryState(retryState);
+      logWarning(
+        "bootstrap",
+        `Ignoring stale deleted-worktree provider error during terminal completion reroot: ${displayMsg || rawErrorMsg}`,
+      );
+      return;
+    }
     const errorDetail = displayMsg ? `: ${displayMsg}` : "";
     const explicitRetryAfterMs = ("retryAfterMs" in lastMsg && typeof lastMsg.retryAfterMs === "number") ? lastMsg.retryAfterMs : undefined;
 
