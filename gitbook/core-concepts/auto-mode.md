@@ -207,6 +207,10 @@ verification_max_retries: 2    # max retry attempts
 
 If verification fails, the AI sees the output and attempts to fix the issues before advancing. This ensures quality gates are enforced mechanically.
 
+Commands must be directly runnable checks such as `npm run lint`, `npm run test`, or `python3 -m pytest`. GSD rejects shell composition and control syntax in verification commands, including pipes, redirects, semicolons, backticks, and command substitution, so a piped command like `python3 -m pytest 2>&1 | tail -5` must be replaced with the underlying test command.
+
+If no verification commands are configured and the task plan does not provide a `verify` command, GSD attempts project discovery. It checks `package.json` scripts first, then Python pytest markers through the `python-project` discovery source: test files under `tests/`, `pytest.ini`, or pytest configuration in `pyproject.toml`.
+
 ## Slice Discussion Gate
 
 For projects requiring human review before each slice:

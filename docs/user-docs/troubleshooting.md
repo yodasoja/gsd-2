@@ -400,6 +400,14 @@ For non-TTY environments (CI, cron, scripted automation), v2.79 adds `gsd headle
 
 **Fix:** Updated in v2.29+ to filter preference commands through `isLikelyCommand()`. Ensure `verification_commands` in preferences contains only valid shell commands, not descriptions.
 
+### Verification command is rejected as unsafe or non-runnable
+
+**Symptoms:** Pre-execution checks fail with `Unsafe or non-runnable Verify command`, often for a command that works in an interactive shell.
+
+**Cause:** GSD only accepts mechanically executable verification commands. Shell control syntax such as pipes (`|`), redirects (`>` or `<`), semicolons, backticks, and command substitution (`$(...)`) is rejected so verification cannot hide failures by trimming or reshaping output.
+
+**Fix:** Put the direct check in the verify field or `verification_commands`. For example, use `python3 -m pytest tests -q --tb=short` instead of `python3 -m pytest tests -q --tb=short 2>&1 | tail -5`.
+
 ## LSP (Language Server Protocol)
 
 ### "LSP isn't available in this workspace"

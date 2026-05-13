@@ -376,7 +376,7 @@ The database is authoritative for milestones, slices, tasks, requirements, summa
 
 10. **Adaptive replanning** — After each slice completes, the roadmap is reassessed. If the work revealed new information that changes the plan, slices are reordered, added, or removed before continuing.
 
-11. **Verification enforcement** — Configure shell commands (`npm run lint`, `npm run test`, etc.) that run automatically after task execution. Failures trigger auto-fix retries before advancing. Execute-task commits and snapshots are deferred until verification passes; failed or incomplete verification blocks closeout instead of publishing changes. Auto-discovered checks from `package.json` run in advisory mode — they log warnings but don't block on pre-existing errors. Configurable via `verification_commands`, `verification_auto_fix`, and `verification_max_retries` preferences.
+11. **Verification enforcement** — Configure simple executable commands (`npm run lint`, `npm run test`, etc.) that run automatically after task execution. Verification commands must not use shell composition or control syntax such as pipes, redirects, semicolons, backticks, or command substitution. Failures trigger auto-fix retries before advancing. Execute-task commits and snapshots are deferred until verification passes; failed or incomplete verification blocks closeout instead of publishing changes. Auto-discovered checks from `package.json` and Python pytest project markers (`python-project`) run in advisory mode — they log warnings but don't block on pre-existing errors. Configurable via `verification_commands`, `verification_auto_fix`, and `verification_max_retries` preferences.
 
 12. **Milestone validation** — After all slices complete, a `validate-milestone` gate compares roadmap success criteria against actual results before sealing the milestone.
 
@@ -670,7 +670,7 @@ auto_report: true
 | `context_mode.exec_stdout_cap_bytes` | Persisted stdout cap for `gsd_exec` output (default: 1048576)                                      |
 | `context_mode.exec_digest_chars`  | Trailing stdout characters returned to the agent context (default: 300)                              |
 | `context_mode.exec_env_allowlist` | Environment variables forwarded to sandboxed `gsd_exec` runs in addition to `PATH` and `HOME`        |
-| `verification_commands`           | Array of shell commands to run after task execution (e.g., `["npm run lint", "npm run test"]`)        |
+| `verification_commands`           | Array of simple executable commands to run after task execution (e.g., `["npm run lint", "npm run test"]`); avoid pipes, redirects, semicolons, backticks, and command substitution |
 | `verification_auto_fix`           | Auto-retry on verification failures (default: true)                                                   |
 | `verification_max_retries`        | Max retries for verification failures (default: 2)                                                    |
 | `phases.require_slice_discussion` | Pause auto-mode before each slice for human discussion review                                         |
