@@ -47,12 +47,20 @@ export interface DispatchAdapter {
     sessionProvider?: string;
     /** Model registry for executor-model lookups inside the budget engine. */
     modelRegistry?: MinimalModelRegistry;
-  }): Promise<{
-    unitType: string;
-    unitId: string;
-    reason: string;
-    preconditions: string[];
-  } | null>;
+  }): Promise<
+    | {
+        kind: "blocked";
+        reason: string;
+        action: "pause" | "stop";
+      }
+    | {
+        unitType: string;
+        unitId: string;
+        reason: string;
+        preconditions: string[];
+      }
+    | null
+  >;
 }
 
 export interface RecoveryAdapter {
