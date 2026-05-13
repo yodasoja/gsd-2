@@ -41,6 +41,15 @@ const SAMPLE_ROADMAP = `# Project Roadmap
 - [ ] 31 — Notifications
 `;
 
+const SAMPLE_VERSION_PREFIX_ROADMAP = `# Project Roadmap
+
+## Phases
+
+- ✅ **v1.0 MVP** — Phases 1-6 (shipped 2026-02-24)
+- ✅ **v1.1 Onboarding** — Phases 7-9 (shipped 2026-03-01)
+- 🚧 **v1.8 Production** — Phases 44-53
+`;
+
 const SAMPLE_PROJECT = `# My Project
 
 A sample project for testing the migration parser.
@@ -246,6 +255,21 @@ test('parseOldRoadmap: flat format', () => {
     assert.deepStrictEqual(roadmap.phases[1].done, false, 'flat roadmap: second phase not done');
 });
 
+test('parseOldRoadmap: emoji version-prefix phase ranges', () => {
+    const roadmap = parseOldRoadmap(SAMPLE_VERSION_PREFIX_ROADMAP);
+    assert.deepStrictEqual(roadmap.milestones.length, 0, 'version roadmap: no milestone sections');
+    assert.deepStrictEqual(roadmap.phases.length, 3, 'version roadmap: 3 phase ranges');
+    assert.deepStrictEqual(roadmap.phases[0].number, 1, 'version roadmap: first range starts at phase 1');
+    assert.deepStrictEqual(roadmap.phases[0].title, 'MVP', 'version roadmap: first title');
+    assert.deepStrictEqual(roadmap.phases[0].done, true, 'version roadmap: first range done');
+    assert.deepStrictEqual(roadmap.phases[1].number, 7, 'version roadmap: second range starts at phase 7');
+    assert.deepStrictEqual(roadmap.phases[1].title, 'Onboarding', 'version roadmap: second title');
+    assert.deepStrictEqual(roadmap.phases[1].done, true, 'version roadmap: second range done');
+    assert.deepStrictEqual(roadmap.phases[2].number, 44, 'version roadmap: third range starts at phase 44');
+    assert.deepStrictEqual(roadmap.phases[2].title, 'Production', 'version roadmap: third title');
+    assert.deepStrictEqual(roadmap.phases[2].done, false, 'version roadmap: third range in progress');
+});
+
 test('parseOldRoadmap: milestone-sectioned with <details>', () => {
     const roadmap = parseOldRoadmap(SAMPLE_MILESTONE_SECTIONED_ROADMAP);
     assert.ok(roadmap.milestones.length >= 2, 'ms roadmap: has milestone sections');
@@ -387,4 +411,3 @@ test('parseOldProject', () => {
     const project = parseOldProject(SAMPLE_PROJECT);
     assert.deepStrictEqual(project, SAMPLE_PROJECT, 'project: returns raw content');
 });
-
