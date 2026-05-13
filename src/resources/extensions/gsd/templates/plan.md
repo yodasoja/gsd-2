@@ -131,10 +131,13 @@
 
   Verify field rules:
   - MUST be a mechanically executable command: `npm test`, `grep -q "pattern" file`, `test -f path`
+  - MUST NOT use shell pipes, redirects, semicolons, backticks, command substitution, or output trimming
   - For content/document tasks: verify file existence, section count, YAML validity, or word count
     NOT exact phrasing, specific formulas, or "zero TBD" aspirational criteria
   - If no command can verify the output, write: "Manual review — file exists and is non-empty"
+  - BAD: `python3 -m pytest tests/ -q --tb=short 2>&1 | tail -5`
   - BAD: "Sections 3.1 and 3.2 exist with exact formulas. Zero TBD/TODO."
+  - GOOD: `python3 -m pytest tests/ -q --tb=short`
   - GOOD: `grep -c "^## " doc.md` returns >= 4 (4+ sections), `! grep -q "TBD\|TODO" doc.md`
 
   Integration closure rule:

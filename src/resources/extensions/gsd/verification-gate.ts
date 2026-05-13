@@ -44,7 +44,8 @@ const PACKAGE_SCRIPT_KEYS = ["typecheck", "lint", "test"] as const;
  *   1. Explicit preference commands
  *   2. Task plan verify field (split on &&)
  *   3. package.json scripts (typecheck, lint, test)
- *   4. None found
+ *   4. Python pytest project markers
+ *   5. None found
  */
 export function discoverCommands(options: DiscoverCommandsOptions): DiscoveredCommands {
   // 1. Preference commands
@@ -91,8 +92,42 @@ export function discoverCommands(options: DiscoverCommandsOptions): DiscoveredCo
     }
   }
 
-  // 4. Nothing found
+  const pythonCommand = discoverPythonPytestCommand(options.cwd);
+  if (pythonCommand) {
+    return { commands: [pythonCommand], source: "python-project" };
+  }
+
+  // 5. Nothing found
   return { commands: [], source: "none" };
+}
+
+function discoverPythonPytestCommand(cwd: string): string | null {
+  const hasTestsDir = existsSync(join(cwd, "tests"));
+  const hasPytestConfig =
+    existsSync(join(cwd, "pytest.ini")) ||
+    existsSync(join(cwd, "tox.ini")) ||
+    existsSync(join(cwd, "setup.cfg"));
+  const pyprojectPath = join(cwd, "pyproject.toml");
+  const hasPyproject = existsSync(pyprojectPath);
+
+  if (!hasTestsDir && !hasPytestConfig && !hasPyproject) {
+    return null;
+  }
+
+  if (hasPytestConfig || hasTestsDir) {
+    return "python3 -m pytest";
+  }
+
+  try {
+    const pyproject = readFileSync(pyprojectPath, "utf-8");
+    if (pyproject.includes("[tool.pytest") || pyproject.includes("pytest")) {
+      return "python3 -m pytest";
+    }
+  } catch {
+    // Ignore unreadable pyproject.toml and fall through.
+  }
+
+  return null;
 }
 
 // ─── Failure Context Formatting ──────────────────────────────────────────────
@@ -144,7 +179,7 @@ export function formatFailureContext(result: VerificationResult): string {
 // ─── Gate Execution ─────────────────────────────────────────────────────────
 
 /** Characters that indicate shell injection when found in a command string. */
-const SHELL_INJECTION_PATTERN = /[;|`]|\$\(/;
+const SHELL_INJECTION_PATTERN = /[;|`<>]|\$\(/;
 
 /**
  * Known executable first-tokens that are safe to run.
@@ -219,9 +254,19 @@ export function isLikelyCommand(cmd: string): boolean {
  * Validate a command string for obvious shell injection patterns.
  * Returns the command unchanged if safe, or null if suspicious.
  */
+export function validateVerificationCommand(cmd: string): { ok: true } | { ok: false; reason: string } {
+  if (SHELL_INJECTION_PATTERN.test(cmd)) {
+    return { ok: false, reason: "contains shell control syntax such as pipes, redirects, semicolons, backticks, or command substitution" };
+  }
+  if (!isLikelyCommand(cmd)) {
+    return { ok: false, reason: "does not look like a runnable command" };
+  }
+  return { ok: true };
+}
+
 function sanitizeCommand(cmd: string): string | null {
-  if (SHELL_INJECTION_PATTERN.test(cmd)) return null;
-  if (!isLikelyCommand(cmd)) return null;
+  const validation = validateVerificationCommand(cmd);
+  if (!validation.ok) return null;
   return cmd;
 }
 
