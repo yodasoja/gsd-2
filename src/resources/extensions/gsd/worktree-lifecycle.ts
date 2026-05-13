@@ -23,6 +23,7 @@ import { join } from "node:path";
 
 import type { AutoSession } from "./auto/session.js";
 import { debugLog } from "./debug-logger.js";
+import { logWarning } from "./workflow-logger.js";
 import { emitJournalEvent } from "./journal.js";
 import { emitWorktreeCreated, emitWorktreeMerged } from "./worktree-telemetry.js";
 import {
@@ -532,7 +533,7 @@ export function _enterMilestoneCore(
 
   // Phase B: claim a milestone lease before any worktree mutation. Two
   // workers cannot enter the same milestone concurrently. Best-effort:
-  // skip if no worker registered (single-worker fallback) or DB
+  // warn if no worker registered (single-worker fallback) or skip if DB
   // unavailable; reuse existing lease if we already hold it on this
   // milestone (re-entry within the same session).
   if (s.workerId) {
@@ -625,6 +626,11 @@ export function _enterMilestoneCore(
         });
       }
     }
+  } else {
+    logWarning(
+      "worktree",
+      `enterMilestone(${milestoneId}) ran before auto worker registration; milestone lease was not claimed.`,
+    );
   }
 
   // Resolve the project root for worktree operations via shared helper.

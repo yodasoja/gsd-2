@@ -99,18 +99,48 @@ test("auto bootstrap validates blocked directories before touching .gsd migratio
 
 test("fresh start registers the auto worker before bootstrap enters worktree flow (#5405)", () => {
   const autoSrc = readGsdFile("auto.ts");
+  const autoStartSrc = readGsdFile("auto-start.ts");
   const startAutoIdx = autoSrc.indexOf("export async function startAuto(");
   const startAutoBody = autoSrc.slice(startAutoIdx);
+  const bootstrapIdx = autoStartSrc.indexOf("export async function bootstrapAutoSession(");
+  const bootstrapBody = autoStartSrc.slice(bootstrapIdx);
 
-  const preBootstrapRegisterIdx = startAutoBody.indexOf("registerAutoWorkerForSession(s, base);");
   const bootstrapCallIdx = startAutoBody.indexOf("const ready = await bootstrapAutoSession(");
+  const preBootstrapBody = startAutoBody.slice(0, bootstrapCallIdx);
+  const preBootstrapRegisterIdx = preBootstrapBody.lastIndexOf("registerAutoWorkerForSession(s, base);");
+  const resumeSectionIdx = startAutoBody.indexOf("if (s.paused) {");
+  const freshStartSectionIdx = startAutoBody.indexOf("// ── Fresh start path — delegated to auto-start.ts ──");
+  const resumeBody = startAutoBody.slice(resumeSectionIdx, freshStartSectionIdx);
+  const resumeDbOpenIdx = resumeBody.indexOf("await openProjectDbIfPresent(base);");
+  const resumeRegisterIdx = resumeBody.indexOf("registerAutoWorkerForSession(s, base);");
+  const resumeEnterMilestoneIdx = resumeBody.indexOf("buildLifecycle().enterMilestone");
+  const dbOpenIdx = bootstrapBody.indexOf("await openProjectDbIfPresent(base);");
+  const bootstrapRegisterIdx = bootstrapBody.indexOf("registerAutoWorkerForSession(base);");
+  const enterMilestoneIdx = bootstrapBody.indexOf("buildLifecycle().enterMilestone");
 
   assert.ok(startAutoIdx > -1, "startAuto should exist");
   assert.ok(preBootstrapRegisterIdx > -1, "startAuto should register worker before bootstrap");
   assert.ok(bootstrapCallIdx > -1, "startAuto should call bootstrapAutoSession");
+  assert.ok(resumeSectionIdx > -1, "startAuto should have resume milestone entry flow");
+  assert.ok(freshStartSectionIdx > resumeSectionIdx, "resume assertions should be scoped before fresh start");
+  assert.ok(resumeDbOpenIdx > -1, "resume should open DB before milestone entry");
+  assert.ok(resumeRegisterIdx > -1, "resume should register worker before milestone entry");
+  assert.ok(resumeEnterMilestoneIdx > -1, "resume should enter milestones through lifecycle");
+  assert.ok(bootstrapIdx > -1, "bootstrapAutoSession should exist");
+  assert.ok(dbOpenIdx > -1, "bootstrap should open the project DB");
+  assert.ok(bootstrapRegisterIdx > -1, "bootstrap should register worker after DB open");
+  assert.ok(enterMilestoneIdx > -1, "bootstrap should enter milestones through lifecycle");
   assert.ok(
     preBootstrapRegisterIdx < bootstrapCallIdx,
     "worker registration must happen before bootstrap so enterMilestone can claim milestone leases on first entry",
+  );
+  assert.ok(
+    dbOpenIdx < bootstrapRegisterIdx && bootstrapRegisterIdx < enterMilestoneIdx,
+    "bootstrap must open DB and register worker before first enterMilestone",
+  );
+  assert.ok(
+    resumeDbOpenIdx < resumeRegisterIdx && resumeRegisterIdx < resumeEnterMilestoneIdx,
+    "resume must open DB and register worker before first enterMilestone",
   );
 });
 

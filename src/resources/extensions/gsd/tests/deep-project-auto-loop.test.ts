@@ -272,6 +272,7 @@ test("deep project setup: bootstrap can start auto-mode without an active milest
       {
         shouldUseWorktreeIsolation: () => false,
         registerSigtermHandler: () => {},
+        registerAutoWorkerForSession: () => {},
         lockBase: () => base,
         buildLifecycle: () => ({
           adoptSessionRoot: (sessionBase: string, originalBase?: string) => {
@@ -386,6 +387,7 @@ test("deep project setup: bootstrap continues queued M002 without milestone cont
       {
         shouldUseWorktreeIsolation: () => false,
         registerSigtermHandler: () => {},
+        registerAutoWorkerForSession: () => {},
         lockBase: () => base,
         buildLifecycle: () => ({
           adoptSessionRoot: (sessionBase: string, originalBase?: string) => {
