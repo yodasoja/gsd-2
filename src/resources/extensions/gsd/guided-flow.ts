@@ -2128,7 +2128,8 @@ export async function showSmartEntry(
       const result = await checkMarkdownHierarchyAgainstDb(basePath);
       if (result.action === "recovery-required") {
         ctx.ui.notify(
-          `${result.message ?? "Markdown planning artifacts do not match the authoritative DB."} Run \`${result.recoveryCommand ?? "gsd recover"}\` to import markdown explicitly.`,
+          result.message ??
+            `Markdown planning artifacts do not match the authoritative DB. Run \`${result.recoveryCommand ?? "gsd recover"}\` to import markdown explicitly.`,
           "warning",
         );
       }
