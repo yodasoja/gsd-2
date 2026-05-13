@@ -4,7 +4,9 @@ export function extractSubagentAgentClasses(input: unknown): string[] {
   const agentClasses: string[] = [];
   const visited = new WeakSet<object>();
   const addAgentClass = (value: unknown): void => {
-    if (typeof value === "string" && value.trim().length > 0) agentClasses.push(value.trim());
+    if (typeof value !== "string") return;
+    const normalized = value.trim().replace(/\.md$/i, "");
+    if (normalized.length > 0) agentClasses.push(normalized);
   };
 
   const visitItems = (value: unknown): void => {

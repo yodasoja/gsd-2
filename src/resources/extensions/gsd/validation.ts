@@ -14,7 +14,8 @@ export function isNonEmptyString(value: unknown): value is string {
  */
 export function validateStringArray(value: unknown, field: string): string[] {
   if (!Array.isArray(value)) {
-    throw new Error(`${field} must be an array`);
+    const received = value === null ? "null" : typeof value;
+    throw new Error(`${field} must be an array of strings, not ${received}`);
   }
   if (value.some((item) => !isNonEmptyString(item))) {
     throw new Error(`${field} must contain only non-empty strings`);
