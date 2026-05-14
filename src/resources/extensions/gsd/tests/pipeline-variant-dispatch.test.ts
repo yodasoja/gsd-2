@@ -243,7 +243,7 @@ test("#4781 phase 2: validate-milestone rule writes pass-through VALIDATION for 
   const content = readFileSync(validationPath, "utf-8");
   assert.match(content, /verdict: pass/);
   assert.match(content, /skip_validation: true/);
-  assert.match(content, /trivial-scope pipeline variant \(#4781\)/);
+  assert.match(content, /trivial-scope pipeline variant/);
 });
 
 test("#4781 phase 2: validate-milestone skip path does not persist gates without a real slice", async (t) => {
