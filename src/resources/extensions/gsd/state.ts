@@ -591,7 +591,7 @@ async function handleAllSlicesDone(
       recentDecisions: [],
       blockers: [
         `Milestone ${activeMilestone.id} validation verdict is needs-remediation but all slices are complete. ` +
-          `Add remediation slices via gsd_reassess_roadmap or override the verdict manually.`,
+          `Add remediation slices via gsd_reassess_roadmap, or run \`/gsd verdict pass --rationale "..."\` to override.`,
       ],
       nextAction: `Resolve ${activeMilestone.id} remediation before proceeding.`,
       registry, requirements,
@@ -1314,7 +1314,7 @@ export async function _deriveStateImpl(
         recentDecisions: [],
         blockers: [
           `Milestone ${activeMilestone.id} validation verdict is needs-remediation but all slices are complete. ` +
-            `Add remediation slices via gsd_reassess_roadmap or override the verdict manually.`,
+            `Add remediation slices via gsd_reassess_roadmap, or run \`/gsd verdict pass --rationale "..."\` to override.`,
         ],
         nextAction: `Resolve ${activeMilestone.id} remediation before proceeding.`,
         registry,
