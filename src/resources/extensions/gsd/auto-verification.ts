@@ -106,9 +106,13 @@ async function runValidateMilestonePostCheck(
   if (!mid) return "continue";
 
   const setToolFailureRetry = (message: string): VerificationResult => {
+    const retryKey = verificationRetryKey(s.currentUnit!.type, s.currentUnit!.id);
+    const attempt = (s.verificationRetryCount.get(retryKey) ?? 0) + 1;
+    s.verificationRetryCount.set(retryKey, attempt);
     s.pendingVerificationRetry = {
-      message,
-      errorClass: "tool-failure",
+      unitId: s.currentUnit!.id,
+      failureContext: message,
+      attempt,
     };
     return "retry";
   };

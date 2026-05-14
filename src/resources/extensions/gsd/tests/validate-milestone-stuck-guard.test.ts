@@ -176,8 +176,9 @@ describe("validate-milestone stuck-loop guard (#4094)", () => {
     assert.equal(result, "retry");
     assert.equal(pauseAutoMock.mock.callCount(), 0);
     assert.ok(s.pendingVerificationRetry);
-    assert.match(s.pendingVerificationRetry!.message, /gsd_validate_milestone/);
-    assert.equal(s.pendingVerificationRetry!.errorClass, "tool-failure");
+    assert.equal(s.pendingVerificationRetry!.unitId, "M001");
+    assert.match(s.pendingVerificationRetry!.failureContext, /gsd_validate_milestone/);
+    assert.equal(s.pendingVerificationRetry!.attempt, 1);
   });
 
   test("retries when VALIDATION file exists but is empty", async () => {
@@ -198,7 +199,8 @@ describe("validate-milestone stuck-loop guard (#4094)", () => {
     assert.equal(result, "retry");
     assert.equal(pauseAutoMock.mock.callCount(), 0);
     assert.ok(s.pendingVerificationRetry);
-    assert.match(s.pendingVerificationRetry!.message, /exists but is empty/);
-    assert.equal(s.pendingVerificationRetry!.errorClass, "tool-failure");
+    assert.equal(s.pendingVerificationRetry!.unitId, "M001");
+    assert.match(s.pendingVerificationRetry!.failureContext, /exists but is empty/);
+    assert.equal(s.pendingVerificationRetry!.attempt, 1);
   });
 });
