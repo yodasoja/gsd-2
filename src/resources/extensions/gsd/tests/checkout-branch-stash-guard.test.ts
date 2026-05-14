@@ -59,4 +59,27 @@ describe("checkoutBranchWithStashGuard", () => {
     const stashList = git(["stash", "list"], repo).trim();
     assert.equal(stashList, "");
   });
+
+  test("surfaces distinct error when checkout succeeds but stash pop conflicts", (t) => {
+    const repo = createRepo(t);
+    // Branch B has a divergent version of note.txt so popping a stash made
+    // against main will conflict after the checkout to B.
+    git(["checkout", "-b", "milestone/B"], repo);
+    writeFileSync(join(repo, "note.txt"), "B-version\n");
+    git(["add", "note.txt"], repo);
+    git(["commit", "-m", "B"], repo);
+    git(["checkout", "main"], repo);
+
+    writeFileSync(join(repo, "note.txt"), "local\n");
+
+    assert.throws(
+      () => checkoutBranchWithStashGuard(repo, "milestone/B", "test-pop-failure"),
+      /checkout to 'milestone\/B' succeeded but stash restore failed/,
+    );
+
+    const branch = git(["branch", "--show-current"], repo).trim();
+    assert.equal(branch, "milestone/B");
+    const stashList = git(["stash", "list"], repo).trim();
+    assert.match(stashList, /gsd: checkout stash/);
+  });
 });
