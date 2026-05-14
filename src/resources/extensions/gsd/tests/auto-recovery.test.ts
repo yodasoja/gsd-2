@@ -1072,7 +1072,7 @@ test("hasImplementationArtifacts does not claim Sxx/Tyy commit trailers across m
     execFileSync("git", ["add", "."], { cwd: base, stdio: "ignore" });
     execFileSync(
       "git",
-      ["commit", "-m", "feat: add M002 feature\n\nGSD-Task: S01/T01"],
+      ["commit", "-m", "feat: add sibling feature\n\nGSD-Task: S01/T01"],
       { cwd: base, stdio: "ignore" },
     );
 

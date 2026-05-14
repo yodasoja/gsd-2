@@ -34,6 +34,7 @@ import {
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   writeFileSync,
 } from "node:fs";
@@ -559,14 +560,17 @@ function commitMatchesMilestone(basePath: string, message: string, milestoneId: 
   // names the milestone, local GSD state proves the task belongs here, or the
   // commit is implementation-bearing evidence itself (#5100).
   if (/^GSD-Task:\s*S[^/\s]+\/T\S+/m.test(message)) {
+    const taskTrailerOwnership = getCommitTaskTrailerOwnershipStatus(basePath, message, milestoneId);
     if (files.some((file) => isMilestoneArtifactPath(file, milestoneId))) return true;
     if (commitMessageMentionsMilestone(message, milestoneId)) return true;
-    if (commitTaskTrailerBelongsToMilestone(basePath, message, milestoneId)) return true;
+    if (taskTrailerOwnership === true) return true;
     // Only apply implementation-bearing fallback when the DB has no record of
     // the milestone (external/gitignored .gsd scenario). If the DB knows this
     // milestone, a negative ownership check is authoritative and must not be
     // overridden to avoid cross-milestone attribution.
     if (
+      taskTrailerOwnership === undefined
+      &&
       MILESTONE_ID_RE.test(milestoneId)
       && classifyImplementationFiles(files) === "present"
       && (!isDbAvailable() || !getMilestone(milestoneId))
@@ -576,17 +580,45 @@ function commitMatchesMilestone(basePath: string, message: string, milestoneId: 
   return false;
 }
 
-function commitTaskTrailerBelongsToMilestone(basePath: string, message: string, milestoneId: string): boolean {
+function getCommitTaskTrailerOwnershipStatus(
+  basePath: string,
+  message: string,
+  milestoneId: string,
+): true | false | undefined {
   const match = message.match(/^GSD-Task:\s*(S[^/\s]+)\/(T[^\s]+)/m);
-  if (!match) return false;
+  if (!match) return undefined;
   const [, sliceId, taskId] = match;
 
   if (getTask(milestoneId, sliceId, taskId)) return true;
 
   const tasksDir = resolveTasksDir(basePath, milestoneId, sliceId);
-  if (!tasksDir) return false;
-  return existsSync(join(tasksDir, `${taskId}-PLAN.md`))
-    || existsSync(join(tasksDir, `${taskId}-SUMMARY.md`));
+  if (tasksDir) {
+    return existsSync(join(tasksDir, `${taskId}-PLAN.md`))
+      || existsSync(join(tasksDir, `${taskId}-SUMMARY.md`));
+  }
+
+  if (taskTrailerExistsInAnyMilestoneOnDisk(basePath, sliceId, taskId)) return false;
+  return undefined;
+}
+
+function taskTrailerExistsInAnyMilestoneOnDisk(basePath: string, sliceId: string, taskId: string): boolean {
+  const milestonesPath = join(basePath, ".gsd", "milestones");
+  if (!existsSync(milestonesPath)) return false;
+
+  let milestoneDirs: string[] = [];
+  try {
+    milestoneDirs = readdirSync(milestonesPath, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+  } catch {
+    return false;
+  }
+
+  return milestoneDirs.some((milestoneDir) => {
+    const tasksDir = join(milestonesPath, milestoneDir, "slices", sliceId, "tasks");
+    return existsSync(join(tasksDir, `${taskId}-PLAN.md`))
+      || existsSync(join(tasksDir, `${taskId}-SUMMARY.md`));
+  });
 }
 
 function commitMessageMentionsMilestone(message: string, milestoneId: string): boolean {
