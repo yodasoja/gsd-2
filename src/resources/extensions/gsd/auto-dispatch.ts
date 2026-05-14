@@ -1330,16 +1330,16 @@ export const DISPATCH_RULES: DispatchRule[] = [
         }
       }
 
-      // Safety guard (#2675, #5747): block completion when VALIDATION
-      // verdict is non-passing. The state machine treats these verdicts as
-      // terminal, but completing-milestone should NOT proceed — remediation
-      // or human attention is needed.
+      // Safety guard (#2675, #5747, #5920): block completion when VALIDATION
+      // verdict is anything other than pass. The state machine treats these
+      // verdicts as terminal, but completing-milestone should NOT proceed —
+      // remediation or human attention is needed.
       const validationFile = resolveMilestoneFile(basePath, mid, "VALIDATION");
       if (validationFile) {
         const validationContent = await loadFile(validationFile);
         if (validationContent) {
           const verdict = extractVerdict(validationContent);
-          if (verdict === "needs-remediation" || verdict === "needs-attention") {
+          if (verdict !== "pass") {
             return {
               action: "stop",
               reason: `Cannot complete milestone ${mid}: VALIDATION verdict is "${verdict}". Address the validation findings and re-run validation, or update the verdict manually.`,
