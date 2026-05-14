@@ -503,7 +503,7 @@ On first run, GSD launches a branded setup wizard that walks you through LLM pro
 | `/gsd mcp`              | MCP server status and connectivity                                            |
 | `/gsd status`           | Progress dashboard                                                            |
 | `/gsd brief <mode>`     | Generate a visual HTML brief (diagram, plan, diff, recap, table, slides)      |
-| `/gsd queue`            | Queue future milestones (safe during auto mode)                               |
+| `/gsd queue`            | Queue/reorder future milestones (`pending`, `queued`, or legacy `planned`; safe during auto mode) |
 | `/gsd prefs`            | Model selection, timeouts, budget ceiling                                     |
 | `/gsd migrate`          | Migrate a v1 `.planning` directory to `.gsd` format                           |
 | `/gsd help`             | Categorized command reference for all GSD subcommands                         |
