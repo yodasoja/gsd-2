@@ -47,7 +47,7 @@ import { regenerateIfMissing } from "./workflow-projections.js";
 import { WorktreeStateProjection } from "./worktree-state-projection.js";
 import { createWorkspace, scopeMilestone } from "./workspace.js";
 import { normalizeWorktreePathForCompare } from "./worktree-root.js";
-import { isDbAvailable, getTask, getSlice, getMilestone, updateTaskStatus, _getAdapter, getVerificationEvidence } from "./gsd-db.js";
+import { isDbAvailable, getDbPath, refreshOpenDatabaseFromDisk, getTask, getSlice, getMilestone, updateTaskStatus, _getAdapter, getVerificationEvidence } from "./gsd-db.js";
 import { renderPlanCheckboxes } from "./markdown-renderer.js";
 import { consumeSignal } from "./session-status-io.js";
 import {
@@ -371,7 +371,7 @@ export function detectRogueFileWrites(
 export const MAX_ARTIFACT_VERIFICATION_RETRIES = 3;
 
 export const STEP_COMPLETE_FALLBACK_MESSAGE =
-  "Step complete. Run /clear, then /gsd to continue (or /gsd auto to run continuously).";
+  "Step complete. Run /clear if you want a clean view, then /gsd next to continue one step (or /gsd auto to run continuously).";
 
 export function buildStepCompleteMessage(nextState: import("./types.js").GSDState): string {
   if (nextState.phase === "complete") {
@@ -379,7 +379,7 @@ export function buildStepCompleteMessage(nextState: import("./types.js").GSDStat
   }
   const next = describeNextUnit(nextState);
   return `Step complete. Next: ${next.label}\n`
-    + `Run /clear, then /gsd to continue (or /gsd auto to run continuously).`;
+    + `Run /clear if you want a clean view, then /gsd next to continue one step (or /gsd auto to run continuously).`;
 }
 
 /**
@@ -684,6 +684,14 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
   // Small delay to let files settle (skipped for sidecars where latency matters more)
   if (!opts?.skipSettleDelay) {
     await new Promise(r => setTimeout(r, 100));
+  }
+
+  const dbPath = getDbPath();
+  if (isDbAvailable() && dbPath && dbPath !== ":memory:") {
+    const refreshed = refreshOpenDatabaseFromDisk();
+    if (!refreshed) {
+      logWarning("db", "post-unit database refresh failed; derived state may be stale");
+    }
   }
 
   // Turn-level git action (commit | snapshot | status-only)
@@ -1177,7 +1185,7 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
         s.verificationRetryFailureHashes.delete(retryKey);
         writeBlockerPlaceholder(s.currentUnit.type, s.currentUnit.id, s.basePath, reason);
         ctx.ui.notify(
-          `${s.currentUnit.type} ${s.currentUnit.id} — deterministic policy rejection, wrote blocker placeholder (no retries) (#4973)`,
+          `${s.currentUnit.type} ${s.currentUnit.id} — deterministic policy rejection, wrote blocker placeholder (no retries)`,
           "warning",
         );
         // Fall through to "continue" — do NOT enter the retry or db-unavailable paths.
@@ -1731,8 +1739,8 @@ export async function postUnitPostVerification(pctx: PostUnitContext): Promise<"
   }
 
   // Step mode → show wizard instead of dispatch.
-  // Without this notify(), /gsd in step mode finishes a unit and silently
-  // exits the loop, leaving the user with no hint to /clear and /gsd again.
+  // Without this notify(), /gsd next finishes a unit and silently exits the
+  // loop, leaving the user with no next-step command.
   if (s.stepMode) {
     let phaseAfterUnit: string | null = null;
     try {

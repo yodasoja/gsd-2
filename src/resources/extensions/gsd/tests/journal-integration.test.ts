@@ -22,6 +22,7 @@ import type { IterationContext, LoopState, PreDispatchData, IterationData } from
 import type { SessionLockStatus } from "../session-lock.js";
 import { runDispatch, runUnitPhase, runPreDispatch, runFinalize } from "../auto/phases.js";
 import { readUnitRuntimeRecord } from "../unit-runtime.js";
+import { ModelPolicyDispatchBlockedError } from "../auto-model-selection.js";
 import {
   closeDatabase,
   insertMilestone,
@@ -160,6 +161,8 @@ function makeIC(
     pi: {
       sendMessage: () => {},
       setModel: async () => true,
+      getThinkingLevel: () => "off",
+      setThinkingLevel: () => {},
     } as any,
     s: makeSession(),
     deps,
@@ -866,6 +869,49 @@ test("runUnitPhase increments unitDispatchCount for repeated artifact-missing re
   resolveAgentEnd({ messages: [{ role: "assistant" }] });
   await secondRun;
   assert.equal(ic.s.unitDispatchCount.get("execute-task/M001/S01/T01"), 2);
+});
+
+test("runUnitPhase pre-dispatch model validation failures do not emit unit-start or dispatch runtime state", async (t) => {
+  const capture = createEventCapture();
+  const base = mkdtempSync(join(tmpdir(), `gsd-pre-dispatch-block-${randomUUID()}`));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+
+  const deps = makeMockDeps(capture, {
+    selectAndApplyModel: async () => {
+      throw new ModelPolicyDispatchBlockedError("execute-task", "M001/S01/T01", []);
+    },
+  });
+  const ic = makeIC(deps, {
+    s: {
+      ...makeSession(),
+      basePath: base,
+    } as any,
+  });
+  const iterData: IterationData = {
+    unitType: "execute-task",
+    unitId: "M001/S01/T01",
+    prompt: "do stuff",
+    finalPrompt: "do stuff",
+    pauseAfterUatDispatch: false,
+    state: { phase: "executing", activeMilestone: { id: "M001" }, activeSlice: { id: "S01" }, registry: [], blockers: [] } as any,
+    mid: "M001",
+    midTitle: "Test",
+    isRetry: false,
+    previousTier: undefined,
+  };
+  const loopState: LoopState = { recentUnits: [{ key: "execute-task/M001/S01/T01" }], stuckRecoveryAttempts: 0, consecutiveFinalizeTimeouts: 0 };
+
+  await assert.rejects(() => runUnitPhase(ic, iterData, loopState), ModelPolicyDispatchBlockedError);
+  await assert.rejects(() => runUnitPhase(ic, iterData, loopState), ModelPolicyDispatchBlockedError);
+
+  const startEvents = capture.events.filter(e => e.eventType === "unit-start");
+  assert.equal(startEvents.length, 0, "pre-dispatch validation failures must not emit unit-start");
+  assert.equal(ic.s.unitDispatchCount.get("execute-task/M001/S01/T01") ?? 0, 0, "dispatch count must not increment on pre-dispatch validation failure");
+  assert.equal(
+    readUnitRuntimeRecord(base, "execute-task", "M001/S01/T01"),
+    null,
+    "pre-dispatch validation failures must not persist a dispatched runtime record",
+  );
 });
 
 test("all events from a mock iteration have monotonically increasing seq and same flowId", async () => {

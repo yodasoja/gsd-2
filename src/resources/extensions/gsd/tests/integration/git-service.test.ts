@@ -1168,6 +1168,15 @@ describe('git-service', async () => {
     rmSync(repo, { recursive: true, force: true });
   });
 
+  test('Integration branch: rejects milestone branches', () => {
+    const repo = initBranchTestRepo();
+
+    writeIntegrationBranch(repo, "M001", "milestone/M001");
+    assert.deepStrictEqual(readIntegrationBranch(repo, "M001"), null, "milestone branches are not recorded as integration branch");
+
+    rmSync(repo, { recursive: true, force: true });
+  });
+
   // ─── writeIntegrationBranch: still records legitimate branches ────────
 
   test('Integration branch: records non-ephemeral gsd branches', () => {

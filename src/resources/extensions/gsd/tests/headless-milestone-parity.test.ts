@@ -45,7 +45,7 @@ describe("headless milestone bootstrap — parity with interactive flow", () => 
 
     // Match only the actual dispatchWorkflow call — comments in the body
     // may mention "plan-milestone" as part of the fix rationale.
-    const dispatchMatches = [...fnBody.matchAll(/dispatchWorkflow\([^)]*,\s*"([^"]+)"\s*\)/g)];
+    const dispatchMatches = [...fnBody.matchAll(/dispatchWorkflow\([\s\S]*?,\s*"([^"]+)"\s*,\s*\{\s*basePath\s*\}\s*\)/g)];
     assert.strictEqual(
       dispatchMatches.length,
       1,

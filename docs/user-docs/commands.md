@@ -14,7 +14,7 @@
 | `/gsd discuss` | Discuss architecture and decisions (works alongside auto mode) |
 | `/gsd status` | Progress dashboard |
 | `/gsd widget` | Cycle dashboard widget: full / small / min / off |
-| `/gsd queue` | Queue and reorder future milestones (safe during auto mode) |
+| `/gsd queue` | Queue and reorder future milestones (`pending`, `queued`, and legacy `planned`; safe during auto mode) |
 | `/gsd capture` | Fire-and-forget thought capture (works during auto mode) |
 | `/gsd triage` | Manually trigger triage of pending captures |
 | `/gsd debug` | Create and inspect persistent /gsd debug sessions |

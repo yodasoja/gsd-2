@@ -1,3 +1,5 @@
+// Project/App: GSD-2
+// File Purpose: Regression tests for interactive assistant replay ordering.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -40,5 +42,17 @@ test("buildAssistantReplaySegments ignores non-rendered non-tool blocks", () => 
 	assert.deepEqual(segments, [
 		{ kind: "assistant", startIndex: 0, endIndex: 0 },
 		{ kind: "assistant", startIndex: 2, endIndex: 2 },
+	]);
+});
+
+test("buildAssistantReplaySegments skips empty GPT reasoning blocks before tools", () => {
+	const segments = buildAssistantReplaySegments([
+		{ type: "thinking", thinking: "", thinkingSignature: "encrypted" },
+		{ type: "text", text: "   " },
+		{ type: "toolCall", id: "t1", name: "read", arguments: { filePath: "todo.js" } },
+	]);
+
+	assert.deepEqual(segments, [
+		{ kind: "tool", contentIndex: 2 },
 	]);
 });

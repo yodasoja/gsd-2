@@ -301,6 +301,23 @@ test("#5843: run-uat uses verification tools policy so build/test commands can r
   assert.match(sourceWriteResult.reason!, /tools-policy "verification"/);
 });
 
+test("planning-dispatch hard block message omits internal tracker references", () => {
+  const manifest = UNIT_MANIFESTS["validate-milestone"];
+  assert.strictEqual(manifest.tools.mode, "planning-dispatch");
+
+  const result = shouldBlockPlanningUnit(
+    "task",
+    "scout",
+    process.cwd(),
+    "validate-milestone",
+    manifest.tools,
+  );
+
+  assert.strictEqual(result.block, true);
+  assert.ok(result.reason, "blocked dispatch should include a user-facing reason");
+  assert.doesNotMatch(result.reason!, /#[0-9]{3,}/);
+});
+
 test('planning-dispatch mode is reserved for slice-level decomposition and completion units', () => {
   const allowedDispatchUnits = new Set([
     "plan-slice",

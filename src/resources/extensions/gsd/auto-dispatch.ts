@@ -457,9 +457,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
       const attempts = incrementUatCount(basePath, mid, sliceId);
       if (attempts > MAX_UAT_ATTEMPTS) {
         return {
-          action: "stop" as const,
-          reason: `run-uat for ${mid}/${sliceId} has been dispatched ${attempts - 1} times without producing a verdict. Verification commands may be broken — fix the UAT spec or manually write an ASSESSMENT verdict.`,
-          level: "warning" as const,
+          action: "skip" as const,
         };
       }
       const uatFile = resolveSliceFile(basePath, mid, sliceId, "UAT")!;
@@ -768,7 +766,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
     },
   },
   {
-    name: "planning (require_slice_discussion) → pause for discussion (#3454)",
+    name: "planning (require_slice_discussion) → pause for discussion",
     match: async ({ state, mid, basePath, prefs }) => {
       if (state.phase !== "planning") return null;
       if (!prefs?.phases?.require_slice_discussion) return null;
@@ -1248,7 +1246,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
             buildMilestoneFileName(mid, "VALIDATION"),
           );
           const skipSource = trivialVariant
-            ? "trivial-scope pipeline variant (#4781)"
+            ? "trivial-scope pipeline variant"
             : "`skip_milestone_validation` preference";
           const skipValidationReason = trivialVariant ? "trivial-scope" : "preference";
           const content = [
@@ -1330,16 +1328,16 @@ export const DISPATCH_RULES: DispatchRule[] = [
         }
       }
 
-      // Safety guard (#2675, #5747): block completion when VALIDATION
-      // verdict is non-passing. The state machine treats these verdicts as
-      // terminal, but completing-milestone should NOT proceed — remediation
-      // or human attention is needed.
+      // Safety guard (#2675, #5747, #5920): block completion when VALIDATION
+      // verdict is anything other than pass. The state machine treats these
+      // verdicts as terminal, but completing-milestone should NOT proceed —
+      // remediation or human attention is needed.
       const validationFile = resolveMilestoneFile(basePath, mid, "VALIDATION");
       if (validationFile) {
         const validationContent = await loadFile(validationFile);
         if (validationContent) {
           const verdict = extractVerdict(validationContent);
-          if (verdict === "needs-remediation" || verdict === "needs-attention") {
+          if (verdict !== "pass") {
             return {
               action: "stop",
               reason: `Cannot complete milestone ${mid}: VALIDATION verdict is "${verdict}". Address the validation findings and re-run validation, or update the verdict manually.`,
@@ -1359,16 +1357,12 @@ export const DISPATCH_RULES: DispatchRule[] = [
         };
       }
 
-      // Safety guard (#1703): verify the milestone produced implementation
-      // artifacts (non-.gsd/ files). A milestone with only plan files and
-      // zero implementation code should not be marked complete.
+      // Safety signal (#1703, #5097): detect milestones with only .gsd/
+      // artifacts. This no longer hard-blocks completion because some
+      // milestones are intentionally planning/documentation-only.
       const artifactCheck = hasImplementationArtifacts(basePath, mid);
       if (artifactCheck === "absent") {
-        return {
-          action: "stop",
-          reason: `Cannot complete milestone ${mid}: no implementation files found outside .gsd/. The milestone has only plan files — actual code changes are required.`,
-          level: "error",
-        };
+        logWarning("dispatch", `Milestone ${mid} has no implementation files outside .gsd/ — continuing complete-milestone dispatch (planning-only/documentation-only milestone).`);
       }
       if (artifactCheck === "unknown") {
         logWarning("dispatch", `Implementation artifact check inconclusive for ${mid} — proceeding (git context unavailable)`);

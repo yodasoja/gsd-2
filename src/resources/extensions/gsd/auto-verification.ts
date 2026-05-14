@@ -105,11 +105,31 @@ async function runValidateMilestonePostCheck(
   const { milestone: mid } = parseUnitId(s.currentUnit.id);
   if (!mid) return "continue";
 
+  const setToolFailureRetry = (message: string): VerificationResult => {
+    const retryKey = verificationRetryKey(s.currentUnit!.type, s.currentUnit!.id);
+    const attempt = (s.verificationRetryCount.get(retryKey) ?? 0) + 1;
+    s.verificationRetryCount.set(retryKey, attempt);
+    s.pendingVerificationRetry = {
+      unitId: s.currentUnit!.id,
+      failureContext: message,
+      attempt,
+    };
+    return "retry";
+  };
+
   const validationFile = resolveMilestoneFile(s.basePath, mid, "VALIDATION");
-  if (!validationFile) return "continue";
+  if (!validationFile) {
+    return setToolFailureRetry(
+      "You must call gsd_validate_milestone to persist the validation results. No VALIDATION.md was created.",
+    );
+  }
 
   const validationContent = await loadFile(validationFile);
-  if (!validationContent) return "continue";
+  if (!validationContent) {
+    return setToolFailureRetry(
+      "You must call gsd_validate_milestone to persist the validation results. VALIDATION.md exists but is empty.",
+    );
+  }
 
   const verdict = extractVerdict(validationContent);
   if (verdict !== "needs-remediation") {

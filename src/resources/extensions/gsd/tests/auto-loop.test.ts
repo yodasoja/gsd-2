@@ -129,6 +129,8 @@ function makeMockPi() {
       setModelCalls.push(args);
       return true;
     },
+    getThinkingLevel: () => "off",
+    setThinkingLevel: () => {},
     calls,
     setModelCalls,
   } as any;

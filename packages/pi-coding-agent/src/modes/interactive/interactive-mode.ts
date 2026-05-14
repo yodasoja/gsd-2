@@ -134,6 +134,13 @@ export type AssistantReplaySegment =
 	| { kind: "assistant"; startIndex: number; endIndex: number }
 	| { kind: "tool"; contentIndex: number };
 
+function isVisibleAssistantReplayText(block: any): boolean {
+	return (
+		(block?.type === "text" && typeof block.text === "string" && block.text.trim().length > 0)
+		|| (block?.type === "thinking" && typeof block.thinking === "string" && block.thinking.trim().length > 0)
+	);
+}
+
 /**
  * Build replay segments for historical assistant messages so rebuild paths
  * preserve the original content[] ordering between assistant prose and tools.
@@ -141,30 +148,38 @@ export type AssistantReplaySegment =
 export function buildAssistantReplaySegments(contentBlocks: Array<any>): AssistantReplaySegment[] {
 	const segments: AssistantReplaySegment[] = [];
 	let runStart = -1;
+	let runEnd = -1;
+
+	const closeRun = () => {
+		if (runStart !== -1) {
+			segments.push({ kind: "assistant", startIndex: runStart, endIndex: runEnd });
+			runStart = -1;
+			runEnd = -1;
+		}
+	};
 
 	for (let i = 0; i < contentBlocks.length; i++) {
 		const block = contentBlocks[i];
-		const isAssistantText = block?.type === "text" || block?.type === "thinking";
+		const isAssistantText = isVisibleAssistantReplayText(block);
+		const isInvisibleAssistantText = block?.type === "text" || block?.type === "thinking";
 		const isTool = block?.type === "toolCall" || block?.type === "serverToolUse";
 
 		if (isAssistantText) {
 			if (runStart === -1) runStart = i;
+			runEnd = i;
 			continue;
 		}
 
-		if (runStart !== -1) {
-			segments.push({ kind: "assistant", startIndex: runStart, endIndex: i - 1 });
-			runStart = -1;
-		}
+		if (isInvisibleAssistantText) continue;
+
+		closeRun();
 
 		if (isTool) {
 			segments.push({ kind: "tool", contentIndex: i });
 		}
 	}
 
-	if (runStart !== -1) {
-		segments.push({ kind: "assistant", startIndex: runStart, endIndex: contentBlocks.length - 1 });
-	}
+	closeRun();
 
 	return segments;
 }

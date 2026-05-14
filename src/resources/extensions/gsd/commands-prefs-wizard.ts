@@ -587,10 +587,15 @@ async function configureModels(ctx: ExtensionCommandContext, prefs: Record<strin
   const models: Record<string, unknown> = (prefs.models as Record<string, unknown>) ?? {};
 
   const availableModels = ctx.modelRegistry.getAvailable();
-  if (availableModels.length > 0) {
+  const getAllWithDiscovered = (ctx.modelRegistry as { getAllWithDiscovered?: () => typeof availableModels }).getAllWithDiscovered;
+  const availableProviders = new Set(availableModels.map((m) => m.provider));
+  const selectableModels = typeof getAllWithDiscovered === "function"
+    ? getAllWithDiscovered().filter((m) => availableProviders.has(m.provider))
+    : availableModels;
+  if (selectableModels.length > 0) {
     // Group models by provider, sorted alphabetically
-    const byProvider = new Map<string, typeof availableModels>();
-    for (const m of availableModels) {
+    const byProvider = new Map<string, typeof selectableModels>();
+    for (const m of selectableModels) {
       let group = byProvider.get(m.provider);
       if (!group) {
         group = [];

@@ -746,3 +746,21 @@ test("transport compatibility still blocks units whose MCP tools are not exposed
   assert.match(error ?? "", /requires secure_env_collect/);
   assert.match(error ?? "", /currently exposes only/);
 });
+
+test("transport compatibility accepts MCP-namespaced runtime tools", () => {
+  const error = getWorkflowTransportSupportError(
+    "claude-code",
+    ["gsd_summary_save"],
+    {
+      projectRoot: "/tmp/project",
+      env: { GSD_WORKFLOW_MCP_COMMAND: "node" },
+      surface: "auto-mode",
+      unitType: "research-slice",
+      authMode: "externalCli",
+      baseUrl: "local://claude-code",
+      activeTools: ["mcp__gsd-workflow__gsd_summary_save"],
+    },
+  );
+
+  assert.equal(error, null);
+});

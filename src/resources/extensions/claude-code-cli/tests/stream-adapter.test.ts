@@ -1258,7 +1258,16 @@ describe("stream-adapter — abort classification (F2)", () => {
 	test("recognizes Claude Code SDK abort exceptions", () => {
 		assert.equal(isClaudeCodeAbortErrorMessage("Claude Code process aborted by user"), true);
 		assert.equal(isClaudeCodeAbortErrorMessage("Request aborted by user"), true);
+		assert.equal(isClaudeCodeAbortErrorMessage("AbortError: The operation was aborted"), true);
 		assert.equal(isClaudeCodeAbortErrorMessage("rate limit exceeded"), false);
+	});
+
+	test("does not misclassify non-user abort contexts", () => {
+		assert.equal(isClaudeCodeAbortErrorMessage("Job aborted due to timeout"), false);
+		assert.equal(isClaudeCodeAbortErrorMessage("Operation aborted: disk full"), false);
+		assert.equal(isClaudeCodeAbortErrorMessage("aborted by system cleanup"), false);
+		assert.equal(isClaudeCodeAbortErrorMessage("Database transaction aborted due to constraint violation"), false);
+		assert.equal(isClaudeCodeAbortErrorMessage("Connection aborted unexpectedly"), false);
 	});
 
 	test("makeAbortedMessage sets stopReason to 'aborted', not 'error'", () => {

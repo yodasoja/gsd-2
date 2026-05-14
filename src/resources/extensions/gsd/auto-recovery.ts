@@ -201,9 +201,15 @@ export function hasImplementationArtifacts(basePath: string, milestoneId?: strin
     // Strategy: check `git diff --name-only` against the merge-base with the
     // main branch. This captures ALL files changed during the milestone's
     // lifetime while running on a milestone branch.
-    const integrationBranch = milestoneId
-      ? readIntegrationBranch(basePath, milestoneId) ?? detectMainBranch(basePath)
-      : detectMainBranch(basePath);
+    const recordedIntegrationBranch = milestoneId
+      ? readIntegrationBranch(basePath, milestoneId)
+      : null;
+    let integrationBranch: string;
+    if (recordedIntegrationBranch?.startsWith("milestone/")) {
+      integrationBranch = detectMainBranch(basePath);
+    } else {
+      integrationBranch = recordedIntegrationBranch ?? detectMainBranch(basePath);
+    }
     const currentBranch = getCurrentBranch(basePath);
     const branchDiff = getChangedFilesSinceBranch(basePath, integrationBranch);
     if (!branchDiff.ok) return "unknown";
@@ -556,27 +562,55 @@ function commitMatchesMilestone(basePath: string, message: string, milestoneId: 
   // rather than Mxx/Sxx/Tyy. Bind those commits back to the milestone when
   // either the commit touched this milestone's artifacts, or — for projects
   // where .gsd/ is gitignored/external (#5033) — the message explicitly
-  // names the milestone or local GSD state proves the task belongs here.
+  // names the milestone, local GSD state proves the task belongs here, or the
+  // commit is implementation-bearing evidence itself (#5100).
   if (/^GSD-Task:\s*S[^/\s]+\/T\S+/m.test(message)) {
     if (files.some((file) => isMilestoneArtifactPath(file, milestoneId))) return true;
     if (commitMessageMentionsMilestone(message, milestoneId)) return true;
-    if (commitTaskTrailerBelongsToMilestone(basePath, message, milestoneId)) return true;
+    const taskTrailerOwnership = getTaskOwnershipStatus(basePath, message, milestoneId);
+    if (taskTrailerOwnership === true) return true;
+    if (taskTrailerOwnership === false) return false;
+    // taskTrailerOwnership === null: unknown ownership. Apply fallback only
+    // in this case to avoid cross-milestone attribution.
+    if (MILESTONE_ID_RE.test(milestoneId) && classifyImplementationFiles(files) === "present") return true;
   }
 
   return false;
 }
 
-function commitTaskTrailerBelongsToMilestone(basePath: string, message: string, milestoneId: string): boolean {
+/**
+ * Tri-state task ownership probe.
+ * true => DB or local files confirm this milestone owns the task.
+ * false => DB is available and this milestone is registered, but task is absent.
+ * null => ownership unknown (milestone not in DB yet, or no DB + no local files).
+ */
+function getTaskOwnershipStatus(
+  basePath: string,
+  message: string,
+  milestoneId: string,
+): true | false | null {
   const match = message.match(/^GSD-Task:\s*(S[^/\s]+)\/(T[^\s]+)/m);
-  if (!match) return false;
+  if (!match) return null;
   const [, sliceId, taskId] = match;
 
-  if (getTask(milestoneId, sliceId, taskId)) return true;
+  if (isDbAvailable()) {
+    if (!getMilestone(milestoneId)) return null;
+    return getTask(milestoneId, sliceId, taskId) ? true : false;
+  }
 
+  // DB unavailable: fallback to local task-file presence.
   const tasksDir = resolveTasksDir(basePath, milestoneId, sliceId);
-  if (!tasksDir) return false;
-  return existsSync(join(tasksDir, `${taskId}-PLAN.md`))
-    || existsSync(join(tasksDir, `${taskId}-SUMMARY.md`));
+  if (
+    tasksDir
+    && (
+      existsSync(join(tasksDir, `${taskId}-PLAN.md`))
+      || existsSync(join(tasksDir, `${taskId}-SUMMARY.md`))
+    )
+  ) {
+    return true;
+  }
+
+  return null;
 }
 
 function commitMessageMentionsMilestone(message: string, milestoneId: string): boolean {

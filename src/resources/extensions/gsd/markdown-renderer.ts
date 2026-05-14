@@ -32,7 +32,7 @@ import {
   resolveMilestoneFile,
   resolveSliceFile,
   resolveSlicePath,
-  resolveTasksDir,
+  gsdProjectionRoot,
   gsdRoot,
   buildTaskFileName,
   buildSliceFileName,
@@ -48,7 +48,11 @@ import { clearPathCache } from "./paths.js";
  * E.g. "/project/.gsd/milestones/M001/M001-ROADMAP.md" → "milestones/M001/M001-ROADMAP.md"
  */
 function toArtifactPath(absPath: string, basePath: string): string {
-  const root = gsdRoot(basePath);
+  const projectionRoot = gsdProjectionRoot(basePath);
+  const projectionRel = relative(projectionRoot, absPath);
+  const root = projectionRel && !projectionRel.startsWith("..") && !projectionRel.startsWith("/")
+    ? projectionRoot
+    : gsdRoot(basePath);
   const rel = relative(root, absPath);
   // Normalize to forward slashes for consistent DB keys
   return rel.replace(/\\/g, "/");
@@ -374,10 +378,9 @@ export async function renderPlanFromDb(
     throw new Error(`no tasks found for ${milestoneId}/${sliceId}`);
   }
 
-  const slicePath = resolveSlicePath(basePath, milestoneId, sliceId)
-    ?? join(gsdRoot(basePath), "milestones", milestoneId, "slices", sliceId);
-  const absPath = resolveSliceFile(basePath, milestoneId, sliceId, "PLAN")
-    ?? join(slicePath, `${sliceId}-PLAN.md`);
+  const slicePath = join(gsdProjectionRoot(basePath), "milestones", milestoneId, "slices", sliceId);
+  mkdirSync(slicePath, { recursive: true });
+  const absPath = join(slicePath, `${sliceId}-PLAN.md`);
   const artifactPath = toArtifactPath(absPath, basePath);
   const sliceGates = getGateResults(milestoneId, sliceId, "slice");
   const content = renderSlicePlanMarkdown(slice, tasks, sliceGates);
@@ -408,8 +411,7 @@ export async function renderTaskPlanFromDb(
     throw new Error(`task ${milestoneId}/${sliceId}/${taskId} not found`);
   }
 
-  const tasksDir = resolveTasksDir(basePath, milestoneId, sliceId)
-    ?? join(gsdRoot(basePath), "milestones", milestoneId, "slices", sliceId, "tasks");
+  const tasksDir = join(gsdProjectionRoot(basePath), "milestones", milestoneId, "slices", sliceId, "tasks");
   mkdirSync(tasksDir, { recursive: true });
   const absPath = join(tasksDir, buildTaskFileName(taskId, "PLAN"));
   const artifactPath = toArtifactPath(absPath, basePath);

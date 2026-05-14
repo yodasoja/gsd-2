@@ -388,6 +388,9 @@ export function readIntegrationBranch(basePath: string, milestoneId: string): st
   }
 }
 
+/** Re-export for backward compatibility — canonical definitions in branch-patterns.ts */
+export { QUICK_BRANCH_RE, WORKFLOW_BRANCH_RE } from "./branch-patterns.js";
+
 /**
  * Persist the integration branch for a milestone.
  *
@@ -398,14 +401,14 @@ export function readIntegrationBranch(basePath: string, milestoneId: string): st
  *
  * The file is committed immediately so the metadata is persisted in git.
  */
-/** Re-export for backward compatibility — canonical definitions in branch-patterns.ts */
-export { QUICK_BRANCH_RE, WORKFLOW_BRANCH_RE } from "./branch-patterns.js";
-
 export function writeIntegrationBranch(
   basePath: string,
   milestoneId: string,
   branch: string,
 ): void {
+  // Never persist milestone branches as integration targets.
+  // They are ephemeral execution branches and can cause self-diff corruption.
+  if (branch.startsWith("milestone/")) return;
   // Don't record slice branches as the integration target
   if (SLICE_BRANCH_RE.test(branch)) return;
   // Don't record quick-task branches — they are ephemeral and merge back

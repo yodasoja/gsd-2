@@ -350,7 +350,7 @@ This is what makes GSD different. Run it, walk away, come back to built software
 
 Auto mode is a state machine driven by the GSD database at the project root. It derives the next unit of work from authoritative SQLite state, creates a fresh agent session, injects a focused prompt with all relevant context pre-inlined, and lets the LLM execute. When the LLM finishes, auto mode persists the result to the database, refreshes markdown projections such as `STATE.md`, and dispatches the next unit.
 
-The database is authoritative for milestones, slices, tasks, requirements, summaries, and completion status. Durable decisions and project knowledge are stored in the `memories` table: decisions are `architecture` memories, and KNOWLEDGE patterns/lessons are `pattern`/`gotcha` memories. Markdown under `.gsd/` is a rendered projection for review, prompts, and git-friendly history; it is not a runtime fallback unless you explicitly run a recovery/import command. In worktree mode, project-root DB state remains authoritative and worktree markdown projections are not synced back as state.
+The database is authoritative for milestones, slices, tasks, requirements, summaries, and completion status. Durable decisions and project knowledge are stored in the `memories` table: decisions are `architecture` memories, and KNOWLEDGE patterns/lessons are `pattern`/`gotcha` memories. Markdown under `.gsd/` is a rendered projection for review, prompts, and git-friendly history; it is not a runtime fallback unless you explicitly run a recovery/import command. In worktree mode, artifact/projection writes are rendered under the active worktree-local `.gsd/`, while the project-root DB remains authoritative runtime state.
 
 `KNOWLEDGE.md` is hybrid: rules remain file-canonical, while patterns and lessons are stored in the `memories` table and rendered back into `KNOWLEDGE.md` on the next session-start projection. Existing pattern and lesson rows are backfilled into memories before projection, so newly captured patterns and lessons may appear in memory-backed prompt context before the file view refreshes.
 
@@ -503,7 +503,7 @@ On first run, GSD launches a branded setup wizard that walks you through LLM pro
 | `/gsd mcp`              | MCP server status and connectivity                                            |
 | `/gsd status`           | Progress dashboard                                                            |
 | `/gsd brief <mode>`     | Generate a visual HTML brief (diagram, plan, diff, recap, table, slides)      |
-| `/gsd queue`            | Queue future milestones (safe during auto mode)                               |
+| `/gsd queue`            | Queue/reorder future milestones (`pending`, `queued`, or legacy `planned`; safe during auto mode) |
 | `/gsd prefs`            | Model selection, timeouts, budget ceiling                                     |
 | `/gsd migrate`          | Migrate a v1 `.planning` directory to `.gsd` format                           |
 | `/gsd help`             | Categorized command reference for all GSD subcommands                         |

@@ -426,7 +426,7 @@ function makeErrorMessage(model: string, errorMsg: string): AssistantMessage {
 
 export function isClaudeCodeAbortErrorMessage(message: string | undefined | null): boolean {
 	if (!message) return false;
-	return /\b(?:claude code process aborted by user|request aborted by user|process aborted by user)\b/i.test(message);
+	return /\b(?:claude code process aborted by user|request aborted by user|process aborted by user|aborterror)\b/i.test(message);
 }
 
 function isBareClaudeCodeAbortErrorMessage(message: string | undefined | null): boolean {

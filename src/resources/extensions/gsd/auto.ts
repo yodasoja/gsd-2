@@ -317,6 +317,13 @@ import { normalizeRealPath } from "./paths.js";
 /** Throttle STATE.md rebuilds — at most once per 30 seconds */
 const STATE_REBUILD_MIN_INTERVAL_MS = 30_000;
 
+export function formatAutoStopNotification(prefix: string, totals: { cost: number; tokens: { total: number } }, unitCount: number): string {
+  return [
+    `${prefix}.`,
+    `Session: ${formatCost(totals.cost)} · ${formatTokenCount(totals.tokens.total)} tokens · ${unitCount} units`,
+  ].join("\n");
+}
+
 /**
  * Phase B — register this auto-mode process in the workers table so other
  * workers and janitors can detect liveness via heartbeat. Best-effort: if
@@ -1022,6 +1029,8 @@ export async function rerootCommandSession(
 }
 
 export async function cleanupAfterLoopExit(ctx: ExtensionContext): Promise<void> {
+  const preserveStepSurface = s.preserveStepSurfaceAfterLoopExit;
+  const preservePausedSurface = s.paused;
   s.currentUnit = null;
   s.active = false;
   deactivateGSD();
@@ -1044,12 +1053,16 @@ export async function cleanupAfterLoopExit(ctx: ExtensionContext): Promise<void>
   // A transient provider-error pause intentionally leaves the paused badge
   // visible so the user still has a resumable auto-mode signal on screen.
   if (!s.paused) {
-    ctx.ui.setStatus("gsd-auto", undefined);
-    ctx.ui.setWidget("gsd-progress", undefined);
-    if (s.completionStopInProgress) {
-      s.completionStopInProgress = false;
+    if (preserveStepSurface) {
+      s.preserveStepSurfaceAfterLoopExit = false;
+    } else {
+      ctx.ui.setStatus("gsd-auto", undefined);
+      ctx.ui.setWidget("gsd-progress", undefined);
+      if (s.completionStopInProgress) {
+        s.completionStopInProgress = false;
+      }
+      initHealthWidget(ctx);
     }
-    initHealthWidget(ctx);
   }
 
   // ADR-016 phase 3 (#5693): the stop-path basePath restore + chdir routes
@@ -1057,7 +1070,7 @@ export async function cleanupAfterLoopExit(ctx: ExtensionContext): Promise<void>
   // `s.basePath` mutation and the paired `process.chdir` for auto-loop
   // transitions. The verb assigns `s.basePath` before any throwable work, so
   // a thrown error still leaves basePath restored.
-  if (s.originalBasePath) {
+  if (s.originalBasePath && !preserveStepSurface && !preservePausedSurface) {
     try {
       buildLifecycle().restoreToProjectRoot();
     } catch (err) {
@@ -1069,7 +1082,7 @@ export async function cleanupAfterLoopExit(ctx: ExtensionContext): Promise<void>
     }
   }
 
-  if (s.originalBasePath && s.cmdCtx) {
+  if (s.originalBasePath && s.cmdCtx && !preserveStepSurface && !preservePausedSurface) {
     const result = await rerootCommandSession(s.cmdCtx, s.originalBasePath);
     if (result.status === "cancelled") {
       logWarning("engine", "post-loop session re-root was cancelled", { file: "auto.ts", basePath: s.originalBasePath });
@@ -1417,7 +1430,7 @@ export async function stopAuto(
       if (ledger && ledger.units.length > 0) {
         const totals = getProjectTotals(ledger.units);
         ctx?.ui.notify(
-          `${notificationPrefix}. Session: ${formatCost(totals.cost)} · ${formatTokenCount(totals.tokens.total)} tokens · ${ledger.units.length} units`,
+          formatAutoStopNotification(notificationPrefix, totals, ledger.units.length),
           "info",
         );
       } else {
@@ -1724,7 +1737,6 @@ export async function pauseAuto(
   restoreProjectRootEnv();
   restoreMilestoneLockEnv();
   s.pendingVerificationRetry = null;
-  s.verificationRetryCount.clear();
   ctx?.ui.setStatus("gsd-auto", "paused");
   ctx?.ui.setWidget("gsd-progress", undefined);
   const resumeCmd = s.stepMode ? "/gsd next" : "/gsd auto";

@@ -30,3 +30,11 @@ export function isInactiveStatus(status: string): boolean {
 export function isSkippedForDispatch(status: string): boolean {
   return isClosedStatus(status) || status === "parked" || isDeferredStatus(status);
 }
+
+/**
+ * Returns true when a milestone is future/backlog work (not currently executing).
+ * Includes legacy/project-specific alias "planned" for compatibility.
+ */
+export function isFutureMilestoneStatus(status: string): boolean {
+  return status === "pending" || status === "queued" || status === "planned";
+}

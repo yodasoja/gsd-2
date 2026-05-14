@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { cleanupAfterLoopExit, rerootCommandSession, stopAuto } from "../auto.ts";
+import { cleanupAfterLoopExit, pauseAuto, rerootCommandSession, stopAuto } from "../auto.ts";
 import { autoSession } from "../auto-runtime-state.ts";
 import { closeDatabase, insertMilestone, insertSlice, openDatabase } from "../gsd-db.ts";
 import { WorktreeLifecycle } from "../worktree-lifecycle.ts";
@@ -35,6 +35,52 @@ test("cleanupAfterLoopExit preserves paused auto badge after provider pause", as
 
     assert.equal(statuses.some(([key]) => key === "gsd-auto"), false);
     assert.equal(autoSession.active, false);
+    assert.equal(autoSession.paused, true);
+  } finally {
+    autoSession.reset();
+    process.chdir(previousCwd);
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("cleanupAfterLoopExit preserves paused worktree session and visible failure output", async (t) => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-paused-session-preserve-"));
+  const worktree = join(base, ".gsd", "worktrees", "M001");
+  const previousCwd = process.cwd();
+  const newSessionWorkspaces: string[] = [];
+  let restoreCalls = 0;
+
+  t.mock.method(WorktreeLifecycle.prototype, "restoreToProjectRoot", function () {
+    restoreCalls += 1;
+  });
+
+  mkdirSync(worktree, { recursive: true });
+  process.chdir(worktree);
+  autoSession.reset();
+  autoSession.active = true;
+  autoSession.paused = true;
+  autoSession.basePath = worktree;
+  autoSession.originalBasePath = base;
+  autoSession.cmdCtx = {
+    newSession: async ({ workspaceRoot }: { workspaceRoot: string }) => {
+      newSessionWorkspaces.push(workspaceRoot);
+      return { cancelled: false };
+    },
+  } as any;
+
+  try {
+    await cleanupAfterLoopExit({
+      ui: {
+        setStatus: () => {},
+        setWidget: () => {},
+        notify: () => {},
+      },
+    } as any);
+
+    assert.equal(restoreCalls, 0, "paused cleanup must not restore out of the active worktree");
+    assert.deepEqual(newSessionWorkspaces, [], "paused cleanup must not start a blank rerooted session");
+    assert.equal(autoSession.basePath, worktree);
+    assert.equal(realpathSync(process.cwd()), realpathSync(worktree));
     assert.equal(autoSession.paused, true);
   } finally {
     autoSession.reset();
@@ -114,6 +160,98 @@ test("cleanupAfterLoopExit clears progress widget after stopAuto reset", async (
     assert.equal(autoSession.completionStopInProgress, false);
   } finally {
     autoSession.reset();
+  }
+});
+
+test("pauseAuto preserves artifact retry counts across pause/resume", async () => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-pause-retry-count-"));
+  const previousCwd = process.cwd();
+  const retryKey = "execute-task:M001/S01/T01";
+
+  autoSession.reset();
+  autoSession.active = true;
+  autoSession.verificationRetryCount.set(retryKey, 2);
+  autoSession.pendingVerificationRetry = {
+    unitId: "M001/S01/T01",
+    failureContext: "Missing expected artifact (attempt 2/3).",
+    attempt: 2,
+  };
+
+  try {
+    process.chdir(base);
+    await pauseAuto();
+
+    assert.equal(autoSession.paused, true);
+    assert.equal(autoSession.pendingVerificationRetry, null);
+    assert.equal(autoSession.verificationRetryCount.get(retryKey), 2);
+  } finally {
+    autoSession.reset();
+    process.chdir(previousCwd);
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("cleanupAfterLoopExit preserves step-mode surface and worktree session after completed step", async (t) => {
+  const base = mkdtempSync(join(tmpdir(), "gsd-step-surface-"));
+  const worktree = join(base, ".gsd", "worktrees", "M001");
+  const previousCwd = process.cwd();
+  const statusCalls: unknown[] = [];
+  const widgetCalls: unknown[] = [];
+  const newSessionWorkspaces: string[] = [];
+  let restoreCalls = 0;
+
+  t.mock.method(WorktreeLifecycle.prototype, "restoreToProjectRoot", function () {
+    restoreCalls += 1;
+  });
+
+  mkdirSync(worktree, { recursive: true });
+  process.chdir(worktree);
+  autoSession.reset();
+  autoSession.active = true;
+  autoSession.paused = false;
+  autoSession.stepMode = true;
+  autoSession.preserveStepSurfaceAfterLoopExit = true;
+  autoSession.basePath = worktree;
+  autoSession.originalBasePath = base;
+  autoSession.cmdCtx = {
+    newSession: async ({ workspaceRoot }: { workspaceRoot: string }) => {
+      newSessionWorkspaces.push(workspaceRoot);
+      return { cancelled: false };
+    },
+  } as any;
+
+  try {
+    await cleanupAfterLoopExit({
+      hasUI: true,
+      ui: {
+        setStatus: (...args: unknown[]) => statusCalls.push(args),
+        setWidget: (...args: unknown[]) => widgetCalls.push(args),
+        setHeader: () => {},
+        notify: () => {},
+      },
+    } as any);
+
+    assert.deepEqual(statusCalls, [], "step-mode cleanup must leave the NEXT badge visible");
+    assert.equal(
+      widgetCalls.some((args) => Array.isArray(args) && args[0] === "gsd-progress" && args[1] === undefined),
+      false,
+      "step-mode cleanup must not clear the completed step progress surface",
+    );
+    assert.equal(
+      widgetCalls.some((args) => Array.isArray(args) && args[0] === "gsd-health"),
+      false,
+      "step-mode cleanup must not replace the progress surface with idle health",
+    );
+    assert.deepEqual(newSessionWorkspaces, [], "step-mode cleanup must not re-root the visible command session");
+    assert.equal(restoreCalls, 0, "step-mode cleanup must not restore out of the active worktree");
+    assert.equal(autoSession.active, false);
+    assert.equal(autoSession.preserveStepSurfaceAfterLoopExit, false);
+    assert.equal(autoSession.basePath, worktree);
+    assert.equal(realpathSync(process.cwd()), realpathSync(worktree));
+  } finally {
+    autoSession.reset();
+    process.chdir(previousCwd);
+    rmSync(base, { recursive: true, force: true });
   }
 });
 

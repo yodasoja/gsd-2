@@ -748,7 +748,7 @@ function matchesAllowedGlob(absPath: string, basePath: string, globs: readonly s
 function blockReason(unitType: string, mode: string, what: string): string {
   return [
     `HARD BLOCK: unit "${unitType}" runs under tools-policy "${mode}" — ${what}.`,
-    `This is a mechanical gate enforced by manifest.tools (#4934). You MUST NOT proceed,`,
+    `This is a mechanical gate enforced by manifest.tools. You MUST NOT proceed,`,
     `retry the same call, or rationalize past this block. If you need to write user source,`,
     `the work belongs in execute-task, not in a planning unit.`,
   ].join(" ");

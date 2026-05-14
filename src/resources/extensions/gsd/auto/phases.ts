@@ -77,6 +77,7 @@ import { resolveManifest } from "../unit-context-manifest.js";
 import { createWorktreeSafetyModule, type WorktreeSafetyResult } from "../worktree-safety.js";
 import { isSuspiciousGhostCompletion } from "../auto-unit-closeout.js";
 import { decideVerificationRetry, verificationRetryKey } from "./verification-retry-policy.js";
+import { buildPhaseHandoffOutcome, setAutoOutcomeWidget } from "../auto-dashboard.js";
 
 // ─── Path Comparison Helper ───────────────────────────────────────────────
 /** Compare two paths for physical identity, tolerating trailing slashes and symlinks. */
@@ -153,6 +154,13 @@ function unitWritesSource(unitType: string): boolean | null {
 
 function formatWorktreeSafetyFailure(result: Extract<WorktreeSafetyResult, { ok: false }>): string {
   return `Worktree Safety failed (${result.kind}): ${result.reason} ${result.remediation}`;
+}
+
+function formatWorktreeSafetyStopReason(result: Extract<WorktreeSafetyResult, { ok: false }>): string {
+  if (result.kind === "empty-worktree-with-project-content") {
+    return `Worktree Safety failed (${result.kind}). Run /gsd doctor fix, then /gsd auto.`;
+  }
+  return `Worktree Safety failed (${result.kind}).`;
 }
 
 function resolveEmptyWorktreeWithProjectContent(
@@ -237,7 +245,7 @@ async function validateSourceWriteWorktreeSafety(
     projectRoot,
   });
   ctx.ui.notify(msg, "error");
-  await deps.stopAuto(ctx, pi, msg);
+  await deps.stopAuto(ctx, pi, formatWorktreeSafetyStopReason(result));
   return { action: "break", reason: result.kind };
 }
 
@@ -1802,42 +1810,8 @@ export async function runUnitPhase(
     s.currentUnit.id === unitId
   );
   const previousTier = s.currentUnitRouting?.tier;
-
-  // Scope workflow-logger buffer to this unit so post-finalize drains are
-  // per-unit. Without this, the module-level _buffer accumulates across every
-  // unit in the same Node process (see workflow-logger.ts module header).
-  _resetLogs();
   const dispatchKey = `${unitType}/${unitId}`;
-  s.unitDispatchCount.set(dispatchKey, (s.unitDispatchCount.get(dispatchKey) ?? 0) + 1);
-  s.currentUnit = { type: unitType, id: unitId, startedAt: Date.now() };
-  s.lastGitActionFailure = null;
-  s.lastGitActionStatus = null;
-  s.lastUnitAgentEndMessages = null;
-  setCurrentPhase(unitType, {
-    basePath: s.basePath,
-    traceId: ic.flowId,
-    turnId: `iter-${ic.iteration}`,
-    causedBy: "unit-start",
-  });
-  s.lastToolInvocationError = null; // #2883: clear stale error from previous unit
-  const unitStartSeq = ic.nextSeq();
-  deps.emitJournalEvent({ ts: new Date().toISOString(), flowId: ic.flowId, seq: unitStartSeq, eventType: "unit-start", data: { unitType, unitId } });
-  deps.captureAvailableSkills();
-  writeUnitRuntimeRecord(
-    s.basePath,
-    unitType,
-    unitId,
-    s.currentUnit.startedAt,
-    {
-      phase: "dispatched",
-      wrapupWarningSent: false,
-      timeoutAt: null,
-      lastProgressAt: s.currentUnit.startedAt,
-      progressCount: 0,
-      lastProgressKind: "dispatch",
-      recoveryAttempts: 0, // Reset so re-dispatched units get full recovery budget (#2322)
-    },
-  );
+  const nextDispatchCount = (s.unitDispatchCount.get(dispatchKey) ?? 0) + 1;
 
   // Status bar (widget + preconditions deferred until after model selection — see #2899)
   ctx.ui.setStatus("gsd-auto", "auto");
@@ -1900,7 +1874,7 @@ export async function runUnitPhase(
         : s.pendingCrashRecovery;
     finalPrompt = `${capped}\n\n---\n\n${finalPrompt}`;
     s.pendingCrashRecovery = null;
-  } else if ((s.unitDispatchCount.get(dispatchKey) ?? 0) > 1) {
+  } else if (nextDispatchCount > 1) {
     const diagnostic = deps.getDeepDiagnostic(s.basePath);
     if (diagnostic) {
       const cappedDiag =
@@ -1943,6 +1917,11 @@ export async function runUnitPhase(
   }
 
   // Select and apply model (with tier escalation on retry — normal units only)
+  const prevUnitRouting = s.currentUnitRouting;
+  const prevUnitModel = s.currentUnitModel;
+  const prevDispatchedModelId = s.currentDispatchedModelId;
+  const prevSessionModel = ctx.model;
+  const prevSessionThinkingLevel = pi.getThinkingLevel();
   const modelResult = await deps.selectAndApplyModel(
     ctx,
     pi,
@@ -2009,13 +1988,66 @@ export async function runUnitPhase(
           ? ctx.modelRegistry.getProviderAuthMode(ctx.model.provider)
           : undefined,
       baseUrl: (s.currentUnitModel as any)?.baseUrl ?? ctx.model?.baseUrl,
+      activeTools: typeof pi.getActiveTools === "function" ? pi.getActiveTools() : [],
     },
   );
   if (compatibilityError) {
+    s.currentUnitRouting = prevUnitRouting;
+    s.currentUnitModel = prevUnitModel;
+    s.currentDispatchedModelId = prevDispatchedModelId;
+    if (s.checkpointSha) {
+      cleanupCheckpoint(s.basePath, unitId);
+      s.checkpointSha = null;
+    }
+    if (prevSessionModel) {
+      const ok = await pi.setModel(prevSessionModel, { persist: false });
+      if (!ok) {
+        ctx.ui.notify("Failed to restore previous session model after compatibility check failure.", "warning");
+      }
+      if (prevSessionThinkingLevel) {
+        pi.setThinkingLevel(prevSessionThinkingLevel);
+      }
+    }
     ctx.ui.notify(compatibilityError, "error");
     await deps.stopAuto(ctx, pi, compatibilityError);
     return { action: "break", reason: "workflow-capability" };
   }
+
+  // Scope workflow-logger buffer to this unit so post-finalize drains are
+  // per-unit. Without this, the module-level _buffer accumulates across every
+  // unit in the same Node process (see workflow-logger.ts module header).
+  _resetLogs();
+  const unitStartedAt = Date.now();
+  s.unitDispatchCount.set(dispatchKey, nextDispatchCount);
+  s.currentUnit = { type: unitType, id: unitId, startedAt: unitStartedAt };
+  s.lastGitActionFailure = null;
+  s.lastGitActionStatus = null;
+  s.lastUnitAgentEndMessages = null;
+  setCurrentPhase(unitType, {
+    basePath: s.basePath,
+    traceId: ic.flowId,
+    turnId: `iter-${ic.iteration}`,
+    causedBy: "unit-start",
+  });
+  s.lastToolInvocationError = null; // #2883: clear stale error from previous unit
+  const unitStartSeq = ic.nextSeq();
+  deps.emitJournalEvent({ ts: new Date().toISOString(), flowId: ic.flowId, seq: unitStartSeq, eventType: "unit-start", data: { unitType, unitId } });
+  deps.captureAvailableSkills();
+  writeUnitRuntimeRecord(
+    s.basePath,
+    unitType,
+    unitId,
+    unitStartedAt,
+    {
+      phase: "dispatched",
+      wrapupWarningSent: false,
+      timeoutAt: null,
+      lastProgressAt: unitStartedAt,
+      progressCount: 0,
+      lastProgressKind: "dispatch",
+      recoveryAttempts: 0, // Reset so re-dispatched units get full recovery budget (#2322)
+    },
+  );
 
   // Progress widget + preconditions — deferred to after model selection so the
   // widget's first render tick shows the correct model (#2899).
@@ -2602,6 +2634,20 @@ export async function runFinalize(
       lastProgressAt: Date.now(),
       lastProgressKind: "finalize-success",
     });
+    if (
+      !preUnitSnapshot.type.startsWith("hook/") &&
+      preUnitSnapshot.type !== "custom-step" &&
+      preUnitSnapshot.type !== "complete-milestone"
+    ) {
+      setAutoOutcomeWidget(ctx, {
+        ...buildPhaseHandoffOutcome({
+          unitType: preUnitSnapshot.type,
+          unitId: preUnitSnapshot.id,
+          agentEndMessages: s.lastUnitAgentEndMessages,
+        }),
+        startedAt: s.autoStartTime,
+      });
+    }
   }
   s.currentUnit = null;
   clearCurrentPhase();

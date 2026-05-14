@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, existsSync, writeFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -100,6 +100,31 @@ test('handlePlanSlice writes slice/task planning state and renders plan artifact
     assert.ok(existsSync(taskPlanPath), 'task plan should be rendered to disk');
     const taskPlan = parseTaskPlanFile(readFileSync(taskPlanPath, 'utf-8'));
     assert.deepEqual(taskPlan.frontmatter.skills_used, []);
+  } finally {
+    cleanup(base);
+  }
+});
+
+test('handlePlanSlice renders plan artifacts under worktree-local .gsd while using project DB', async () => {
+  const base = makeTmpBase();
+  const worktree = join(base, '.gsd', 'worktrees', 'M001');
+  mkdirSync(join(worktree, '.gsd'), { recursive: true });
+  mkdirSync(join(worktree, 'src', 'resources', 'extensions', 'gsd', 'tools'), { recursive: true });
+  writeFileSync(join(worktree, 'src', 'resources', 'extensions', 'gsd', 'tools', 'plan-milestone.ts'), '// fixture\n', 'utf-8');
+  writeFileSync(join(worktree, 'src', 'resources', 'extensions', 'gsd', 'tools', 'plan-task.ts'), '// fixture\n', 'utf-8');
+  openDatabase(join(base, '.gsd', 'gsd.db'));
+
+  try {
+    seedParentSlice();
+
+    const result = await handlePlanSlice(validParams(), worktree);
+    assert.ok(!('error' in result), `unexpected error: ${'error' in result ? result.error : ''}`);
+
+    const worktreePlan = join(worktree, '.gsd', 'milestones', 'M001', 'slices', 'S02', 'S02-PLAN.md');
+    const projectPlan = join(base, '.gsd', 'milestones', 'M001', 'slices', 'S02', 'S02-PLAN.md');
+    assert.ok(existsSync(worktreePlan), 'slice plan should be rendered to worktree-local .gsd');
+    assert.ok(!existsSync(projectPlan), 'slice plan should not be rendered to project .gsd');
+    assert.equal(result.planPath, realpathSync(worktreePlan));
   } finally {
     cleanup(base);
   }
