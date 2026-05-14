@@ -766,7 +766,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
     },
   },
   {
-    name: "planning (require_slice_discussion) → pause for discussion (#3454)",
+    name: "planning (require_slice_discussion) → pause for discussion",
     match: async ({ state, mid, basePath, prefs }) => {
       if (state.phase !== "planning") return null;
       if (!prefs?.phases?.require_slice_discussion) return null;
@@ -1246,7 +1246,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
             buildMilestoneFileName(mid, "VALIDATION"),
           );
           const skipSource = trivialVariant
-            ? "trivial-scope pipeline variant (#4781)"
+            ? "trivial-scope pipeline variant"
             : "`skip_milestone_validation` preference";
           const skipValidationReason = trivialVariant ? "trivial-scope" : "preference";
           const content = [

@@ -1177,7 +1177,7 @@ export async function postUnitPreVerification(pctx: PostUnitContext, opts?: PreV
         s.verificationRetryFailureHashes.delete(retryKey);
         writeBlockerPlaceholder(s.currentUnit.type, s.currentUnit.id, s.basePath, reason);
         ctx.ui.notify(
-          `${s.currentUnit.type} ${s.currentUnit.id} — deterministic policy rejection, wrote blocker placeholder (no retries) (#4973)`,
+          `${s.currentUnit.type} ${s.currentUnit.id} — deterministic policy rejection, wrote blocker placeholder (no retries)`,
           "warning",
         );
         // Fall through to "continue" — do NOT enter the retry or db-unavailable paths.

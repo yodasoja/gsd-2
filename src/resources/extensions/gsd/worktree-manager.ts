@@ -618,7 +618,7 @@ export function removeWorktree(
       try {
         rmSync(nestedGitPath, { recursive: true, force: true });
         logWarning("reconcile",
-          `Removed nested .git directory from scaffolded project to prevent data loss (#2616)`,
+          `Removed nested .git directory from scaffolded project to prevent data loss`,
           { worktree: name, nestedRepo: nestedDir },
         );
       } catch {

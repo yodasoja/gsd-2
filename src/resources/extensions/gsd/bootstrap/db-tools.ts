@@ -913,7 +913,7 @@ export function registerDbTools(pi: ExtensionAPI): void {
     label: "Skip Slice",
     description:
       "Mark a slice as skipped so auto-mode advances past it without executing. " +
-      "Non-closed tasks within the slice are cascaded to skipped so milestone completion is not blocked by leftover pending tasks (#4375). " +
+      "Non-closed tasks within the slice are cascaded to skipped so milestone completion is not blocked by leftover pending tasks. " +
       "The slice data is preserved for reference. The state machine treats skipped slices like completed ones for dependency satisfaction.",
     promptSnippet: "Skip a GSD slice (mark as skipped, auto-mode will advance past it)",
     promptGuidelines: [
