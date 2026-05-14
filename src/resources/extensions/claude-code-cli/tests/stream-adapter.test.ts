@@ -1262,6 +1262,14 @@ describe("stream-adapter — abort classification (F2)", () => {
 		assert.equal(isClaudeCodeAbortErrorMessage("rate limit exceeded"), false);
 	});
 
+	test("does not misclassify non-user abort contexts", () => {
+		assert.equal(isClaudeCodeAbortErrorMessage("Job aborted due to timeout"), false);
+		assert.equal(isClaudeCodeAbortErrorMessage("Operation aborted: disk full"), false);
+		assert.equal(isClaudeCodeAbortErrorMessage("aborted by system cleanup"), false);
+		assert.equal(isClaudeCodeAbortErrorMessage("Database transaction aborted due to constraint violation"), false);
+		assert.equal(isClaudeCodeAbortErrorMessage("Connection aborted unexpectedly"), false);
+	});
+
 	test("makeAbortedMessage sets stopReason to 'aborted', not 'error'", () => {
 		const message = makeAbortedMessage("claude-sonnet-4-6", "");
 		assert.equal(message.stopReason, "aborted");
