@@ -204,9 +204,12 @@ export function hasImplementationArtifacts(basePath: string, milestoneId?: strin
     const recordedIntegrationBranch = milestoneId
       ? readIntegrationBranch(basePath, milestoneId)
       : null;
-    const integrationBranch = recordedIntegrationBranch?.startsWith("milestone/")
-      ? detectMainBranch(basePath)
-      : (recordedIntegrationBranch ?? detectMainBranch(basePath));
+    let integrationBranch: string;
+    if (recordedIntegrationBranch?.startsWith("milestone/")) {
+      integrationBranch = detectMainBranch(basePath);
+    } else {
+      integrationBranch = recordedIntegrationBranch ?? detectMainBranch(basePath);
+    }
     const currentBranch = getCurrentBranch(basePath);
     const branchDiff = getChangedFilesSinceBranch(basePath, integrationBranch);
     if (!branchDiff.ok) return "unknown";
