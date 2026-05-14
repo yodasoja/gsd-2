@@ -225,6 +225,25 @@ test("clearLock removes the session_file row for the active worker", (t) => {
     "session_file row deleted by clearLock");
 });
 
+test("clearLock marks stale worker as stopping when no current-process worker matches", (t) => {
+  const base = makeBase();
+  t.after(() => cleanup(base));
+  openDatabase(join(base, ".gsd", "gsd.db"));
+  const projectRoot = normalizeRealPath(base);
+  const workerId = registerAutoWorker({ projectRootRealpath: projectRoot });
+
+  setRuntimeKv("worker", workerId, "session_file", "/tmp/stale-session.jsonl");
+  setWorkerPid(workerId, 99999);
+  expireWorker(workerId);
+  assert.ok(readCrashLock(base), "stale worker is detected before clearLock");
+
+  clearLock(base);
+
+  assert.equal(getAutoWorker(workerId)?.status, "stopping");
+  assert.equal(getRuntimeKv("worker", workerId, "session_file"), null);
+  assert.equal(readCrashLock(base), null);
+});
+
 test("clearStaleWorkerLock crashes stale worker and cancels latest active dispatch", (t) => {
   const base = makeBase();
   t.after(() => cleanup(base));

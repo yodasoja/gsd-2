@@ -31,6 +31,7 @@ import {
   findStaleWorkerForProject,
   getAllAutoWorkers,
   markWorkerCrashed,
+  markWorkerStopping,
   type AutoWorkerRow,
 } from "./db/auto-workers.js";
 import { markLatestActiveForWorkerCanceled, type DispatchStatus } from "./db/unit-dispatches.js";
@@ -220,8 +221,13 @@ export function clearLock(basePath: string): void {
   try {
     const projectRoot = normalizeRealPath(basePath);
     const worker = findActiveWorkerForCurrentProcess(projectRoot);
-    if (!worker) return;
-    deleteRuntimeKv("worker", worker.worker_id, SESSION_FILE_KV_KEY);
+    if (worker) deleteRuntimeKv("worker", worker.worker_id, SESSION_FILE_KV_KEY);
+
+    const stale = findStaleWorkerForProject(projectRoot);
+    if (stale) {
+      markWorkerStopping(stale.worker_id);
+      deleteRuntimeKv("worker", stale.worker_id, SESSION_FILE_KV_KEY);
+    }
   } catch {
     // Best-effort.
   }
