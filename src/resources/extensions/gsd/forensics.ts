@@ -837,7 +837,7 @@ export function detectWorktreeOrphans(
       type: "worktree-unmerged-exit",
       severity: "warning",
       summary: `${summary.exitsWithUnmergedWork} auto-exit(s) left milestone work unmerged`,
-      details: `Exit reasons: ${reasonBreakdown || "(none)"} · Producer-side signal for #4761-class orphans. Inspect .gsd/journal/*.jsonl with eventType:"auto-exit" for per-exit detail.`,
+      details: `Exit reasons: ${reasonBreakdown || "(none)"} · Producer-side signal for orphaned worktrees. Inspect .gsd/journal/*.jsonl with eventType:"auto-exit" for per-exit detail.`,
     });
   }
 }
@@ -1056,7 +1056,7 @@ function saveForensicReport(basePath: string, report: ForensicReport, problemDes
         .map(([r, n]) => `${r}=${n}`).join(", ");
       sections.push(`  - Exit reasons: ${breakdown}`);
     }
-    sections.push(`- Canonical-root redirects (#4761 fix fired): ${t.canonicalRedirects}`);
+    sections.push(`- Canonical-root redirects: ${t.canonicalRedirects}`);
     // #4765 slice-cadence counters
     if (t.slicesMerged + t.sliceMergeConflicts + t.milestoneResquashes > 0) {
       sections.push(`- Slices merged: ${t.slicesMerged} · Slice merge conflicts: ${t.sliceMergeConflicts}`);
@@ -1220,7 +1220,7 @@ function formatReportForPrompt(report: ForensicReport): string {
     if (hasSignal) {
       sections.push("### Worktree Telemetry");
       sections.push(`- Created: ${t.worktreesCreated} · Merged: ${t.worktreesMerged} · Conflicts: ${t.mergeConflicts}`);
-      sections.push(`- Orphans: ${t.orphansDetected} · Unmerged exits: ${t.exitsWithUnmergedWork} · Redirects (#4761): ${t.canonicalRedirects}`);
+      sections.push(`- Orphans: ${t.orphansDetected} · Unmerged exits: ${t.exitsWithUnmergedWork} · Redirects: ${t.canonicalRedirects}`);
       if (t.orphansDetected > 0) {
         const breakdown = Object.entries(t.orphansByReason)
           .map(([r, n]) => `${r}=${n}`).join(", ");
