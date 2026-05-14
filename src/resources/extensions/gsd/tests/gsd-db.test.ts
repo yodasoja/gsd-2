@@ -37,6 +37,7 @@ import {
   checkpointDatabase,
   refreshOpenDatabaseFromDisk,
   tryCreateMemoriesFts,
+  _isLikelyWslDrvFsPathForTest,
 } from '../gsd-db.ts';
 import { _resetLogs, peekLogs, setStderrLoggingEnabled } from '../workflow-logger.ts';
 
@@ -342,6 +343,16 @@ describe('gsd-db', () => {
       const mmap = adapter.prepare('PRAGMA mmap_size').get();
       assert.deepStrictEqual(mmap?.['mmap_size'], 67108864, 'non-darwin should still enable mmap_size');
       cleanup(linuxDbPath);
+    });
+  });
+
+  test('gsd-db: detects WSL DrvFs mount paths for conservative pragmas', () => {
+    withPlatform('linux', () => {
+      assert.equal(_isLikelyWslDrvFsPathForTest('/mnt/d/code/project/.gsd/gsd.db'), true);
+      assert.equal(_isLikelyWslDrvFsPathForTest('/tmp/gsd.db'), false);
+    });
+    withPlatform('darwin', () => {
+      assert.equal(_isLikelyWslDrvFsPathForTest('/mnt/d/code/project/.gsd/gsd.db'), false);
     });
   });
 

@@ -112,12 +112,13 @@ const providerLoader = createSqliteProviderLoader({
 export const SCHEMA_VERSION = 28;
 
 function initSchema(db: DbAdapter, fileBacked: boolean): void {
-  if (fileBacked) db.exec("PRAGMA journal_mode=WAL");
+  const conservativeFilePragmas = fileBacked && _isLikelyWslDrvFsPathForTest(currentPath);
+  if (fileBacked) db.exec(conservativeFilePragmas ? "PRAGMA journal_mode=DELETE" : "PRAGMA journal_mode=WAL");
   if (fileBacked) db.exec("PRAGMA busy_timeout = 5000");
-  if (fileBacked) db.exec("PRAGMA synchronous = NORMAL");
+  if (fileBacked) db.exec(conservativeFilePragmas ? "PRAGMA synchronous = FULL" : "PRAGMA synchronous = NORMAL");
   if (fileBacked) db.exec("PRAGMA auto_vacuum = INCREMENTAL");
   if (fileBacked) db.exec("PRAGMA cache_size = -8000");   // 8 MB page cache
-  if (fileBacked && process.platform !== "darwin") db.exec("PRAGMA mmap_size = 67108864");  // 64 MB mmap
+  if (fileBacked && !conservativeFilePragmas && process.platform !== "darwin") db.exec("PRAGMA mmap_size = 67108864");  // 64 MB mmap
   db.exec("PRAGMA temp_store = MEMORY");
   db.exec("PRAGMA foreign_keys = ON");
 
@@ -154,6 +155,17 @@ function initSchema(db: DbAdapter, fileBacked: boolean): void {
   }
 
   migrateSchema(db);
+}
+
+export function _isLikelyWslDrvFsPathForTest(dbPath: string | null): boolean {
+  if (!dbPath || process.platform !== "linux") return false;
+  const drvFsPathPattern = /^\/mnt\/[a-z](?:\/|$)/i;
+  if (drvFsPathPattern.test(dbPath)) return true;
+  try {
+    return drvFsPathPattern.test(realpathSync(dbPath));
+  } catch {
+    return false;
+  }
 }
 
 /**
