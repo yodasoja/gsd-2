@@ -184,6 +184,10 @@ export function buildAssistantReplaySegments(contentBlocks: Array<any>): Assista
 	return segments;
 }
 
+export function getToolExpansionStartupHint(toolOutputExpanded: boolean, keybindings: KeybindingsManager): string {
+	return appKeyHint(keybindings, "expandTools", toolOutputExpanded ? "to collapse tools" : "to expand tools");
+}
+
 type CompactionQueuedMessage = {
 	text: string;
 	mode: "steer" | "followUp";
@@ -308,7 +312,7 @@ export class InteractiveMode {
 	private pendingTools = new Map<string, ToolExecutionComponent>();
 
 	// Tool output expansion state
-	private toolOutputExpanded = false;
+	private toolOutputExpanded = true;
 
 	// Pasted image tracking
 	private pendingImages: ImageContent[] = [];
@@ -560,7 +564,7 @@ export class InteractiveMode {
 				hint("cycleThinkingLevel", "to cycle thinking level"),
 				rawKeyHint(`${appKey(kb, "cycleModelForward")}/${appKey(kb, "cycleModelBackward")}`, "to cycle models"),
 				hint("selectModel", "to select model"),
-				hint("expandTools", "to expand tools"),
+				getToolExpansionStartupHint(this.toolOutputExpanded, kb),
 				hint("toggleThinking", "to expand thinking"),
 				hint("externalEditor", "for external editor"),
 				rawKeyHint("/", "for commands"),
