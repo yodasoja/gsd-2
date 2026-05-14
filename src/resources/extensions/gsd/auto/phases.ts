@@ -1917,6 +1917,10 @@ export async function runUnitPhase(
   }
 
   // Select and apply model (with tier escalation on retry — normal units only)
+  const prevUnitRouting = s.currentUnitRouting;
+  const prevUnitModel = s.currentUnitModel;
+  const prevDispatchedModelId = s.currentDispatchedModelId;
+  const prevSessionModel = ctx.model;
   const modelResult = await deps.selectAndApplyModel(
     ctx,
     pi,
@@ -1986,6 +1990,15 @@ export async function runUnitPhase(
     },
   );
   if (compatibilityError) {
+    s.currentUnitRouting = prevUnitRouting;
+    s.currentUnitModel = prevUnitModel;
+    s.currentDispatchedModelId = prevDispatchedModelId;
+    if (prevSessionModel) {
+      await pi.setModel(prevSessionModel, { persist: false });
+      if (s.autoModeStartThinkingLevel) {
+        pi.setThinkingLevel(s.autoModeStartThinkingLevel);
+      }
+    }
     ctx.ui.notify(compatibilityError, "error");
     await deps.stopAuto(ctx, pi, compatibilityError);
     return { action: "break", reason: "workflow-capability" };
