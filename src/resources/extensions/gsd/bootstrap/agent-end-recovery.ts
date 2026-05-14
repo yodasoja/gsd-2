@@ -100,6 +100,14 @@ export function isUserInitiatedAbortMessage(message: string | undefined | null):
   return /\b(?:claude code process aborted by user|request aborted by user|process aborted by user)\b/i.test(message);
 }
 
+export function shouldDeferTransientErrorToCoreRetry(
+  cls: ErrorClass,
+  rawErrorMsg: string,
+): boolean {
+  if (!isTransient(cls) || cls.kind === "rate-limit") return false;
+  return !/retry failed after \d+ attempts:/i.test(rawErrorMsg);
+}
+
 function isBareClaudeCodeSessionSwitchAbortMarker(message: string | undefined | null): boolean {
   if (!message) return false;
   const normalized = message.trim().replace(/\s+/g, " ").toLowerCase();
@@ -488,7 +496,7 @@ export async function handleAgentEnd(
     // Core retries transient failures in-session after this handler.
     // Keep that behavior for non-rate-limit classes to avoid pause/retry races,
     // but let rate-limit continue into model fallback logic below (#4373).
-    if (isTransient(cls) && cls.kind !== "rate-limit") {
+    if (shouldDeferTransientErrorToCoreRetry(cls, rawErrorMsg)) {
       return;
     }
 
