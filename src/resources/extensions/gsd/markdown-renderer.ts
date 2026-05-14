@@ -379,6 +379,7 @@ export async function renderPlanFromDb(
   }
 
   const slicePath = join(gsdProjectionRoot(basePath), "milestones", milestoneId, "slices", sliceId);
+  mkdirSync(slicePath, { recursive: true });
   const absPath = join(slicePath, `${sliceId}-PLAN.md`);
   const artifactPath = toArtifactPath(absPath, basePath);
   const sliceGates = getGateResults(milestoneId, sliceId, "slice");
