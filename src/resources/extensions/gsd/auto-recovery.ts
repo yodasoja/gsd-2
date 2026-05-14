@@ -562,12 +562,15 @@ function commitMatchesMilestone(basePath: string, message: string, milestoneId: 
     if (files.some((file) => isMilestoneArtifactPath(file, milestoneId))) return true;
     if (commitMessageMentionsMilestone(message, milestoneId)) return true;
     if (commitTaskTrailerBelongsToMilestone(basePath, message, milestoneId)) return true;
-    if (MILESTONE_ID_RE.test(milestoneId) && classifyImplementationFiles(files) === "present") {
-      logWarning(
-        "recovery",
-        `unable to verify GSD-Task trailer ownership for ${milestoneId}; ignoring implementation-only commit evidence`,
-      );
-    }
+    // Only apply implementation-bearing fallback when the DB has no record of
+    // the milestone (external/gitignored .gsd scenario). If the DB knows this
+    // milestone, a negative ownership check is authoritative and must not be
+    // overridden to avoid cross-milestone attribution.
+    if (
+      MILESTONE_ID_RE.test(milestoneId)
+      && classifyImplementationFiles(files) === "present"
+      && (!isDbAvailable() || !getMilestone(milestoneId))
+    ) return true;
   }
 
   return false;
