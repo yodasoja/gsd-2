@@ -225,7 +225,7 @@ test("clearLock removes the session_file row for the active worker", (t) => {
     "session_file row deleted by clearLock");
 });
 
-test("clearLock marks stale worker as stopping when no current-process worker matches", (t) => {
+test("clearLock marks stale worker crashed when no current-process worker matches", (t) => {
   const base = makeBase();
   t.after(() => cleanup(base));
   openDatabase(join(base, ".gsd", "gsd.db"));
@@ -239,7 +239,7 @@ test("clearLock marks stale worker as stopping when no current-process worker ma
 
   clearLock(base);
 
-  assert.equal(getAutoWorker(workerId)?.status, "stopping");
+  assert.equal(getAutoWorker(workerId)?.status, "crashed");
   assert.equal(getRuntimeKv("worker", workerId, "session_file"), null);
   assert.equal(readCrashLock(base), null);
 });
