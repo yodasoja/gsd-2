@@ -1042,7 +1042,7 @@ async function dispatchWorkflow(
             ? ctx.modelRegistry.getProviderAuthMode(ctx.model.provider)
             : undefined,
         baseUrl: result.appliedModel?.baseUrl ?? ctx.model?.baseUrl,
-        activeTools: pi.getActiveTools(),
+        activeTools: typeof pi.getActiveTools === "function" ? pi.getActiveTools() : [],
       },
     );
     if (compatibilityError) {
