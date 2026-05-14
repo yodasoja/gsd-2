@@ -162,7 +162,7 @@ describe("validate-milestone stuck-loop guard (#4094)", () => {
     assert.equal(pauseAutoMock.mock.callCount(), 0);
   });
 
-  test("continues when no VALIDATION file exists yet", async () => {
+  test("retries when no VALIDATION file exists yet", async () => {
     insertMilestone({ id: "M001" });
     insertSlice({ id: "S01", milestoneId: "M001", title: "Slice 1", status: "complete" });
 
@@ -173,7 +173,10 @@ describe("validate-milestone stuck-loop guard (#4094)", () => {
 
     const result = await runPostUnitVerification({ s, ctx, pi } as VerificationContext, pauseAutoMock);
 
-    assert.equal(result, "continue");
+    assert.equal(result, "retry");
     assert.equal(pauseAutoMock.mock.callCount(), 0);
+    assert.ok(s.pendingVerificationRetry);
+    assert.match(s.pendingVerificationRetry!.message, /gsd_validate_milestone/);
+    assert.equal(s.pendingVerificationRetry!.errorClass, "tool-failure");
   });
 });

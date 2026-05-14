@@ -106,10 +106,22 @@ async function runValidateMilestonePostCheck(
   if (!mid) return "continue";
 
   const validationFile = resolveMilestoneFile(s.basePath, mid, "VALIDATION");
-  if (!validationFile) return "continue";
+  if (!validationFile) {
+    s.pendingVerificationRetry = {
+      message: "You must call gsd_validate_milestone to persist the validation results. No VALIDATION.md was created.",
+      errorClass: "tool-failure",
+    };
+    return "retry";
+  }
 
   const validationContent = await loadFile(validationFile);
-  if (!validationContent) return "continue";
+  if (!validationContent) {
+    s.pendingVerificationRetry = {
+      message: "You must call gsd_validate_milestone to persist the validation results. No VALIDATION.md was created.",
+      errorClass: "tool-failure",
+    };
+    return "retry";
+  }
 
   const verdict = extractVerdict(validationContent);
   if (verdict !== "needs-remediation") {
