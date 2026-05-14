@@ -482,7 +482,7 @@ function isInsideGsdWorktree(p: string): boolean {
 
 function probeGsdRoot(rawBasePath: string): string {
   const contract = resolveGsdPathContract(rawBasePath);
-  if (contract.isWorktree) return contract.projectGsd;
+  if (contract.isWorktree) return contract.worktreeGsd ?? join(rawBasePath, ".gsd");
 
   // 1. Fast path — check the input path directly
   const local = join(rawBasePath, ".gsd");
