@@ -1007,7 +1007,73 @@ export function enterBranchModeForMilestone(
     });
   }
 
-  nativeCheckoutBranch(basePath, branch);
+  checkoutBranchWithStashGuard(basePath, branch, `enter-branch-mode:${milestoneId}`);
+}
+
+export function checkoutBranchWithStashGuard(
+  basePath: string,
+  branch: string,
+  reason: string,
+): void {
+  let stashMarker: string | null = null;
+  let stashed = false;
+
+  const status = nativeWorkingTreeStatus(basePath).trim();
+  if (status.length > 0) {
+    stashMarker = `gsd-checkout-stash:${reason}:${process.pid}:${Date.now()}:${process.hrtime.bigint().toString(36)}`;
+    const stashListBefore = execFileSync("git", ["stash", "list"], {
+      cwd: basePath,
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf-8",
+    });
+    execFileSync(
+      "git",
+      ["stash", "push", "--include-untracked", "-m", `gsd: checkout stash [${stashMarker}]`],
+      {
+        cwd: basePath,
+        stdio: ["ignore", "pipe", "pipe"],
+        encoding: "utf-8",
+      },
+    );
+    const stashListAfter = execFileSync("git", ["stash", "list"], {
+      cwd: basePath,
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf-8",
+    });
+    stashed = stashListAfter !== stashListBefore;
+  }
+
+  // Checkout and stash-restore are split so we can distinguish two failure
+  // modes: (a) checkout failed → HEAD did not move, restore stash and rethrow;
+  // (b) checkout succeeded but stash pop failed → HEAD moved to `branch` but
+  // the working-tree changes remain in the stash list. We surface a distinct
+  // error in case (b) so callers don't assume the branch switch was rolled back.
+  try {
+    nativeCheckoutBranch(basePath, branch);
+  } catch (checkoutErr) {
+    if (stashed) {
+      try {
+        popStashByRef(basePath, stashMarker);
+      } catch (restoreErr) {
+        logWarning("worktree", `git stash pop failed during checkout restore: ${restoreErr instanceof Error ? restoreErr.message : String(restoreErr)}`);
+      }
+    }
+    throw checkoutErr;
+  }
+
+  if (stashed) {
+    try {
+      popStashByRef(basePath, stashMarker);
+    } catch (popErr) {
+      const msg = popErr instanceof Error ? popErr.message : String(popErr);
+      const wrapped = new Error(
+        `checkout to '${branch}' succeeded but stash restore failed; working tree changes remain in the stash list. Original error: ${msg}`,
+      );
+      const ref = (popErr as { stashRef?: string } | null)?.stashRef;
+      if (ref) (wrapped as { stashRef?: string }).stashRef = ref;
+      throw wrapped;
+    }
+  }
 }
 
 // ─── Public API ────────────────────────────────────────────────────────────
