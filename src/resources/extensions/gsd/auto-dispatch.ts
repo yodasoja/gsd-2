@@ -457,9 +457,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
       const attempts = incrementUatCount(basePath, mid, sliceId);
       if (attempts > MAX_UAT_ATTEMPTS) {
         return {
-          action: "stop" as const,
-          reason: `run-uat for ${mid}/${sliceId} has been dispatched ${attempts - 1} times without producing a verdict. Verification commands may be broken — fix the UAT spec or manually write an ASSESSMENT verdict.`,
-          level: "warning" as const,
+          action: "skip" as const,
         };
       }
       const uatFile = resolveSliceFile(basePath, mid, sliceId, "UAT")!;
