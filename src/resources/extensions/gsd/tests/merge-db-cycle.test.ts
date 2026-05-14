@@ -161,7 +161,11 @@ test("mergeMilestoneToMain keeps the Windows DB cycle closed through squash merg
     process.chdir(savedCwd);
     process.env.PATH = originalPath;
     GIT_NO_PROMPT_ENV.PATH = originalGitEnvPath;
-    process.env.HOME = originalHome;
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
     if (originalGsdHome === undefined) {
       delete process.env.GSD_HOME;
     } else {
