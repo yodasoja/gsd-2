@@ -2,8 +2,12 @@
 // File Purpose: Regression tests for interactive assistant replay ordering.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import stripAnsi from "strip-ansi";
 
-import { buildAssistantReplaySegments } from "./interactive-mode.js";
+import { buildAssistantReplaySegments, getToolExpansionStartupHint } from "./interactive-mode.js";
+import { initTheme } from "./theme/theme.js";
+
+initTheme("dark", false);
 
 test("buildAssistantReplaySegments preserves tool-first ordering", () => {
 	const segments = buildAssistantReplaySegments([
@@ -55,4 +59,15 @@ test("buildAssistantReplaySegments skips empty GPT reasoning blocks before tools
 	assert.deepEqual(segments, [
 		{ kind: "tool", contentIndex: 2 },
 	]);
+});
+
+test("tool expansion startup hint reflects the default expansion state", () => {
+	const keybindings = {
+		getKeys(action: string) {
+			return action === "expandTools" ? ["ctrl+o"] : [];
+		},
+	} as any;
+
+	assert.match(stripAnsi(getToolExpansionStartupHint(true, keybindings)), /ctrl\+o.*collapse tools/);
+	assert.match(stripAnsi(getToolExpansionStartupHint(false, keybindings)), /ctrl\+o.*expand tools/);
 });

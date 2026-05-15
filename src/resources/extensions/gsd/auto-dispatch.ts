@@ -1340,7 +1340,7 @@ export const DISPATCH_RULES: DispatchRule[] = [
           if (verdict !== "pass") {
             return {
               action: "stop",
-              reason: `Cannot complete milestone ${mid}: VALIDATION verdict is "${verdict}". Address the validation findings and re-run validation, or update the verdict manually.`,
+              reason: `Cannot complete milestone ${mid}: VALIDATION verdict is "${verdict}". Address the validation findings and re-run validation, or run \`/gsd verdict pass --rationale "..."\` to override.`,
               level: "warning",
             };
           }
